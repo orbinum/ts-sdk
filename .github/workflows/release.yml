@@ -42,50 +42,62 @@ jobs:
                   echo "tag=v$VERSION" >> $GITHUB_OUTPUT
                   echo "📦 Version: $VERSION"
 
-            - name: Check if tag already exists
+            - name: Check release state
               id: check_tag
               run: |
+                  TAG_EXISTS=false
+                  NPM_EXISTS=false
+
                   if git rev-parse "refs/tags/v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
-                    echo "exists=true" >> $GITHUB_OUTPUT
-                    echo "⚠️  Tag v${{ steps.version.outputs.version }} already exists. Skipping release."
+                    TAG_EXISTS=true
+                    echo "⚠️  Tag v${{ steps.version.outputs.version }} already exists."
                   else
-                    echo "exists=false" >> $GITHUB_OUTPUT
-                    echo "✅ Tag v${{ steps.version.outputs.version }} does not exist, proceeding"
+                    echo "✅ Tag v${{ steps.version.outputs.version }} does not exist."
                   fi
 
+                  if npm view @orbinum/sdk@${{ steps.version.outputs.version }} version >/dev/null 2>&1; then
+                    NPM_EXISTS=true
+                    echo "⚠️  npm @orbinum/sdk@${{ steps.version.outputs.version }} already published."
+                  else
+                    echo "✅ npm @orbinum/sdk@${{ steps.version.outputs.version }} not yet published."
+                  fi
+
+                  echo "tag_exists=$TAG_EXISTS" >> $GITHUB_OUTPUT
+                  echo "npm_exists=$NPM_EXISTS" >> $GITHUB_OUTPUT
+
             - name: Install dependencies
-              if: steps.check_tag.outputs.exists == 'false'
+              if: steps.check_tag.outputs.tag_exists == 'false'
               run: pnpm install --frozen-lockfile
 
             - name: Typecheck
-              if: steps.check_tag.outputs.exists == 'false'
+              if: steps.check_tag.outputs.tag_exists == 'false'
               run: pnpm typecheck:all
 
             - name: Lint
-              if: steps.check_tag.outputs.exists == 'false'
+              if: steps.check_tag.outputs.tag_exists == 'false'
               run: pnpm lint
 
             - name: Format check
-              if: steps.check_tag.outputs.exists == 'false'
+              if: steps.check_tag.outputs.tag_exists == 'false'
               run: pnpm format:check
 
             - name: Test
-              if: steps.check_tag.outputs.exists == 'false'
+              if: steps.check_tag.outputs.tag_exists == 'false'
               run: pnpm test
 
             - name: Build
-              if: steps.check_tag.outputs.exists == 'false'
+              if: steps.check_tag.outputs.tag_exists == 'false'
               run: pnpm build
 
             - name: Generate checksums
-              if: steps.check_tag.outputs.exists == 'false'
+              if: steps.check_tag.outputs.tag_exists == 'false'
               run: |
                   mkdir -p release
                   find dist/ -type f | sort | xargs sha256sum > release/checksums.txt
                   cat release/checksums.txt
 
             - name: Package dist
-              if: steps.check_tag.outputs.exists == 'false'
+              if: steps.check_tag.outputs.tag_exists == 'false'
               run: |
                   VERSION=${{ steps.version.outputs.tag }}
                   tar -czf release/orbinum-sdk-${VERSION}.tar.gz dist/
@@ -93,7 +105,7 @@ jobs:
                   ls -lh release/
 
             - name: Create release notes
-              if: steps.check_tag.outputs.exists == 'false'
+              if: steps.check_tag.outputs.tag_exists == 'false'
               run: |
                   awk '/^## \[/{if(flag){exit}flag=1;next}flag' CHANGELOG.md > release_notes_body.md
 
@@ -113,7 +125,7 @@ jobs:
                   } > release_notes.md
 
             - name: Create and push tag
-              if: steps.check_tag.outputs.exists == 'false'
+              if: steps.check_tag.outputs.tag_exists == 'false'
               run: |
                   git config user.name "github-actions[bot]"
                   git config user.email "github-actions[bot]@users.noreply.github.com"
@@ -121,7 +133,7 @@ jobs:
                   git push origin "${{ steps.version.outputs.tag }}"
 
             - name: Create GitHub Release
-              if: steps.check_tag.outputs.exists == 'false'
+              if: steps.check_tag.outputs.tag_exists == 'false'
               uses: softprops/action-gh-release@v1
               with:
                   tag_name: ${{ steps.version.outputs.tag }}
@@ -136,22 +148,25 @@ jobs:
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+            - name: Install dependencies for publish
+              if: steps.check_tag.outputs.npm_exists == 'false'
+              run: pnpm install --frozen-lockfile
+
+            - name: Build for publish
+              if: steps.check_tag.outputs.tag_exists == 'true' && steps.check_tag.outputs.npm_exists == 'false'
+              run: pnpm build
+
             - name: Setup Node.js for npm publish
-              if: steps.check_tag.outputs.exists == 'false'
+              if: steps.check_tag.outputs.npm_exists == 'false'
               uses: actions/setup-node@v4
               with:
                   node-version: "22"
                   registry-url: "https://registry.npmjs.org"
 
             - name: Publish to npm
-              if: steps.check_tag.outputs.exists == 'false'
+              if: steps.check_tag.outputs.npm_exists == 'false'
               run: |
-                  VERSION=${{ steps.version.outputs.version }}
-                  if npm view @orbinum/sdk@$VERSION version >/dev/null 2>&1; then
-                    echo "⚠️ Version $VERSION already published on npm. Skipping publish."
-                  else
-                    pnpm publish --no-git-checks --access public
-                    echo "✅ Published @orbinum/sdk@$VERSION to npm"
-                  fi
+                  pnpm publish --no-git-checks --access public
+                  echo "✅ Published @orbinum/sdk@${{ steps.version.outputs.version }} to npm"
               env:
                   NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
