@@ -1,0 +1,157 @@
+name: Release
+
+on:
+    push:
+        branches: [main]
+        paths:
+            - "package.json"
+            - "CHANGELOG.md"
+            - "src/**"
+            - ".github/workflows/release.yml"
+
+permissions:
+    contents: write
+
+jobs:
+    release:
+        name: Build, Release, and Publish
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+              with:
+                  fetch-depth: 0
+
+            - name: Setup pnpm
+              uses: pnpm/action-setup@v4
+              with:
+                  run_install: false
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "22"
+                  cache: pnpm
+
+            - name: Extract version from package.json
+              id: version
+              run: |
+                  VERSION=$(node -p "require('./package.json').version")
+                  echo "version=$VERSION" >> $GITHUB_OUTPUT
+                  echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+                  echo "📦 Version: $VERSION"
+
+            - name: Check if tag already exists
+              id: check_tag
+              run: |
+                  if git rev-parse "refs/tags/v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+                    echo "exists=true" >> $GITHUB_OUTPUT
+                    echo "⚠️  Tag v${{ steps.version.outputs.version }} already exists. Skipping release."
+                  else
+                    echo "exists=false" >> $GITHUB_OUTPUT
+                    echo "✅ Tag v${{ steps.version.outputs.version }} does not exist, proceeding"
+                  fi
+
+            - name: Install dependencies
+              if: steps.check_tag.outputs.exists == 'false'
+              run: pnpm install --frozen-lockfile
+
+            - name: Typecheck
+              if: steps.check_tag.outputs.exists == 'false'
+              run: pnpm typecheck:all
+
+            - name: Lint
+              if: steps.check_tag.outputs.exists == 'false'
+              run: pnpm lint
+
+            - name: Format check
+              if: steps.check_tag.outputs.exists == 'false'
+              run: pnpm format:check
+
+            - name: Test
+              if: steps.check_tag.outputs.exists == 'false'
+              run: pnpm test
+
+            - name: Build
+              if: steps.check_tag.outputs.exists == 'false'
+              run: pnpm build
+
+            - name: Generate checksums
+              if: steps.check_tag.outputs.exists == 'false'
+              run: |
+                  mkdir -p release
+                  find dist/ -type f | sort | xargs sha256sum > release/checksums.txt
+                  cat release/checksums.txt
+
+            - name: Package dist
+              if: steps.check_tag.outputs.exists == 'false'
+              run: |
+                  VERSION=${{ steps.version.outputs.tag }}
+                  tar -czf release/orbinum-sdk-${VERSION}.tar.gz dist/
+                  mv release/checksums.txt release/checksums-${VERSION}.txt
+                  ls -lh release/
+
+            - name: Create release notes
+              if: steps.check_tag.outputs.exists == 'false'
+              run: |
+                  awk '/^## \[/{if(flag){exit}flag=1;next}flag' CHANGELOG.md > release_notes_body.md
+
+                  {
+                    echo "## ${{ steps.version.outputs.tag }}"
+                    echo ""
+                    if [ -s release_notes_body.md ]; then
+                      cat release_notes_body.md
+                    else
+                      echo "- Release generated from CI."
+                    fi
+                    echo ""
+                    echo "## Release Assets"
+                    echo ""
+                    echo "- \`orbinum-sdk-${{ steps.version.outputs.tag }}.tar.gz\` — compiled dist (ESM + CJS + types)"
+                    echo "- \`checksums-${{ steps.version.outputs.tag }}.txt\` — SHA-256 checksums"
+                  } > release_notes.md
+
+            - name: Create and push tag
+              if: steps.check_tag.outputs.exists == 'false'
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "github-actions[bot]@users.noreply.github.com"
+                  git tag -a "${{ steps.version.outputs.tag }}" -m "Release ${{ steps.version.outputs.tag }}"
+                  git push origin "${{ steps.version.outputs.tag }}"
+
+            - name: Create GitHub Release
+              if: steps.check_tag.outputs.exists == 'false'
+              uses: softprops/action-gh-release@v1
+              with:
+                  tag_name: ${{ steps.version.outputs.tag }}
+                  name: Release ${{ steps.version.outputs.tag }}
+                  files: |
+                      release/*.tar.gz
+                      release/*.txt
+                  body_path: release_notes.md
+                  draft: false
+                  prerelease: false
+                  fail_on_unmatched_files: false
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+            - name: Setup Node.js for npm publish
+              if: steps.check_tag.outputs.exists == 'false'
+              uses: actions/setup-node@v4
+              with:
+                  node-version: "22"
+                  registry-url: "https://registry.npmjs.org"
+
+            - name: Publish to npm
+              if: steps.check_tag.outputs.exists == 'false'
+              run: |
+                  VERSION=${{ steps.version.outputs.version }}
+                  if npm view @orbinum/sdk@$VERSION version >/dev/null 2>&1; then
+                    echo "⚠️ Version $VERSION already published on npm. Skipping publish."
+                  else
+                    pnpm publish --no-git-checks --access public
+                    echo "✅ Published @orbinum/sdk@$VERSION to npm"
+                  fi
+              env:
+                  NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

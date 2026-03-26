@@ -5,10 +5,28 @@
   "author": "Orbinum",
   "license": "ISC",
   "main": "dist/index.js",
+  "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
   "scripts": {
-    "build": "tsup src/index.ts --format esm --dts",
-    "prepublishOnly": "npm run build"
+    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "typecheck": "tsc --noEmit",
+    "typecheck:all": "tsc --project tsconfig.test.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src/**/*.ts",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\"",
+    "clean": "rm -rf dist node_modules package-lock.json yarn.lock pnpm-lock.yaml"
   },
   "repository": {
     "type": "git",
@@ -27,9 +45,23 @@
   },
   "homepage": "https://github.com/orbinum/ts-sdk#readme",
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^25.2.1",
+    "eslint": "^10.0.3",
+    "prettier": "^3.8.1",
     "ts-node": "^10.9.2",
     "tsup": "^8.5.1",
-    "typescript": "^5.9.3"
-  }
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.57.0",
+    "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "@noble/ciphers": "^2.1.1",
+    "@noble/hashes": "^2.0.1",
+    "@polkadot/util-crypto": "^14.0.3",
+    "@zk-kit/baby-jubjub": "^1.0.3",
+    "polkadot-api": "^1.23.3",
+    "poseidon-lite": "^0.3.0"
+  },
+  "packageManager": "pnpm@10.32.1+sha512.a706938f0e89ac1456b6563eab4edf1d1faf3368d1191fc5c59790e96dc918e4456ab2e67d613de1043d2e8c81f87303e6b40d4ffeca9df15ef1ad567348f2be"
 }
