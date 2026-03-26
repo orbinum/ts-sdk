@@ -81,3 +81,74 @@ export const SP_SEL = {
     // unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32)                → 0xdcf1bff2
     UNSHIELD: new Uint8Array([0xdc, 0xf1, 0xbf, 0xf2]),
 } as const;
+
+// ─── Known Precompiles registry ───────────────────────────────────────────────
+
+/** Metadata for a known precompile: display name and function selector map. */
+export interface KnownPrecompileInfo {
+    /** Human-readable name, e.g. "ShieldedPool". */
+    name: string;
+    /** Map from 4-byte hex selector (no 0x prefix) to function signature. */
+    functions: Record<string, string>;
+}
+
+/**
+ * Registry of all known Orbinum EVM precompiles, keyed by lowercase address.
+ * Covers Ethereum standard (EIP), Frontier non-standard, and Orbinum custom precompiles.
+ */
+export const KNOWN_PRECOMPILES: Record<string, KnownPrecompileInfo> = {
+    // ── Ethereum standard (EIP) ─────────────────────────────────────────────
+    '0x0000000000000000000000000000000000000001': {
+        name: 'ECRecover',
+        functions: { '00000000': 'ecrecover(bytes32,uint8,bytes32,bytes32)' },
+    },
+    '0x0000000000000000000000000000000000000002': { name: 'SHA256', functions: {} },
+    '0x0000000000000000000000000000000000000003': { name: 'RIPEMD160', functions: {} },
+    '0x0000000000000000000000000000000000000004': { name: 'Identity', functions: {} },
+    '0x0000000000000000000000000000000000000005': { name: 'ModExp', functions: {} },
+    // ── Frontier / non-standard ─────────────────────────────────────────────
+    '0x0000000000000000000000000000000000000400': { name: 'SHA3FIPS256', functions: {} },
+    '0x0000000000000000000000000000000000000401': { name: 'ECRecoverPublicKey', functions: {} },
+    '0x0000000000000000000000000000000000000402': { name: 'Curve25519Add', functions: {} },
+    '0x0000000000000000000000000000000000000403': { name: 'Curve25519ScalarMul', functions: {} },
+    // ── Orbinum custom ───────────────────────────────────────────────────────
+    '0x0000000000000000000000000000000000000800': {
+        name: 'AccountMapping',
+        functions: {
+            d03149ab: 'resolveAlias(string)',
+            '7a0ed62c': 'getAliasOf(address)',
+            '47e05c6c': 'hasPrivateLink(string,bytes32)',
+            dca49d0e: 'mapAccount()',
+            '08f57367': 'unmapAccount()',
+            '7fac359e': 'releaseAlias()',
+            '4d023ab9': 'cancelSale()',
+            '2f8839c3': 'registerAlias(string)',
+            '5ac998e7': 'transferAlias(address)',
+            '1625df3a': 'buyAlias(string)',
+            '32091192': 'putAliasOnSale(uint256,address[])',
+            '6f579c0c': 'removeChainLink(uint32)',
+            '5f3e837c': 'addChainLink(uint32,bytes,bytes)',
+            c04e98f4: 'registerPrivateLink(uint32,bytes32)',
+            dfd8b57e: 'removePrivateLink(bytes32)',
+            '4df1f33d': 'revealPrivateLink(bytes32,bytes,bytes32,bytes)',
+            '776cf9ff': 'setAccountMetadata(bytes,bytes,bytes)',
+        },
+    },
+    '0x0000000000000000000000000000000000000801': {
+        name: 'ShieldedPool',
+        functions: {
+            '781442b9': 'shield(uint32,uint256,bytes32,bytes)',
+            dcd5b898: 'privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[])',
+            dcf1bff2: 'unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32)',
+        },
+    },
+};
+
+/**
+ * Returns the human-readable name for a known precompile address,
+ * or null if the address is not a known precompile.
+ */
+export function getPrecompileLabel(address: string | null | undefined): string | null {
+    if (!address) return null;
+    return KNOWN_PRECOMPILES[address.toLowerCase()]?.name ?? null;
+}

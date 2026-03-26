@@ -35,8 +35,15 @@ export {
     AccountMappingPrecompile,
     CryptoPrecompiles,
     PRECOMPILE_ADDR,
+    KNOWN_PRECOMPILES,
+    getPrecompileLabel,
 } from './precompiles/index';
-export type { EvmTxRequest, EvmSigner, ResolvedAlias } from './precompiles/index';
+export type {
+    EvmTxRequest,
+    EvmSigner,
+    ResolvedAlias,
+    KnownPrecompileInfo,
+} from './precompiles/index';
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
 export { toHex, fromHex, ensureHexPrefix } from './utils/hex';
