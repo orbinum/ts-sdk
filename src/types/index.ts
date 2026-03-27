@@ -1,2 +1,2 @@
-export * from './pallet-args';
 export * from './pallet-events';
+export * from './pallet-extrinsics';

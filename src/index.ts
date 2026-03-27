@@ -106,21 +106,121 @@ export type {
 } from './types';
 export { SLIP0044_NAMESPACE } from './types';
 
-// ─── Pallet types (args + events) ────────────────────────────────────────────
-export type {
-    ShieldArgs,
-    UnshieldArgs,
-    PrivateTransferInput,
-    PrivateTransferOutput,
-    PrivateTransferArgs,
-} from './types/pallet-args';
+// ─── Pallet event types ───────────────────────────────────────────────────────
+
+// pallet-shielded-pool events
 export type {
     ShieldedEvent,
     PrivateTransferEvent,
     UnshieldedEvent,
     MerkleRootUpdatedEvent,
+    AuditPolicySetEvent,
+    DisclosedEvent,
+    DisclosureRequestedEvent,
+    DisclosureRejectedEvent,
+    DisclosureRequestExpiredEvent,
+    DisclosureRecordRevokedEvent,
+    AssetRegisteredEvent,
+    AssetVerifiedEvent,
+    AssetUnverifiedEvent,
     ShieldedPoolEvent,
 } from './types/pallet-events';
+
+// pallet-zk-verifier events
+export type {
+    VerificationKeyRegisteredEvent,
+    ActiveVersionSetEvent,
+    VerificationKeyRemovedEvent,
+    ProofVerifiedEvent,
+    ProofVerificationFailedEvent,
+    BatchVerificationKeysRegisteredEvent,
+    ZkVerifierEvent,
+} from './types/pallet-events';
+
+// pallet-account-mapping events
+export type {
+    AccountMappedEvent,
+    AccountUnmappedEvent,
+    AliasRegisteredEvent,
+    AliasReleasedEvent,
+    AliasTransferredEvent,
+    AliasListedForSaleEvent,
+    AliasSaleCancelledEvent,
+    AliasSoldEvent,
+    ChainLinkAddedEvent,
+    ChainLinkRemovedEvent,
+    MetadataUpdatedEvent,
+    SupportedChainAddedEvent,
+    SupportedChainRemovedEvent,
+    ProxyCallExecutedEvent,
+    PrivateChainLinkAddedEvent,
+    PrivateChainLinkRemovedEvent,
+    PrivateChainLinkRevealedEvent,
+    PrivateLinkDispatchExecutedEvent,
+    AccountMappingEvent,
+} from './types/pallet-events';
+
+// ─── Pallet extrinsic arg types ───────────────────────────────────────────────
+
+// pallet-shielded-pool
+export type {
+    Bytes32,
+    DisclosurePublicSignals,
+    Auditor,
+    DisclosureCondition,
+    BatchDisclosureSubmission,
+    ShieldOperation,
+    ShieldArgs,
+    ShieldBatchArgs,
+    PrivateTransferInput,
+    PrivateTransferOutput,
+    PrivateTransferArgs,
+    UnshieldArgs,
+    SetAuditPolicyArgs,
+    RequestDisclosureArgs,
+    DiscloseArgs,
+    RejectDisclosureArgs,
+    BatchSubmitDisclosureProofsArgs,
+    RegisterAssetArgs,
+    VerifyAssetArgs,
+    UnverifyAssetArgs,
+    PruneExpiredRequestArgs,
+    RevokeDisclosureRecordArgs,
+    ShieldedPoolCall,
+} from './types/pallet-extrinsics';
+
+// pallet-zk-verifier
+export type {
+    CircuitId as CircuitIdType,
+    VkEntry,
+    RegisterVerificationKeyArgs,
+    SetActiveVersionArgs,
+    RemoveVerificationKeyArgs,
+    VerifyProofArgs,
+    BatchRegisterVerificationKeysArgs,
+    ZkVerifierCall,
+} from './types/pallet-extrinsics';
+export { CircuitId } from './types/pallet-extrinsics';
+
+// pallet-account-mapping
+export type {
+    RegisterAliasArgs,
+    TransferAliasArgs,
+    PutAliasOnSaleArgs,
+    BuyAliasArgs,
+    AddChainLinkArgs,
+    RemoveChainLinkArgs,
+    SetAccountMetadataArgs,
+    AddSupportedChainArgs,
+    RemoveSupportedChainArgs,
+    DispatchAsLinkedAccountArgs,
+    RegisterPrivateLinkArgs,
+    RemovePrivateLinkArgs,
+    RevealPrivateLinkArgs,
+    DispatchAsPrivateLinkArgs,
+    AccountMappingCall,
+} from './types/pallet-extrinsics';
+// SignatureScheme already exported from './types' above
 
 // ─── Indexer ──────────────────────────────────────────────────────────────────
 export type {
