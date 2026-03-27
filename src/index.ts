@@ -46,6 +46,8 @@ export type {
 } from './precompiles/index';
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
+export { formatBalance, formatORB } from './utils/format';
+export type { FormatOptions } from './utils/format';
 export { toHex, fromHex, ensureHexPrefix } from './utils/hex';
 export {
     bigintTo32Le,
