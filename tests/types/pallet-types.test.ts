@@ -5,7 +5,7 @@ import type {
     PrivateTransferInput,
     PrivateTransferOutput,
     PrivateTransferArgs,
-} from '../../src/types/pallet-args';
+} from '../../src/types/pallet-extrinsics/shielded-pool';
 import type {
     ShieldedEvent,
     PrivateTransferEvent,
@@ -37,10 +37,10 @@ describe('pallet-args types', () => {
             nullifier: new Array(32).fill(0),
             assetId: 0,
             amount: 500n,
-            recipient: new Array(32).fill(1),
+            recipient: '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
         };
         expect(args.proof).toHaveLength(192);
-        expect(args.recipient).toHaveLength(32);
+        expect(typeof args.recipient).toBe('string');
     });
 
     it('PrivateTransferArgs holds nested inputs and outputs', () => {
@@ -53,12 +53,13 @@ describe('pallet-args types', () => {
             memo: new Array(104).fill(0),
         };
         const args: PrivateTransferArgs = {
-            inputs: [input],
-            outputs: [output],
             proof: new Array(192).fill(0),
             merkleRoot: new Array(32).fill(0),
+            nullifiers: [input],
+            outputs: [output],
+            encryptedMemos: [new Array(104).fill(0)],
         };
-        expect(args.inputs).toHaveLength(1);
+        expect(args.nullifiers).toHaveLength(1);
         expect(args.outputs).toHaveLength(1);
     });
 });
