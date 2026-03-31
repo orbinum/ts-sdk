@@ -755,6 +755,89 @@ describe('SubstrateClient._buildDataProxy', () => {
     expect(() => proxy[0]!.toJSON()).not.toThrow();
     expect(() => proxy[0]!.toHuman()).not.toThrow();
   });
+
+  // ── Binary / asHex() support (polkadot-api H160, H256, etc.) ────────────
+  it('serializes an object with asHex() by calling asHex — not returning {}', () => {
+    const binary = { asHex: () => '0xdeadbeef' };
+    const proxy = buildDataProxy([binary]);
+    const json = proxy.toJSON() as unknown[];
+    expect(json[0]).toBe('0xdeadbeef');
+  });
+
+  it('toJSON of a Binary element returns the hex string from asHex()', () => {
+    const binary = { asHex: () => '0x1234567890abcdef1234567890abcdef12345678' };
+    const proxy = buildDataProxy([binary]);
+    const json = proxy.toJSON() as unknown[];
+    expect(json[0]).toBe('0x1234567890abcdef1234567890abcdef12345678');
+  });
+
+  it('falls through to object traversal when asHex() throws', () => {
+    const broken = {
+      asHex: () => { throw new Error('broken'); },
+      field: 'value',
+    };
+    const proxy = buildDataProxy([broken]);
+    const json = proxy.toJSON() as { field: string }[];
+    // Should not be '{}' — falls through to generic object traversal
+    expect(json[0]).toMatchObject({ field: 'value' });
+  });
+
+  it('serializes Uint8Array with 0x prefix in toJSON', () => {
+    const bytes = new Uint8Array([0xab, 0xcd, 0xef]);
+    const proxy = buildDataProxy([bytes]);
+    const json = proxy.toJSON() as string[];
+    expect(json[0]).toBe('0xabcdef');
+  });
+
+  it('Uint8Array with a single zero byte produces 0x00', () => {
+    const proxy = buildDataProxy([new Uint8Array([0x00])]);
+    const json = proxy.toJSON() as string[];
+    expect(json[0]).toBe('0x00');
+  });
+
+  // ── Simulated ethereum.Executed event data ───────────────────────────────
+
+  it('handles positional [from, to, txHash] array of Binary objects (ethereum.Executed)', () => {
+    const binaryFrom  = { asHex: () => '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' };
+    const binaryTo    = { asHex: () => '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' };
+    const binaryTxHash = { asHex: () => '0x' + 'cc'.repeat(32) };
+
+    const proxy = buildDataProxy([binaryFrom, binaryTo, binaryTxHash]);
+    const json = proxy.toJSON() as string[];
+
+    expect(json[0]).toBe('0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    expect(json[1]).toBe('0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+    expect(json[2]).toBe('0x' + 'cc'.repeat(32));
+  });
+
+  it('handles named { from, to, transactionHash } object of Binary objects (ethereum.Executed)', () => {
+    const proxy = buildDataProxy({
+      from:            { asHex: () => '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+      to:              { asHex: () => '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
+      transactionHash: { asHex: () => '0x' + 'cc'.repeat(32) },
+    });
+    const json = proxy.toJSON() as Record<string, unknown>;
+    // toJSON of the top-level object uses Object.values ordering, so check on raw call
+    const topJson = json as unknown;
+    // The top-level toJSON wraps the whole value — values should contain the hex strings
+    expect(JSON.stringify(topJson)).toContain('0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    expect(JSON.stringify(topJson)).toContain('0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
+    expect(JSON.stringify(topJson)).toContain('0x' + 'cc'.repeat(32));
+  });
+
+  it('nested Binary inside object is recursively serialized via asHex()', () => {
+    const inner = { asHex: () => '0xdeadbeef' };
+    const proxy = buildDataProxy([{ nested: inner, label: 'test' }]);
+    const json = proxy.toJSON() as { nested: string; label: string }[];
+    expect(json[0]!.nested).toBe('0xdeadbeef');
+    expect(json[0]!.label).toBe('test');
+  });
+
+  it('plain string is preserved as-is through jsonifyValue', () => {
+    const proxy = buildDataProxy(['0xplainstring']);
+    const json = proxy.toJSON() as string[];
+    expect(json[0]).toBe('0xplainstring');
+  });
 });
 
 // ─── SubstrateClient.getBlockHash ────────────────────────────────────────────

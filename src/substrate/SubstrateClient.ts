@@ -332,13 +332,22 @@ export class SubstrateClient {
             if (v === null || v === undefined) return v;
             if (typeof v === 'bigint') return v.toString();
             if (v instanceof Uint8Array)
-                return Array.from(v)
+                return `0x${Array.from(v)
                     .map((b) => b.toString(16).padStart(2, '0'))
-                    .join('');
+                    .join('')}`;
             if (Array.isArray(v)) return v.map(jsonifyValue);
             if (typeof v === 'object') {
+                const obj = v as Record<string, unknown>;
+                // Handle polkadot-api Binary type and similar objects with asHex()
+                if (typeof obj['asHex'] === 'function') {
+                    try {
+                        return (obj['asHex'] as () => string)();
+                    } catch {
+                        /* fall through to generic handling */
+                    }
+                }
                 return Object.fromEntries(
-                    Object.entries(v as Record<string, unknown>)
+                    Object.entries(obj)
                         .filter(([, val]) => typeof val !== 'function')
                         .map(([k, val]) => [k, jsonifyValue(val)])
                 );
