@@ -14,9 +14,21 @@ importers:
       '@noble/hashes':
         specifier: ^2.0.1
         version: 2.0.1
+      '@polkadot-api/metadata-builders':
+        specifier: ^0.13.9
+        version: 0.13.9
+      '@polkadot-api/substrate-bindings':
+        specifier: ^0.17.0
+        version: 0.17.0
+      '@polkadot-api/tx-utils':
+        specifier: ^0.2.2
+        version: 0.2.2
       '@polkadot/util-crypto':
         specifier: ^14.0.3
         version: 14.0.3(@polkadot/util@14.0.3)
+      '@scure/base':
+        specifier: ^2.0.0
+        version: 2.0.0
       '@zk-kit/baby-jubjub':
         specifier: ^1.0.3
         version: 1.0.3
@@ -545,6 +557,9 @@ packages:
 
   '@polkadot-api/substrate-client@0.5.0':
     resolution: {integrity: sha512-J+gyZONCak+n6NxADZWtldH+gatYORqEScMAgI9gGu43pHUe7/xNRCqnin0dgDIzmuL3m1ERglF8LR7YhB0nHQ==}
+
+  '@polkadot-api/tx-utils@0.2.2':
+    resolution: {integrity: sha512-IidYgzy6r4vriNGpIoe4OoiYIIC6j1+rboNINLaxhNPtrds+p0oDuu5O82WW7K20nimMQrCOVRClZCc3QAgfwQ==}
 
   '@polkadot-api/utils@0.2.0':
     resolution: {integrity: sha512-nY3i5fQJoAxU4n3bD7Fs208/KR2J95SGfVc58kDjbRYN5a84kWaGEqzjBNtP9oqht49POM8Bm9mbIrkvC1Bzuw==}
@@ -2272,6 +2287,14 @@ snapshots:
     dependencies:
       '@polkadot-api/json-rpc-provider': 0.0.4
       '@polkadot-api/raw-client': 0.1.1
+      '@polkadot-api/utils': 0.2.0
+
+  '@polkadot-api/tx-utils@0.2.2':
+    dependencies:
+      '@polkadot-api/merkleize-metadata': 1.1.29
+      '@polkadot-api/metadata-builders': 0.13.9
+      '@polkadot-api/signers-common': 0.1.20
+      '@polkadot-api/substrate-bindings': 0.17.0
       '@polkadot-api/utils': 0.2.0
 
   '@polkadot-api/utils@0.2.0': {}

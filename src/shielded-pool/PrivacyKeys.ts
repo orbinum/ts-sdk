@@ -21,11 +21,7 @@ import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { mulPointEscalar, Base8 } from '@zk-kit/baby-jubjub';
 import { bigintTo32Le } from '../utils/bytes';
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-/** BN254 scalar field order */
-const BN254_R = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+import { BN254_R } from './constants';
 
 const IVK_DOMAIN = new TextEncoder().encode('orbinum-ivk-v1');
 

@@ -1,10 +1,22 @@
-export { MerkleModule } from './MerkleModule';
 export { NoteBuilder } from './NoteBuilder';
 export { EncryptedMemo } from './EncryptedMemo';
-export type { DecryptedMemo } from './EncryptedMemo';
 export { ShieldedPoolModule } from './ShieldedPoolModule';
+export type {
+    DecryptedMemo,
+    MerkleTreeInfo,
+    ScanCommitment,
+    ShieldParams,
+    ShieldBatchItem,
+    ShieldBatchParams,
+    UnshieldParams,
+    PrivateTransferInput,
+    PrivateTransferOutput,
+    PrivateTransferParams,
+    NoteInput,
+    ZkNote,
+    ShieldResult,
+} from './types';
 export { tryDecryptNote } from './NoteDecryptor';
-export type { ScanCommitment } from './NoteDecryptor';
 export {
     deriveViewingKey,
     deriveOwnerPk,
@@ -19,3 +31,4 @@ export {
     vaultReplacer,
     vaultReviver,
 } from './VaultCrypto';
+export { fromBase64, toBase64 } from './helpers';

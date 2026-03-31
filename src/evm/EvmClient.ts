@@ -124,6 +124,21 @@ export class EvmClient {
      * Returns a transaction receipt by hash, or null if not yet mined.
      */
     async getTransactionReceipt(txHash: string): Promise<Record<string, unknown> | null> {
-        return this.request<Record<string, unknown> | null>('eth_getTransactionReceipt', [txHash]);
+        const res = await fetch(this.rpcUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                id: 1,
+                jsonrpc: '2.0',
+                method: 'eth_getTransactionReceipt',
+                params: [txHash],
+            }),
+        });
+        if (!res.ok) throw new Error(`EVM HTTP ${res.status}: ${res.statusText}`);
+        const json = (await res.json()) as JsonRpcResponse<Record<string, unknown>>;
+        if (json.error) {
+            throw new Error(`EVM RPC [${json.error.code}]: ${json.error.message}`);
+        }
+        return json.result ?? null;
     }
 }

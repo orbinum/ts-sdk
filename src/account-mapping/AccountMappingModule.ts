@@ -1,9 +1,17 @@
-import { Binary, type PolkadotSigner, type TxFinalizedPayload } from 'polkadot-api';
+import { Binary, type PolkadotSigner } from 'polkadot-api';
 import type { SubstrateClient } from '../substrate/SubstrateClient';
+import type { TxResult } from '../client/types';
 import { normalizeEvmAddress } from '../utils/address';
+import { callUnsafeTx, resolveTx, toTxResult } from '../utils/tx';
 import type {
-    TxResult,
-    SignatureScheme,
+    RawAccountAddresses,
+    RawAliasResponse,
+    RawListingResponse,
+    RawAccountMetadataResponse,
+    RawFullIdentityResponse,
+    RawPrivateLinkResponse,
+} from './types/raw';
+import type {
     ChainLink,
     PrivateLink,
     AccountMetadata,
@@ -12,125 +20,12 @@ import type {
     ListingInfo,
     AccountListing,
     SupportedChain,
-} from '../types';
-
-// ─── Raw RPC shapes ───────────────────────────────────────────────────────────
-
-type RawAccountAddresses = {
-    mapped: string | null;
-    fallback: string | null;
-};
-
-type RawAliasResponse = {
-    alias: string;
-    substrate_account: string;
-    evm_address: string | null;
-    chain_links_count: number;
-};
-
-type RawListingResponse = {
-    alias: string;
-    price: string; // u128 as string
-    private: boolean;
-    whitelist_count: number;
-};
-
-type RawChainLinkResponse = {
-    chain_id: number;
-    address: string;
-};
-
-type RawAccountMetadataResponse = {
-    display_name: string | null;
-    bio: string | null;
-    avatar: string | null;
-};
-
-type RawFullIdentityResponse = {
-    owner: string;
-    evm_address: string | null;
-    chain_links: RawChainLinkResponse[];
-    metadata: RawAccountMetadataResponse | null;
-};
-
-type RawPrivateLinkResponse = {
-    chain_id: number;
-    commitment: string;
-};
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function toTxResult(payload: TxFinalizedPayload): TxResult {
-    const base = {
-        txHash: payload.txHash,
-        blockHash: payload.block.hash,
-        blockNumber: payload.block.number,
-        ok: payload.ok,
-    };
-    if (!payload.ok) {
-        return { ...base, error: payload.dispatchError.type };
-    }
-    return base;
-}
-
-function callUnsafeTx(
-    txEntry: unknown,
-    ...args: unknown[]
-): { signAndSubmit(signer: PolkadotSigner): Promise<TxFinalizedPayload> } {
-    return (
-        txEntry as (...a: unknown[]) => {
-            signAndSubmit(s: PolkadotSigner): Promise<TxFinalizedPayload>;
-        }
-    )(...args);
-}
-
-function resolveTx(unsafe: unknown, pallet: string, call: string): unknown {
-    const u = unsafe as Record<string, Record<string, Record<string, unknown>>>;
-    const p = u['tx']?.[pallet] as Record<string, unknown> | undefined;
-    if (p === undefined) throw new Error(`Pallet "${pallet}" not found in runtime metadata`);
-    const entry = p[call];
-    if (entry === undefined)
-        throw new Error(`Call "${pallet}.${call}" not found in runtime metadata`);
-    return entry;
-}
-
-function mapRawScheme(raw: unknown): SignatureScheme {
-    if (raw === 'Eip191' || raw === 'eip191') return 'Eip191';
-    if (raw === 'Ed25519' || raw === 'ed25519') return 'Ed25519';
-    return raw as SignatureScheme;
-}
-
-export type AddChainLinkParams = {
-    /** External chain ID. Use SLIP0044_NAMESPACE | coinType for SLIP-0044 chains. */
-    chainId: number;
-    /** The external address bytes (e.g. 20 bytes for EVM, 32 for Solana). */
-    address: Uint8Array;
-    /** Signature over the caller's AccountId32 (64 bytes for Ed25519, 65 for EIP-191). */
-    signature: Uint8Array;
-};
-
-export type SetMetadataParams = {
-    displayName?: string | null;
-    bio?: string | null;
-    avatar?: string | null;
-};
-
-export type PutOnSaleParams = {
-    price: bigint;
-    /** If true the sale becomes OTC (whitelist required). */
-    isPrivate: boolean;
-};
-
-export type DispatchAsLinkedParams = {
-    /** Owner AccountId32 hex (0x-prefixed 64 chars). */
-    owner: string;
-    chainId: number;
-    address: Uint8Array;
-    /** Signature over the encoded call payload. */
-    signature: Uint8Array;
-    /** Encoded call bytes (SCALE). */
-    callData: Uint8Array;
-};
+    AddChainLinkParams,
+    SetMetadataParams,
+    PutOnSaleParams,
+    DispatchAsLinkedParams,
+} from './types';
+import { mapRawScheme } from './helpers';
 
 // ─── AccountMappingModule ─────────────────────────────────────────────────────
 

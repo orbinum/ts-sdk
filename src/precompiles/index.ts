@@ -1,8 +1,7 @@
 export { ShieldedPoolPrecompile } from './ShieldedPoolPrecompile';
-export type { EvmTxRequest, EvmSigner } from './ShieldedPoolPrecompile';
 export { AccountMappingPrecompile } from './AccountMappingPrecompile';
-export type { ResolvedAlias } from './AccountMappingPrecompile';
 export { CryptoPrecompiles } from './CryptoPrecompiles';
+export type { EvmTxRequest, EvmSigner, ResolvedAlias, KnownPrecompileInfo } from './types';
 export {
     PRECOMPILE_ADDR,
     AM_SEL,
@@ -10,7 +9,6 @@ export {
     KNOWN_PRECOMPILES,
     getPrecompileLabel,
 } from './addresses';
-export type { KnownPrecompileInfo } from './addresses';
 export {
     encode,
     encodeHex,
@@ -21,3 +19,5 @@ export {
     decodeBytes,
     decodeString,
 } from './abi';
+export { decodePrecompileCalldata } from './decode';
+export type { DecodedPrecompile } from './decode';

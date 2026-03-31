@@ -62,6 +62,14 @@ function bigintFormatUnits(value: bigint, decimals: number): string {
     return (negative ? '-' : '') + intPart.toString() + '.' + fracStr;
 }
 
+function isCanonicalDecimal(value: string): boolean {
+    return /^-?(?:\d+\.\d*|\d*\.\d+)$/.test(value);
+}
+
+function isBigIntLikeInteger(value: string): boolean {
+    return /^-?\d+$/.test(value) || /^0[xX][0-9a-fA-F]+$/.test(value);
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 /**
@@ -83,9 +91,14 @@ export interface FormatOptions {
  *
  * Handles the following input forms:
  * - `bigint` — raw planck/wei amount.
- * - `string` — decimal integer, hex (`0x`-prefixed), or already-formatted decimal.
- * - `number` — interpreted as a plain integer.
+ * - `string` — canonical decimal integer, canonical hex (`0x`/`0X`-prefixed), or canonical decimal.
+ * - `number` — converted via `String(number)` and accepted only if it matches one of the
+ *   supported canonical numeric formats.
  * - `null` / `undefined` — treated as zero.
+ *
+ * Rejected string formats return zero instead of being coerced. This includes grouped values
+ * such as `1,000`, scientific notation such as `1e18`, underscored numbers, and explicit plus
+ * signs such as `+1`.
  *
  * Does NOT depend on `ethers`. Uses pure BigInt arithmetic.
  *
@@ -106,15 +119,19 @@ export function formatBalance(
 
     if (raw === null || raw === undefined) return zero;
 
-    const rawStr = String(raw).trim().replace(/,/g, '');
-    if (!rawStr || rawStr === '0' || rawStr === '0x0') return zero;
+    if (typeof raw === 'number' && !Number.isFinite(raw)) return zero;
+
+    const rawStr = String(raw).trim();
+    if (!rawStr) return zero;
 
     // Already a decimal string (e.g. already formatted by ethers/viem upstream)
-    if (rawStr.includes('.') && !rawStr.startsWith('0x')) {
+    if (isCanonicalDecimal(rawStr)) {
         const formatted = normalizeDecimalForDisplay(rawStr, precision);
         if (!formatted || formatted === '0' || formatted === '-0') return zero;
         return showSymbol ? `${formatted} ${symbol}` : formatted;
     }
+
+    if (!isBigIntLikeInteger(rawStr)) return zero;
 
     try {
         const n = BigInt(rawStr);
@@ -122,8 +139,7 @@ export function formatBalance(
         const formatted = normalizeDecimalForDisplay(decimalStr, precision);
         if (!formatted || formatted === '0' || formatted === '-0') return zero;
         return showSymbol ? `${formatted} ${symbol}` : formatted;
-    } catch (e) {
-        console.warn('[formatBalance] Failed to parse:', raw, e);
+    } catch {
         return zero;
     }
 }

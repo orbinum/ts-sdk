@@ -3,7 +3,7 @@ import { AccountMappingPrecompile } from '../../src/precompiles/AccountMappingPr
 import { AM_SEL, PRECOMPILE_ADDR } from '../../src/precompiles/addresses';
 import { toHex } from '../../src/utils/hex';
 import type { EvmClient } from '../../src/evm/EvmClient';
-import type { EvmSigner } from '../../src/precompiles/ShieldedPoolPrecompile';
+import type { EvmSigner } from '../../src/precompiles/types';
 
 // ─── Mock helpers ─────────────────────────────────────────────────────────────
 

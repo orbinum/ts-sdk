@@ -1,4 +1,4 @@
-import type { NoteInput, ZkNote } from '../types';
+import type { NoteInput, ZkNote } from './types';
 import { EncryptedMemo } from './EncryptedMemo';
 import { toHex } from '../utils/hex';
 import { bigintTo32Le } from '../utils/bytes';

@@ -4,9 +4,12 @@
  * In-memory manager for the user's Orbinum shielded-pool identity.
  * Protocol-level module — no UI, no localStorage, no sessionStorage dependencies.
  *
- * Call `PrivacyKeyManager.load(spendingKey)` after deriving the key from a wallet
- * signature (see `deriveSpendingKeyFromSignature`).  The caller (application layer)
- * is responsible for key persistence and session caching.
+ * Create one instance per user session:
+ *   const pkm = new PrivacyKeyManager();
+ *   await pkm.load(spendingKey);
+ *
+ * The caller (application layer) is responsible for key persistence and session
+ * caching. Each instance holds independent state — safe for multi-wallet use.
  *
  * Derivation scheme:
  *   spendingKey (bigint, BN254 scalar)
@@ -16,11 +19,7 @@
 
 import { deriveViewingKey, deriveOwnerPk } from './PrivacyKeys';
 import { bigintTo32Le } from '../utils/bytes';
-
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-/** BN254 scalar field order */
-const BN254_R = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+import { BN254_R } from './constants';
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -30,15 +29,15 @@ interface PrivacyKeyState {
     ownerPk: bigint | null;
 }
 
-let _state: PrivacyKeyState = {
-    spendingKey: null,
-    viewingKey: null,
-    ownerPk: null,
-};
-
 // ─── PrivacyKeyManager ────────────────────────────────────────────────────────
 
-export const PrivacyKeyManager = {
+export class PrivacyKeyManager {
+    private _state: PrivacyKeyState = {
+        spendingKey: null,
+        viewingKey: null,
+        ownerPk: null,
+    };
+
     /**
      * Load a spending key into the in-memory session.
      * Derives viewingKey and ownerPk immediately.
@@ -47,52 +46,52 @@ export const PrivacyKeyManager = {
     async load(spendingKey: bigint): Promise<void> {
         const viewingKey = deriveViewingKey(spendingKey);
         const ownerPk = deriveOwnerPk(spendingKey);
-        _state = { spendingKey, viewingKey, ownerPk };
-    },
+        this._state = { spendingKey, viewingKey, ownerPk };
+    }
 
     /** Clear all key material from memory. Call on vault lock / sign-out. */
     clear(): void {
-        _state = { spendingKey: null, viewingKey: null, ownerPk: null };
-    },
+        this._state = { spendingKey: null, viewingKey: null, ownerPk: null };
+    }
 
     /** Returns true if a spending key has been loaded. */
     isLoaded(): boolean {
-        return _state.spendingKey !== null;
-    },
+        return this._state.spendingKey !== null;
+    }
 
     /** Returns the spending key. Throws if not loaded. */
     getSpendingKey(): bigint {
-        if (_state.spendingKey === null) {
+        if (this._state.spendingKey === null) {
             throw new Error('PrivacyKeyManager: no key loaded. Call load() first.');
         }
-        return _state.spendingKey;
-    },
+        return this._state.spendingKey;
+    }
 
     /** Returns the 32-byte viewing key. Throws if not loaded. */
     getViewingKey(): Uint8Array {
-        if (_state.viewingKey === null) {
+        if (this._state.viewingKey === null) {
             throw new Error('PrivacyKeyManager: no key loaded. Call load() first.');
         }
-        return _state.viewingKey;
-    },
+        return this._state.viewingKey;
+    }
 
     /** Returns the BabyJubJub owner public key (x-coordinate). Throws if not loaded. */
     getOwnerPk(): bigint {
-        if (_state.ownerPk === null) {
+        if (this._state.ownerPk === null) {
             throw new Error('PrivacyKeyManager: no key loaded. Call load() first.');
         }
-        return _state.ownerPk;
-    },
+        return this._state.ownerPk;
+    }
 
     /** Returns the spending key as a 32-byte little-endian Uint8Array. Throws if not loaded. */
     getSpendingKeyBytes(): Uint8Array {
         return bigintTo32Le(this.getSpendingKey());
-    },
+    }
 
     /** Exports the spending key as a 0x-prefixed 64-char hex string. Throws if not loaded. */
     exportHex(): string {
         return '0x' + this.getSpendingKey().toString(16).padStart(64, '0');
-    },
+    }
 
     /**
      * Load a spending key from a 0x-prefixed or bare hex string.
@@ -104,5 +103,5 @@ export const PrivacyKeyManager = {
             throw new Error('PrivacyKeyManager: invalid spending key — out of BN254 range.');
         }
         await this.load(key);
-    },
-};
+    }
+}

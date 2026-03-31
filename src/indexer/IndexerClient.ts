@@ -1,92 +1,18 @@
-/** Configuration for IndexerClient. */
-export interface IndexerClientConfig {
-    /** Base URL of the indexer REST API (no trailing slash). */
-    baseUrl: string;
-    /** Request timeout in ms. Default: 10_000. */
-    timeoutMs?: number;
-}
-
-/** Generic paginated result returned by list endpoints. */
-export interface PaginatedResult<T> {
-    data: T[];
-    pagination: {
-        page: number;
-        limit: number;
-        total: number;
-    };
-}
-
-/** A shielded commitment (shield event) stored by the indexer. */
-export interface ShieldedCommitment {
-    commitmentHex: string;
-    blockNumber: number;
-    extrinsicIndex: number | null;
-    leafIndex: number;
-    /** Asset ID as decimal string (e.g. "0"). */
-    assetId: string;
-    /** SS58 or 0x-prefixed depositor address, null if not tracked. */
-    sender: string | null;
-    /** 0x-prefixed encrypted memo hex, null if not present. */
-    encryptedMemo: string | null;
-    timestampMs: number | null;
-}
-
-/** A spent nullifier stored by the indexer. */
-export interface SpentNullifier {
-    nullifierHex: string;
-    blockNumber: number;
-    extrinsicIndex: number | null;
-    txType: 'unshield' | 'private_transfer';
-    timestampMs: number | null;
-}
-
-/** A private transfer event stored by the indexer. */
-export interface PrivateTransfer {
-    /** "{blockNumber}-{extrinsicIndex}" */
-    id: string;
-    blockNumber: number;
-    extrinsicIndex: number | null;
-    /** JSON-encoded array of nullifier hex strings. */
-    inputNullifiersJson: string;
-    /** JSON-encoded array of commitment hex strings. */
-    outputCommitmentsJson: string;
-    /** JSON-encoded array of leaf index numbers. */
-    leafIndicesJson: string;
-    timestampMs: number | null;
-}
-
-/** An unshield event stored by the indexer. */
-export interface Unshield {
-    /** "{blockNumber}-{extrinsicIndex}" */
-    id: string;
-    blockNumber: number;
-    extrinsicIndex: number | null;
-    nullifierHex: string;
-    /** Asset ID as decimal string. */
-    assetId: string;
-    /** Amount as decimal string (bigint-safe). */
-    amount: string;
-    recipient: string;
-    timestampMs: number | null;
-}
-
-/** A Merkle root checkpoint stored by the indexer. */
-export interface MerkleRoot {
-    id: number;
-    rootHex: string;
-    blockNumber: number;
-    oldRootHex: string | null;
-    treeSize: number;
-    timestampMs: number | null;
-}
-
-/** Response from the nullifier status endpoint. */
-export interface NullifierStatusResult {
-    nullifier: string;
-    spent: boolean;
-    txType?: 'unshield' | 'private_transfer';
-    blockNumber?: number;
-}
+import type {
+    IndexerClientConfig,
+    IndexedBlock,
+    IndexedEvmTx,
+    IndexedExtrinsic,
+    IndexerStats,
+    MerkleRoot,
+    NullifierStatusResult,
+    PaginatedResult,
+    PrivateTransfer,
+    ShieldedAddressEvent,
+    ShieldedCommitment,
+    SpentNullifier,
+    Unshield,
+} from './types';
 
 /**
  * HTTP client for the Orbinum indexer REST API.
@@ -105,37 +31,31 @@ export class IndexerClient {
 
     // ─── Internal helpers ──────────────────────────────────────────────────────
 
-    private async get<T>(path: string): Promise<T> {
+    private async _fetchResponse(path: string): Promise<Response> {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), this.timeoutMs);
         try {
-            const res = await fetch(`${this.baseUrl}${path}`, {
-                signal: controller.signal,
-            });
-            if (!res.ok) {
-                throw new Error(`IndexerClient: HTTP ${res.status} for ${path}`);
-            }
-            return res.json() as Promise<T>;
+            return await fetch(`${this.baseUrl}${path}`, { signal: controller.signal });
         } finally {
             clearTimeout(timer);
         }
     }
 
-    private async getOrNull<T>(path: string): Promise<T | null> {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-        try {
-            const res = await fetch(`${this.baseUrl}${path}`, {
-                signal: controller.signal,
-            });
-            if (res.status === 404) return null;
-            if (!res.ok) {
-                throw new Error(`IndexerClient: HTTP ${res.status} for ${path}`);
-            }
-            return res.json() as Promise<T>;
-        } finally {
-            clearTimeout(timer);
+    private async get<T>(path: string): Promise<T> {
+        const res = await this._fetchResponse(path);
+        if (!res.ok) {
+            throw new Error(`IndexerClient: HTTP ${res.status} for ${path}`);
         }
+        return res.json() as Promise<T>;
+    }
+
+    private async getOrNull<T>(path: string): Promise<T | null> {
+        const res = await this._fetchResponse(path);
+        if (res.status === 404) return null;
+        if (!res.ok) {
+            throw new Error(`IndexerClient: HTTP ${res.status} for ${path}`);
+        }
+        return res.json() as Promise<T>;
     }
 
     private buildQuery(params: Record<string, string | number | undefined>): string {
@@ -230,5 +150,110 @@ export class IndexerClient {
     /** Returns the latest Merkle root, or null if none exists. */
     async getLatestMerkleRoot(): Promise<MerkleRoot | null> {
         return this.getOrNull<MerkleRoot>('/shielded/merkle-roots/latest');
+    }
+
+    // ─── Address activity ──────────────────────────────────────────────────────
+
+    /** Returns a paginated list of extrinsics signed by the given address. */
+    async getAddressExtrinsics(
+        address: string,
+        params?: { page?: number; limit?: number }
+    ): Promise<PaginatedResult<IndexedExtrinsic>> {
+        const qs = this.buildQuery({ page: params?.page, limit: params?.limit });
+        return this.get<PaginatedResult<IndexedExtrinsic>>(
+            `/address/${encodeURIComponent(address.toLowerCase())}/extrinsics${qs}`
+        );
+    }
+
+    /** Returns a paginated list of EVM transactions filtered by address and/or block number. */
+    async getEvmTransactions(params?: {
+        page?: number;
+        limit?: number;
+        address?: string;
+        blockNumber?: number;
+    }): Promise<PaginatedResult<IndexedEvmTx>> {
+        const qs = this.buildQuery({
+            page: params?.page,
+            limit: params?.limit,
+            address: params?.address?.toLowerCase(),
+            blockNumber: params?.blockNumber,
+        });
+        return this.get<PaginatedResult<IndexedEvmTx>>(`/evm/transactions${qs}`);
+    }
+
+    /** Returns a single EVM transaction by hash, or null if not found. */
+    async getEvmTransactionByHash(hash: string): Promise<IndexedEvmTx | null> {
+        return this.getOrNull<IndexedEvmTx>(
+            `/evm/transactions/${encodeURIComponent(hash.toLowerCase())}`
+        );
+    }
+
+    // ─── Blocks ────────────────────────────────────────────────────────────────
+
+    /** Returns a paginated list of indexed blocks. */
+    async getBlocks(params?: {
+        page?: number;
+        limit?: number;
+    }): Promise<PaginatedResult<IndexedBlock>> {
+        const qs = this.buildQuery({ page: params?.page, limit: params?.limit });
+        return this.get<PaginatedResult<IndexedBlock>>(`/blocks${qs}`);
+    }
+
+    /** Returns a single block by number or hash, or null if not found. */
+    async getBlock(numberOrHash: string | number): Promise<IndexedBlock | null> {
+        return this.getOrNull<IndexedBlock>(`/blocks/${encodeURIComponent(String(numberOrHash))}`);
+    }
+
+    // ─── Address commitments ───────────────────────────────────────────────────
+
+    /** Returns a paginated list of shielded commitments initiated by an address. */
+    async getAddressCommitments(
+        address: string,
+        params?: { page?: number; limit?: number }
+    ): Promise<PaginatedResult<ShieldedCommitment>> {
+        const qs = this.buildQuery({ page: params?.page, limit: params?.limit });
+        return this.get<PaginatedResult<ShieldedCommitment>>(
+            `/address/${encodeURIComponent(address.toLowerCase())}/shielded${qs}`
+        );
+    }
+
+    /**
+     * Returns a paginated list of all shielded activity (commitments, unshields,
+     * private transfers) associated with the given address.
+     * Each item is tagged with a `kind` discriminant.
+     */
+    async getAddressShieldedActivity(
+        address: string,
+        params?: { page?: number; limit?: number }
+    ): Promise<PaginatedResult<ShieldedAddressEvent>> {
+        const qs = this.buildQuery({ page: params?.page, limit: params?.limit });
+        return this.get<PaginatedResult<ShieldedAddressEvent>>(
+            `/shielded/address/${encodeURIComponent(address.toLowerCase())}${qs}`
+        );
+    }
+
+    // ─── Stats & Health ────────────────────────────────────────────────────────
+
+    /** Returns aggregated indexer statistics. */
+    async getStats(): Promise<IndexerStats> {
+        return this.get<IndexerStats>('/stats');
+    }
+
+    /** Returns true if the indexer health endpoint responds OK. */
+    async isHealthy(): Promise<boolean> {
+        try {
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+            try {
+                const res = await fetch(`${this.baseUrl}/health`, {
+                    signal: controller.signal,
+                });
+                return res.ok;
+            } finally {
+                clearTimeout(timer);
+            }
+        } catch {
+            return false;
+        }
     }
 }

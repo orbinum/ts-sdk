@@ -55,6 +55,18 @@ export function evmToImplicitSubstrate(evmAddr: string): string {
 }
 
 /**
+ * Converts an EVM H160 address to the 32-byte AccountId32 hex used by
+ * pallet-account-mapping (EeSuffixAddressMapping: H160 ++ [0x00; 12]).
+ * Returns null for invalid or non-EVM input.
+ *
+ * @param address  0x-prefixed EVM H160 address (or bare 40-char hex).
+ */
+export function evmToMappedAccountHex(address: string): string | null {
+    if (!isEvmAddress(address)) return null;
+    return evmToImplicitSubstrate(address);
+}
+
+/**
  * Returns true if the given AccountId32 hex was derived from an EVM address
  * via the EeSuffixAddressMapping (last 12 bytes are zero).
  *

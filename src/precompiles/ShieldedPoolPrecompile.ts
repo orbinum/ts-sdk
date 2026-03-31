@@ -1,27 +1,10 @@
 import type { EvmClient } from '../evm/EvmClient';
-import type { ShieldParams, UnshieldParams, PrivateTransferParams } from '../types';
+import type { ShieldParams, UnshieldParams, PrivateTransferParams } from '../shielded-pool/types';
+import type { EvmSigner } from './types';
 import { EncryptedMemo } from '../shielded-pool/EncryptedMemo';
 import { fromHex, toHex } from '../utils/hex';
 import { encodeHex } from './abi';
 import { PRECOMPILE_ADDR, SP_SEL } from './addresses';
-
-// ─── EvmSigner ────────────────────────────────────────────────────────────────
-
-/** EVM transaction request passed to an `EvmSigner` callback. */
-export type EvmTxRequest = {
-    to: string;
-    data: string; // 0x-prefixed calldata
-    value?: bigint; // ETH value in wei (0 for shielded pool calls)
-};
-
-/**
- * Callback that signs and submits an EVM transaction, returning the tx hash.
- *
- * MetaMask: `(tx) => window.ethereum.request({ method: 'eth_sendTransaction', params: [{ ...tx, from: account }] })`
- * ethers:   `(tx) => (await signer.sendTransaction({ to: tx.to, data: tx.data })).hash`
- * viem:     `(tx) => walletClient.sendTransaction({ to: tx.to, data: tx.data })`
- */
-export type EvmSigner = (tx: EvmTxRequest) => Promise<string>;
 
 // ─── ShieldedPoolPrecompile ───────────────────────────────────────────────────
 

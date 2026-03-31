@@ -89,6 +89,10 @@ describe('formatBalance — hex string input', () => {
         expect(formatBalance('0x0de0b6b3a7640000')).toBe('1 ORB');
     });
 
+    it('accepts uppercase 0X-prefixed hex', () => {
+        expect(formatBalance('0X0DE0B6B3A7640000')).toBe('1 ORB');
+    });
+
     it('parses 0x6f05b59d3b20000 as 0.5 ORB', () => {
         // 0x6f05b59d3b20000 = 5 * 10^17
         expect(formatBalance('0x6f05b59d3b20000')).toBe('0.5 ORB');
@@ -181,6 +185,26 @@ describe('formatBalance — invalid / unparseable input', () => {
 
     it('returns zero for non-numeric string', () => {
         expect(formatBalance('not-a-number')).toBe('0 ORB');
+    });
+
+    it('returns zero for grouped strings with commas', () => {
+        expect(formatBalance('1,000')).toBe('0 ORB');
+    });
+
+    it('returns zero for scientific notation', () => {
+        expect(formatBalance('1e18')).toBe('0 ORB');
+    });
+
+    it('returns zero for explicit plus sign', () => {
+        expect(formatBalance('+1')).toBe('0 ORB');
+    });
+
+    it('returns zero for underscored numeric strings', () => {
+        expect(formatBalance('1_000')).toBe('0 ORB');
+    });
+
+    it('returns zero for malformed hex', () => {
+        expect(formatBalance('0xZZ')).toBe('0 ORB');
     });
 });
 

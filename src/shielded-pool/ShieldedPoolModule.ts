@@ -1,61 +1,17 @@
-import { Binary, type PolkadotSigner, type TxFinalizedPayload } from 'polkadot-api';
+import { Binary, type PolkadotSigner } from 'polkadot-api';
 import type { SubstrateClient } from '../substrate/SubstrateClient';
-import type { MerkleModule } from './MerkleModule';
+import type { TxResult } from '../client/types';
+import { callUnsafeTx, resolveTx, toTxResult } from '../utils/tx';
 import { EncryptedMemo } from './EncryptedMemo';
 import { NoteBuilder } from './NoteBuilder';
 import type {
     ShieldParams,
     UnshieldParams,
     PrivateTransferParams,
-    TxResult,
-    NullifierStatus,
-    PoolBalance,
-    MerkleTreeInfo,
     NoteInput,
     ShieldResult,
-} from '../types';
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function toTxResult(payload: TxFinalizedPayload): TxResult {
-    const base = {
-        txHash: payload.txHash,
-        blockHash: payload.block.hash,
-        blockNumber: payload.block.number,
-        ok: payload.ok,
-    };
-    if (!payload.ok) {
-        return { ...base, error: payload.dispatchError.type };
-    }
-    return base;
-}
-
-/**
- * Calls a PAPI UnsafeApi tx entry with positional args.
- * UnsafeApi types tx calls as `[data: any]` (no descriptors available),
- * so we use this helper to preserve type safety outside the call site.
- */
-function callUnsafeTx(
-    txEntry: unknown,
-    ...args: unknown[]
-): { signAndSubmit(signer: PolkadotSigner): Promise<TxFinalizedPayload> } {
-    return (
-        txEntry as (...a: unknown[]) => {
-            signAndSubmit(s: PolkadotSigner): Promise<TxFinalizedPayload>;
-        }
-    )(...args);
-}
-
-/** Retrieves a tx entry from the UnsafeApi, throwing if not found. */
-function resolveTx(unsafe: unknown, pallet: string, call: string): unknown {
-    const u = unsafe as Record<string, Record<string, Record<string, unknown>>>;
-    const p = u['tx']?.[pallet] as Record<string, unknown> | undefined;
-    if (p === undefined) throw new Error(`Pallet "${pallet}" not found in runtime metadata`);
-    const entry = p[call];
-    if (entry === undefined)
-        throw new Error(`Call "${pallet}.${call}" not found in runtime metadata`);
-    return entry;
-}
+    ShieldBatchParams,
+} from './types';
 
 // ─── ShieldedPoolModule ───────────────────────────────────────────────────────
 
@@ -69,10 +25,7 @@ function resolveTx(unsafe: unknown, pallet: string, call: string): unknown {
  * Parameter order matches the Orbinum runtime extrinsics exactly.
  */
 export class ShieldedPoolModule {
-    constructor(
-        private readonly substrate: SubstrateClient,
-        readonly merkle: MerkleModule
-    ) {}
+    constructor(private readonly substrate: SubstrateClient) {}
 
     // ─── Extrinsics ────────────────────────────────────────────────────────────
 
@@ -185,44 +138,19 @@ export class ShieldedPoolModule {
         return toTxResult(await tx.signAndSubmit(signer));
     }
 
-    // ─── Queries ───────────────────────────────────────────────────────────────
-
-    /** Returns whether a nullifier has already been spent. */
-    async isNullifierSpent(nullifierHex: string): Promise<boolean> {
-        const raw = await this.substrate.request<{ is_spent: boolean }>(
-            'privacy_getNullifierStatus',
-            [nullifierHex]
-        );
-        return raw.is_spent;
-    }
-
-    /** Returns the full nullifier status object. */
-    async getNullifierStatus(nullifierHex: string): Promise<NullifierStatus> {
-        const raw = await this.substrate.request<{ nullifier: string; is_spent: boolean }>(
-            'privacy_getNullifierStatus',
-            [nullifierHex]
-        );
-        return { nullifier: raw.nullifier, isSpent: raw.is_spent };
-    }
-
-    /** Returns the total locked balance in the pool for a given asset. */
-    async getPoolBalance(assetId: number): Promise<PoolBalance> {
-        const raw = await this.substrate.request<{ balance: string | number }>(
-            'shieldedPool_getPoolBalance',
-            [assetId]
-        );
-        return { assetId, balance: BigInt(raw.balance) };
-    }
-
     /**
-     * Returns Merkle tree info and pool balance for a given asset in a single call.
-     * Convenience wrapper used by both `app` and `privacy-explorer`.
+     * Deposits multiple notes into the shielded pool in a single extrinsic.
+     * Extrinsic: shieldedPool.shieldBatch(operations) — max 20 items.
      */
-    async getPoolStats(assetId = 0): Promise<{ merkle: MerkleTreeInfo; balance: PoolBalance }> {
-        const [merkle, balance] = await Promise.all([
-            this.merkle.getTreeInfo(),
-            this.getPoolBalance(assetId),
-        ]);
-        return { merkle, balance };
+    async shieldBatch(params: ShieldBatchParams, signer: PolkadotSigner): Promise<TxResult> {
+        const operations = params.items.map((item) => ({
+            assetId: item.assetId,
+            amount: item.amount.toString(),
+            commitment: Binary.fromHex(item.commitment),
+            encryptedMemo: Binary.fromBytes(item.encryptedMemo ?? EncryptedMemo.dummy()),
+        }));
+        const entry = resolveTx(this.substrate.unsafe, 'shieldedPool', 'shieldBatch');
+        const tx = callUnsafeTx(entry, operations);
+        return toTxResult(await tx.signAndSubmit(signer));
     }
 }

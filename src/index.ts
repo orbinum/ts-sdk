@@ -1,11 +1,63 @@
-// ─── Main client ─────────────────────────────────────────────────────────────
-export { OrbinumClient } from './client';
+// Public SDK exports.
+// This file defines the public API surface exposed to SDK consumers.
 
-// ─── Modules (for direct import / advanced usage) ────────────────────────────
+// ─── Main client ─────────────────────────────────────────────────────────────
+export { OrbinumClient } from './client/OrbinumClient';
+export { OrbinumClientProvider } from './client/OrbinumClientProvider';
+
+// ─── Client types ────────────────────────────────────────────────────────────
+export type { OrbinumClientConfig, TxResult } from './client/types';
+export type {
+    ConnectionStatus,
+    StatusChangeEvent,
+    StatusListener,
+    ClientProviderConfig,
+} from './client/OrbinumClientProvider';
+
+// ─── Core modules (for direct import / advanced usage) ───────────────────────
 export { SubstrateClient } from './substrate/index';
+export type { DynamicBuilder, ExtrinsicDecoder } from './substrate/index';
 export { EvmClient } from './evm/index';
+export { EvmExplorer } from './evm-explorer/index';
+export type {
+    ChainInfo,
+    SystemHealth,
+    EventRecord,
+    EventPhase,
+    EventData,
+    RawBlockHeader,
+    RawBlock,
+    BlockInfo,
+} from './substrate/index';
+export type {
+    EvmBlock,
+    EvmTransaction,
+    EvmAddressInfo,
+    EvmTxSummary,
+    EvmLog,
+    TokenInfo,
+    TokenTransfer,
+} from './evm-explorer/index';
+
+// ─── rpc-v2 ──────────────────────────────────────────────────────────────────
+export { PrivacyModule } from './rpc-v2/index';
+export type {
+    RpcV2MerkleProof,
+    PrivacyMerkleProof,
+    RpcV2NullifierStatus,
+    RpcV2PoolAssetBalance,
+    RpcV2PoolStats,
+} from './rpc-v2/index';
+export { ZkVerifierModule } from './zk-verifier/index';
+export type {
+    ZkVerifierCircuitVersionInfo,
+    ZkVerifierVkHash,
+    ZkVerifierVersionStats,
+    ZkVerifierHistoricalVersion,
+} from './zk-verifier/index';
+
+// ─── Shielded pool ───────────────────────────────────────────────────────────
 export {
-    MerkleModule,
     NoteBuilder,
     EncryptedMemo,
     ShieldedPoolModule,
@@ -18,11 +70,27 @@ export {
     deriveVaultKey,
     encryptJson,
     decryptJson,
+    fromBase64,
+    toBase64,
     vaultReplacer,
     vaultReviver,
 } from './shielded-pool/index';
 export type { DecryptedMemo, ScanCommitment } from './shielded-pool/index';
-export { ChainModule } from './chain/index';
+export type {
+    MerkleTreeInfo,
+    ShieldParams,
+    ShieldBatchItem,
+    ShieldBatchParams,
+    ShieldResult,
+    UnshieldParams,
+    PrivateTransferInput,
+    PrivateTransferOutput,
+    PrivateTransferParams,
+    NoteInput,
+    ZkNote,
+} from './shielded-pool/types';
+
+// ─── Account mapping ─────────────────────────────────────────────────────────
 export { AccountMappingModule } from './account-mapping/index';
 export type {
     AddChainLinkParams,
@@ -30,71 +98,7 @@ export type {
     PutOnSaleParams,
     DispatchAsLinkedParams,
 } from './account-mapping/index';
-export {
-    ShieldedPoolPrecompile,
-    AccountMappingPrecompile,
-    CryptoPrecompiles,
-    PRECOMPILE_ADDR,
-    KNOWN_PRECOMPILES,
-    getPrecompileLabel,
-} from './precompiles/index';
 export type {
-    EvmTxRequest,
-    EvmSigner,
-    ResolvedAlias,
-    KnownPrecompileInfo,
-} from './precompiles/index';
-
-// ─── Utilities ───────────────────────────────────────────────────────────────
-export { formatBalance, formatORB } from './utils/format';
-export type { FormatOptions } from './utils/format';
-export { toHex, fromHex, ensureHexPrefix } from './utils/hex';
-export {
-    bigintTo32Le,
-    bigintTo32Be,
-    bigintTo32LeArr,
-    bytesToBigintLE,
-    computePathIndices,
-    leHexToBigint,
-} from './utils/bytes';
-export {
-    normalizeEvmAddress,
-    isSs58,
-    isEvmAddress,
-    evmAddressToAccountId,
-    evmToImplicitSubstrate,
-    isImplicitEvmAccount,
-    implicitSubstrateToEvm,
-    isSubstrateAddress,
-    isUnifiedAddress,
-    substrateToEvm,
-    evmToSubstrate,
-    accountIdHexToSs58,
-    substrateSs58ToAccountIdHex,
-    addressToAccountIdHex,
-} from './utils/address';
-
-// ─── Types ───────────────────────────────────────────────────────────────────
-export type {
-    OrbinumClientConfig,
-    TxResult,
-    MerkleTreeInfo,
-    PoolStats,
-    MerkleProof,
-    CommitmentMerkleProof,
-    NullifierStatus,
-    PoolBalance,
-    ShieldParams,
-    ShieldResult,
-    UnshieldParams,
-    TransferInput,
-    TransferOutput,
-    PrivateTransferParams,
-    NoteInput,
-    ZkNote,
-    ChainInfo,
-    FullIdentityInfo,
-    SignatureScheme,
     ChainLink,
     PrivateLink,
     AccountMetadata,
@@ -103,10 +107,28 @@ export type {
     ListingInfo,
     AccountListing,
     SupportedChain,
-} from './types';
-export { SLIP0044_NAMESPACE } from './types';
+} from './account-mapping/types';
+export { SignatureScheme, SLIP0044_NAMESPACE } from './account-mapping/types';
 
-// ─── Pallet event types ───────────────────────────────────────────────────────
+// ─── Precompiles ─────────────────────────────────────────────────────────────
+export {
+    ShieldedPoolPrecompile,
+    AccountMappingPrecompile,
+    CryptoPrecompiles,
+    PRECOMPILE_ADDR,
+    KNOWN_PRECOMPILES,
+    getPrecompileLabel,
+    decodePrecompileCalldata,
+} from './precompiles/index';
+export type {
+    EvmTxRequest,
+    EvmSigner,
+    ResolvedAlias,
+    KnownPrecompileInfo,
+    DecodedPrecompile,
+} from './precompiles/index';
+
+// ─── Runtime event types ─────────────────────────────────────────────────────
 
 // pallet-shielded-pool events
 export type {
@@ -124,7 +146,7 @@ export type {
     AssetVerifiedEvent,
     AssetUnverifiedEvent,
     ShieldedPoolEvent,
-} from './types/pallet-events';
+} from './shielded-pool/types/pallet-events';
 
 // pallet-zk-verifier events
 export type {
@@ -135,7 +157,7 @@ export type {
     ProofVerificationFailedEvent,
     BatchVerificationKeysRegisteredEvent,
     ZkVerifierEvent,
-} from './types/pallet-events';
+} from './zk-verifier/types/pallet-events';
 
 // pallet-account-mapping events
 export type {
@@ -158,9 +180,9 @@ export type {
     PrivateChainLinkRevealedEvent,
     PrivateLinkDispatchExecutedEvent,
     AccountMappingEvent,
-} from './types/pallet-events';
+} from './account-mapping/types/pallet-events';
 
-// ─── Pallet extrinsic arg types ───────────────────────────────────────────────
+// ─── Runtime extrinsic arg types ─────────────────────────────────────────────
 
 // pallet-shielded-pool
 export type {
@@ -172,8 +194,8 @@ export type {
     ShieldOperation,
     ShieldArgs,
     ShieldBatchArgs,
-    PrivateTransferInput,
-    PrivateTransferOutput,
+    RawTransferInput,
+    RawTransferOutput,
     PrivateTransferArgs,
     UnshieldArgs,
     SetAuditPolicyArgs,
@@ -187,7 +209,7 @@ export type {
     PruneExpiredRequestArgs,
     RevokeDisclosureRecordArgs,
     ShieldedPoolCall,
-} from './types/pallet-extrinsics';
+} from './shielded-pool/types/pallet-extrinsics';
 
 // pallet-zk-verifier
 export type {
@@ -199,8 +221,8 @@ export type {
     VerifyProofArgs,
     BatchRegisterVerificationKeysArgs,
     ZkVerifierCall,
-} from './types/pallet-extrinsics';
-export { CircuitId } from './types/pallet-extrinsics';
+} from './zk-verifier/types/pallet-extrinsics';
+export { CircuitId } from './zk-verifier/types/pallet-extrinsics';
 
 // pallet-account-mapping
 export type {
@@ -219,14 +241,19 @@ export type {
     RevealPrivateLinkArgs,
     DispatchAsPrivateLinkArgs,
     AccountMappingCall,
-} from './types/pallet-extrinsics';
-// SignatureScheme already exported from './types' above
+} from './account-mapping/types/pallet-extrinsics';
+// SignatureScheme already exported from './account-mapping/types' above
 
 // ─── Indexer ──────────────────────────────────────────────────────────────────
+export { IndexerClient } from './indexer';
 export type {
-    IndexerClient,
     IndexerClientConfig,
     PaginatedResult,
+    IndexedBlock,
+    IndexedExtrinsic,
+    IndexedEvmTx,
+    IndexerStats,
+    ShieldedAddressEvent,
     ShieldedCommitment,
     SpentNullifier,
     PrivateTransfer,
@@ -235,9 +262,117 @@ export type {
     NullifierStatusResult,
 } from './indexer';
 
+// ─── Utilities ───────────────────────────────────────────────────────────────
+export { formatBalance, formatORB } from './utils/format';
+export type { FormatOptions } from './utils/format';
+export { shortHash, truncateMiddle } from './utils/string';
+export { toHex, fromHex, ensureHexPrefix, hexToNumber, hexToBigint } from './utils/hex';
+export { toTxResult } from './utils/tx';
+export {
+    bigintTo32Le,
+    bigintTo32Be,
+    bigintTo32LeArr,
+    bytesToBigintLE,
+    computePathIndices,
+    leHexToBigint,
+} from './utils/bytes';
+export {
+    normalizeEvmAddress,
+    isSs58,
+    isEvmAddress,
+    evmAddressToAccountId,
+    evmToImplicitSubstrate,
+    evmToMappedAccountHex,
+    isImplicitEvmAccount,
+    implicitSubstrateToEvm,
+    isSubstrateAddress,
+    isUnifiedAddress,
+    substrateToEvm,
+    evmToSubstrate,
+    accountIdHexToSs58,
+    substrateSs58ToAccountIdHex,
+    addressToAccountIdHex,
+} from './utils/address';
+
+// ─── Extrinsic / event arg mappers ───────────────────────────────────────────
+export { mapExtrinsicArgs, mapZkEventData } from './extrinsic/index';
+
+// ─── Decoded pallet arg & event shapes (explorer / read path) ────────────────
+export type {
+    DecodedShieldArgs,
+    DecodedShieldBatchOperation,
+    DecodedShieldBatchArgs,
+    DecodedPrivateTransferArgs,
+    DecodedUnshieldArgs,
+    DecodedSetAuditPolicyArgs,
+    DecodedRequestDisclosureArgs,
+    DecodedApproveDisclosureArgs,
+    DecodedRejectDisclosureArgs,
+    DecodedSubmitDisclosureArgs,
+    DecodedBatchSubmitDisclosureArgs,
+    DecodedTransferArgs,
+    DecodedTransferKeepAliveArgs,
+    DecodedTransferAllArgs,
+    DecodedBatchArgs,
+    DecodedSudoArgs,
+    DecodedRemarkArgs,
+    DecodedRegisterAliasArgs,
+    DecodedPutAliasForSaleArgs,
+    DecodedSetAccountMetadataArgs,
+    DecodedAddChainLinkArgs,
+    DecodedRevealPrivateLinkArgs,
+    DecodedDispatchAsPrivateLinkArgs,
+    DecodedEthereumTransactArgs,
+    DecodedEvmCallArgs,
+} from './extrinsic/decoded-args';
+
+export type {
+    ShieldedEventData,
+    PrivateTransferEventData,
+    UnshieldedEventData,
+    MerkleRootUpdatedData,
+    AuditPolicySetData,
+    DisclosureRequestedData,
+    DisclosureApprovedData,
+    DisclosureRejectedData,
+    DisclosureSubmittedData,
+    DisclosureVerifiedData,
+    AuditTrailRecordedData,
+    TransferEventData,
+    EndowedEventData,
+    ReservedEventData,
+    AliasRegisteredData,
+    AliasTransferredData,
+    AliasOnSaleData,
+    AliasSoldData,
+    AccountMappedData,
+    EvmExitReason,
+    EvmExecutedData,
+    EthereumExecutedData,
+    DispatchInfo,
+    DispatchError,
+    ExtrinsicSuccessData,
+    ExtrinsicFailedData,
+} from './extrinsic/decoded-events';
+
+// ─── Substrate SCALE primitives (re-exported for SDK consumers) ──────────────
+export {
+    Blake2256,
+    AccountId,
+    u128,
+    u64,
+    Storage,
+    Keccak256,
+} from '@polkadot-api/substrate-bindings';
+
+// ─── Base encoding utilities ─────────────────────────────────────────────────
+export { base58 } from '@scure/base';
+
 // ─── Re-export PAPI types used in public APIs ────────────────────────────────
 export type { PolkadotSigner } from 'polkadot-api';
 // Signers for Node.js (raw keypair testing)
 export { getPolkadotSigner } from 'polkadot-api/signer';
 // Signer bridge to @polkadot/extension-dapp (browser)
 export { getPolkadotSignerFromPjs } from 'polkadot-api/pjs-signer';
+// Ss58 address decoding
+export { getSs58AddressInfo } from 'polkadot-api';

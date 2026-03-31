@@ -1,6 +1,6 @@
 {
   "name": "@orbinum/sdk",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Official TypeScript SDK for Orbinum.",
   "author": "Orbinum",
   "license": "ISC",
@@ -58,7 +58,11 @@
   "dependencies": {
     "@noble/ciphers": "^2.1.1",
     "@noble/hashes": "^2.0.1",
+    "@polkadot-api/metadata-builders": "^0.13.9",
+    "@polkadot-api/substrate-bindings": "^0.17.0",
+    "@polkadot-api/tx-utils": "^0.2.2",
     "@polkadot/util-crypto": "^14.0.3",
+    "@scure/base": "^2.0.0",
     "@zk-kit/baby-jubjub": "^1.0.3",
     "polkadot-api": "^1.23.3",
     "poseidon-lite": "^0.3.0"

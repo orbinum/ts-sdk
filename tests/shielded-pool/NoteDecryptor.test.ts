@@ -3,7 +3,7 @@ import { tryDecryptNote, type ScanCommitment } from '../../src/shielded-pool/Not
 import { NoteBuilder } from '../../src/shielded-pool/NoteBuilder';
 import { deriveViewingKey } from '../../src/shielded-pool/PrivacyKeys';
 import { toHex } from '../../src/utils/hex';
-import type { ZkNote } from '../../src/types';
+import type { ZkNote } from '../../src/shielded-pool/types';
 
 // ─── Test fixtures ────────────────────────────────────────────────────────────
 

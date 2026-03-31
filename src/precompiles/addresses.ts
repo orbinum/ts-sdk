@@ -5,6 +5,8 @@
  * computed as `bytes4(keccak256("<functionName>(<argTypes>)"))`.
  */
 
+import type { KnownPrecompileInfo } from './types';
+
 // ─── Contract Addresses ───────────────────────────────────────────────────────
 
 /** All precompile contract addresses. */
@@ -83,14 +85,6 @@ export const SP_SEL = {
 } as const;
 
 // ─── Known Precompiles registry ───────────────────────────────────────────────
-
-/** Metadata for a known precompile: display name and function selector map. */
-export interface KnownPrecompileInfo {
-    /** Human-readable name, e.g. "ShieldedPool". */
-    name: string;
-    /** Map from 4-byte hex selector (no 0x prefix) to function signature. */
-    functions: Record<string, string>;
-}
 
 /**
  * Registry of all known Orbinum EVM precompiles, keyed by lowercase address.

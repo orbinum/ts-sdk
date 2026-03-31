@@ -209,6 +209,18 @@ describe('AccountMappingModule.resolveFullIdentity', () => {
       await new AccountMappingModule(failingClient()).resolveFullIdentity('@alice'),
     ).toBeNull();
   });
+
+  it('calls accountMapping_resolveFullIdentity with the alias argument', async () => {
+    const client = mockClient(rawFull);
+    const mod = new AccountMappingModule(client);
+
+    await mod.resolveFullIdentity('@alice');
+
+    expect(vi.mocked(client.request)).toHaveBeenCalledWith(
+      'accountMapping_resolveFullIdentity',
+      ['@alice'],
+    );
+  });
 });
 
 // ─── getAccountMetadata ───────────────────────────────────────────────────────

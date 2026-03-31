@@ -5,6 +5,7 @@ import {
     deriveSpendingKeyMessage,
     deriveSpendingKeyFromSignature,
 } from '../../src/shielded-pool/PrivacyKeys';
+import { BN254_R } from '../../src/shielded-pool/constants';
 
 // ─── deriveViewingKey ─────────────────────────────────────────────────────────
 
@@ -109,8 +110,6 @@ describe('deriveSpendingKeyMessage', () => {
 });
 
 // ─── deriveSpendingKeyFromSignature ───────────────────────────────────────────
-
-const BN254_R = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 
 // A synthetic 65-byte signature (all zeros except first byte) for deterministic tests
 const DUMMY_SIG = '0x' + '00'.repeat(65);

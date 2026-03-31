@@ -15,64 +15,17 @@
  * Cipher: ChaCha20-Poly1305 (IETF, 96-bit nonce)
  */
 
-import { sha256 } from '@noble/hashes/sha2.js';
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { randomBytes } from '@noble/ciphers/utils.js';
 import { bytesToBigintLE } from '../utils/bytes';
-
-// ─── Decrypted memo type ──────────────────────────────────────────────────────
-
-/** Fields recovered from a successfully decrypted EncryptedMemo. */
-export type DecryptedMemo = {
-    value: bigint;
-    ownerPk: bigint;
-    blinding: bigint;
-    assetId: bigint;
-};
+import { deriveEncryptionKey, serializeMemo } from './helpers';
+import type { DecryptedMemo } from './types';
 
 // ─── Constants (mirror constants.rs) ─────────────────────────────────────────
 
-const KEY_DOMAIN = new TextEncoder().encode('orbinum-note-encryption-v1');
 const NONCE_SIZE = 12;
-const MEMO_PLAINTEXT_SIZE = 76;
 /** Full encrypted memo: nonce(12) + plaintext(76) + MAC(16) = 104 bytes */
 export const ENCRYPTED_MEMO_SIZE = 104;
-
-// ─── Plaintext serialization ──────────────────────────────────────────────────
-
-/**
- * Serialize memo plaintext to 76 bytes.
- * Layout: value(8 LE) || owner_pk(32) || blinding(32) || asset_id(4 LE)
- */
-function serializeMemo(
-    value: bigint,
-    ownerPk: Uint8Array,
-    blinding: Uint8Array,
-    assetId: number
-): Uint8Array {
-    const buf = new Uint8Array(MEMO_PLAINTEXT_SIZE);
-    const view = new DataView(buf.buffer);
-    // value as u64 LE (bigint — clamp to 8 bytes)
-    view.setBigUint64(0, value & 0xffff_ffff_ffff_ffffn, true);
-    buf.set(ownerPk.slice(0, 32), 8);
-    buf.set(blinding.slice(0, 32), 40);
-    view.setUint32(72, assetId >>> 0, true);
-    return buf;
-}
-
-// ─── Key derivation ───────────────────────────────────────────────────────────
-
-/**
- * Derive the per-note encryption key.
- * key = SHA256(viewing_key || commitment || KEY_DOMAIN)
- */
-function deriveEncryptionKey(viewingKey: Uint8Array, commitment: Uint8Array): Uint8Array {
-    const h = sha256.create();
-    h.update(viewingKey);
-    h.update(commitment);
-    h.update(KEY_DOMAIN);
-    return h.digest();
-}
 
 // ─── EncryptedMemo ───────────────────────────────────────────────────────────
 

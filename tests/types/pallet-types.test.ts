@@ -1,22 +1,40 @@
 import { describe, it, expect } from 'vitest';
 import type {
+    PrivateTransferInput as PublicPrivateTransferInput,
+    PrivateTransferOutput as PublicPrivateTransferOutput,
+} from '../../src/index';
+import type {
     ShieldArgs,
     UnshieldArgs,
-    PrivateTransferInput,
-    PrivateTransferOutput,
+    RawTransferInput,
+    RawTransferOutput,
     PrivateTransferArgs,
-} from '../../src/types/pallet-extrinsics/shielded-pool';
+} from '../../src/shielded-pool/types/pallet-extrinsics';
 import type {
     ShieldedEvent,
     PrivateTransferEvent,
     UnshieldedEvent,
     MerkleRootUpdatedEvent,
     ShieldedPoolEvent,
-} from '../../src/types/pallet-events';
+} from '../../src/shielded-pool/types/pallet-events';
 
 // ─── pallet-args structural tests ────────────────────────────────────────────
 
 describe('pallet-args types', () => {
+    it('public private-transfer types use the hex-based module shape', () => {
+        const input: PublicPrivateTransferInput = {
+            nullifier: '0x' + 'aa'.repeat(32),
+            commitment: '0x' + 'bb'.repeat(32),
+        };
+        const output: PublicPrivateTransferOutput = {
+            commitment: '0x' + 'cc'.repeat(32),
+            encryptedMemo: new Uint8Array(104),
+        };
+        expect(input.nullifier.startsWith('0x')).toBe(true);
+        expect(output.commitment.startsWith('0x')).toBe(true);
+        expect(output.encryptedMemo).toBeInstanceOf(Uint8Array);
+    });
+
     it('ShieldArgs holds expected shape', () => {
         const args: ShieldArgs = {
             assetId: 0,
@@ -44,11 +62,11 @@ describe('pallet-args types', () => {
     });
 
     it('PrivateTransferArgs holds nested inputs and outputs', () => {
-        const input: PrivateTransferInput = {
+        const input: RawTransferInput = {
             nullifier: new Array(32).fill(0),
             commitment: new Array(32).fill(1),
         };
-        const output: PrivateTransferOutput = {
+        const output: RawTransferOutput = {
             commitment: new Array(32).fill(2),
             memo: new Array(104).fill(0),
         };

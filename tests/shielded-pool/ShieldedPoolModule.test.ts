@@ -1,7 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ShieldedPoolModule } from '../../src/shielded-pool/ShieldedPoolModule';
 import type { SubstrateClient } from '../../src/substrate/SubstrateClient';
-import type { MerkleModule } from '../../src/shielded-pool/MerkleModule';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -43,13 +42,6 @@ function queryClient(result: unknown): SubstrateClient {
   } as unknown as SubstrateClient;
 }
 
-function failingQueryClient(): SubstrateClient {
-  return {
-    request: vi.fn().mockRejectedValue(new Error('RPC error')),
-  } as unknown as SubstrateClient;
-}
-
-const mockMerkle = {} as MerkleModule;
 const mockSigner = {} as never;
 
 // Common test params
@@ -82,20 +74,11 @@ const TRANSFER_PARAMS = {
   merkleRoot: '0x' + 'a1'.repeat(32),
 };
 
-// ─── constructor / merkle access ──────────────────────────────────────────────
-
-describe('ShieldedPoolModule constructor', () => {
-  it('exposes the merkle module', () => {
-    const mod = new ShieldedPoolModule(txClient('shield'), mockMerkle);
-    expect(mod.merkle).toBe(mockMerkle);
-  });
-});
-
 // ─── shield ───────────────────────────────────────────────────────────────────
 
 describe('ShieldedPoolModule.shield', () => {
   it('returns a TxResult on success', async () => {
-    const mod = new ShieldedPoolModule(txClient('shield'), mockMerkle);
+    const mod = new ShieldedPoolModule(txClient('shield'));
     const result = await mod.shield(SHIELD_PARAMS, mockSigner);
     expect(result.txHash).toBe('0xabc');
     expect(result.ok).toBe(true);
@@ -103,28 +86,28 @@ describe('ShieldedPoolModule.shield', () => {
   });
 
   it('maps blockHash from block.hash', async () => {
-    const mod = new ShieldedPoolModule(txClient('shield'), mockMerkle);
+    const mod = new ShieldedPoolModule(txClient('shield'));
     const result = await mod.shield(SHIELD_PARAMS, mockSigner);
     expect(result.blockHash).toBe('0xblock');
   });
 
   it('calls signAndSubmit with the provided signer', async () => {
     const client = txClient('shield');
-    const mod = new ShieldedPoolModule(client, mockMerkle);
+    const mod = new ShieldedPoolModule(client);
     await mod.shield(SHIELD_PARAMS, mockSigner);
     expect(client._signAndSubmit).toHaveBeenCalledWith(mockSigner);
   });
 
   it('calls the shield tx entry exactly once', async () => {
     const client = txClient('shield');
-    const mod = new ShieldedPoolModule(client, mockMerkle);
+    const mod = new ShieldedPoolModule(client);
     await mod.shield(SHIELD_PARAMS, mockSigner);
     expect(client._txEntry).toHaveBeenCalledTimes(1);
   });
 
   it('returns error info when tx fails', async () => {
     const client = txClient('shield', FINALIZED_ERR);
-    const mod = new ShieldedPoolModule(client, mockMerkle);
+    const mod = new ShieldedPoolModule(client);
     const result = await mod.shield(SHIELD_PARAMS, mockSigner);
     expect(result.ok).toBe(false);
     expect((result as { error?: string }).error).toBe('Module');
@@ -132,7 +115,7 @@ describe('ShieldedPoolModule.shield', () => {
 
   it('throws when pallet is missing from runtime metadata', async () => {
     const client = { request: vi.fn(), unsafe: { tx: {} } } as unknown as SubstrateClient;
-    const mod = new ShieldedPoolModule(client, mockMerkle);
+    const mod = new ShieldedPoolModule(client);
     await expect(mod.shield(SHIELD_PARAMS, mockSigner)).rejects.toThrow(/Pallet "shieldedPool" not found/);
   });
 
@@ -141,13 +124,13 @@ describe('ShieldedPoolModule.shield', () => {
       request: vi.fn(),
       unsafe: { tx: { shieldedPool: {} } },
     } as unknown as SubstrateClient;
-    const mod = new ShieldedPoolModule(client, mockMerkle);
+    const mod = new ShieldedPoolModule(client);
     await expect(mod.shield(SHIELD_PARAMS, mockSigner)).rejects.toThrow(/Call "shieldedPool.shield" not found/);
   });
 
   it('uses dummy memo when encryptedMemo is not provided', async () => {
     const client = txClient('shield');
-    const mod = new ShieldedPoolModule(client, mockMerkle);
+    const mod = new ShieldedPoolModule(client);
     const params = { assetId: 0, amount: 100n, commitment: '0x' + 'ab'.repeat(32) };
     const result = await mod.shield(params, mockSigner);
     expect(result.ok).toBe(true);
@@ -159,7 +142,7 @@ describe('ShieldedPoolModule.shield', () => {
 describe('ShieldedPoolModule.buildAndShield', () => {
   it('returns { txResult, note } shape', async () => {
     const client = txClient('shield');
-    const mod = new ShieldedPoolModule(client, mockMerkle);
+    const mod = new ShieldedPoolModule(client);
     const result = await mod.buildAndShield({ value: 500n, blinding: 1n }, mockSigner);
     expect(result).toHaveProperty('txResult');
     expect(result).toHaveProperty('note');
@@ -167,28 +150,28 @@ describe('ShieldedPoolModule.buildAndShield', () => {
 
   it('txResult is ok', async () => {
     const client = txClient('shield');
-    const mod = new ShieldedPoolModule(client, mockMerkle);
+    const mod = new ShieldedPoolModule(client);
     const result = await mod.buildAndShield({ value: 500n, blinding: 1n }, mockSigner);
     expect(result.txResult.ok).toBe(true);
   });
 
   it('note has the correct value', async () => {
     const client = txClient('shield');
-    const mod = new ShieldedPoolModule(client, mockMerkle);
+    const mod = new ShieldedPoolModule(client);
     const result = await mod.buildAndShield({ value: 999n, blinding: 1n }, mockSigner);
     expect(result.note.value).toBe(999n);
   });
 
   it('note has commitmentHex as 0x-prefixed 64-nibble string', async () => {
     const client = txClient('shield');
-    const mod = new ShieldedPoolModule(client, mockMerkle);
+    const mod = new ShieldedPoolModule(client);
     const result = await mod.buildAndShield({ value: 1n, blinding: 1n }, mockSigner);
     expect(result.note.commitmentHex).toMatch(/^0x[0-9a-f]{64}$/);
   });
 
   it('forwards optional note fields', async () => {
     const client = txClient('shield');
-    const mod = new ShieldedPoolModule(client, mockMerkle);
+    const mod = new ShieldedPoolModule(client);
     const result = await mod.buildAndShield(
       { value: 10n, assetId: 1, ownerPk: 0n, blinding: 2n, spendingKey: 3n },
       mockSigner
@@ -202,7 +185,7 @@ describe('ShieldedPoolModule.buildAndShield', () => {
 
 describe('ShieldedPoolModule.unshield', () => {
   it('returns a TxResult on success', async () => {
-    const mod = new ShieldedPoolModule(txClient('unshield'), mockMerkle);
+    const mod = new ShieldedPoolModule(txClient('unshield'));
     const result = await mod.unshield(UNSHIELD_PARAMS, mockSigner);
     expect(result.ok).toBe(true);
     expect(result.txHash).toBe('0xabc');
@@ -210,21 +193,21 @@ describe('ShieldedPoolModule.unshield', () => {
 
   it('calls the unshield tx entry exactly once', async () => {
     const client = txClient('unshield');
-    const mod = new ShieldedPoolModule(client, mockMerkle);
+    const mod = new ShieldedPoolModule(client);
     await mod.unshield(UNSHIELD_PARAMS, mockSigner);
     expect(client._txEntry).toHaveBeenCalledTimes(1);
   });
 
   it('calls signAndSubmit with the signer', async () => {
     const client = txClient('unshield');
-    const mod = new ShieldedPoolModule(client, mockMerkle);
+    const mod = new ShieldedPoolModule(client);
     await mod.unshield(UNSHIELD_PARAMS, mockSigner);
     expect(client._signAndSubmit).toHaveBeenCalledWith(mockSigner);
   });
 
   it('returns error info when tx fails', async () => {
     const client = txClient('unshield', FINALIZED_ERR);
-    const mod = new ShieldedPoolModule(client, mockMerkle);
+    const mod = new ShieldedPoolModule(client);
     const result = await mod.unshield(UNSHIELD_PARAMS, mockSigner);
     expect(result.ok).toBe(false);
     expect((result as { error?: string }).error).toBe('Module');
@@ -232,7 +215,7 @@ describe('ShieldedPoolModule.unshield', () => {
 
   it('throws when pallet is missing', async () => {
     const client = { request: vi.fn(), unsafe: { tx: {} } } as unknown as SubstrateClient;
-    const mod = new ShieldedPoolModule(client, mockMerkle);
+    const mod = new ShieldedPoolModule(client);
     await expect(mod.unshield(UNSHIELD_PARAMS, mockSigner)).rejects.toThrow(/shieldedPool/);
   });
 });
@@ -241,7 +224,7 @@ describe('ShieldedPoolModule.unshield', () => {
 
 describe('ShieldedPoolModule.privateTransfer', () => {
   it('returns a TxResult on success', async () => {
-    const mod = new ShieldedPoolModule(txClient('privateTransfer'), mockMerkle);
+    const mod = new ShieldedPoolModule(txClient('privateTransfer'));
     const result = await mod.privateTransfer(TRANSFER_PARAMS, mockSigner);
     expect(result.ok).toBe(true);
     expect(result.txHash).toBe('0xabc');
@@ -249,28 +232,28 @@ describe('ShieldedPoolModule.privateTransfer', () => {
 
   it('calls the privateTransfer tx entry exactly once', async () => {
     const client = txClient('privateTransfer');
-    const mod = new ShieldedPoolModule(client, mockMerkle);
+    const mod = new ShieldedPoolModule(client);
     await mod.privateTransfer(TRANSFER_PARAMS, mockSigner);
     expect(client._txEntry).toHaveBeenCalledTimes(1);
   });
 
   it('calls signAndSubmit with the signer', async () => {
     const client = txClient('privateTransfer');
-    const mod = new ShieldedPoolModule(client, mockMerkle);
+    const mod = new ShieldedPoolModule(client);
     await mod.privateTransfer(TRANSFER_PARAMS, mockSigner);
     expect(client._signAndSubmit).toHaveBeenCalledWith(mockSigner);
   });
 
   it('returns error info when tx fails', async () => {
     const client = txClient('privateTransfer', FINALIZED_ERR);
-    const mod = new ShieldedPoolModule(client, mockMerkle);
+    const mod = new ShieldedPoolModule(client);
     const result = await mod.privateTransfer(TRANSFER_PARAMS, mockSigner);
     expect(result.ok).toBe(false);
   });
 
   it('handles outputs without encryptedMemo (uses dummy)', async () => {
     const client = txClient('privateTransfer');
-    const mod = new ShieldedPoolModule(client, mockMerkle);
+    const mod = new ShieldedPoolModule(client);
     const params = {
       ...TRANSFER_PARAMS,
       outputs: [{ commitment: '0x' + 'ee'.repeat(32) }],
@@ -284,151 +267,101 @@ describe('ShieldedPoolModule.privateTransfer', () => {
       request: vi.fn(),
       unsafe: { tx: { shieldedPool: {} } },
     } as unknown as SubstrateClient;
-    const mod = new ShieldedPoolModule(client, mockMerkle);
+    const mod = new ShieldedPoolModule(client);
     await expect(mod.privateTransfer(TRANSFER_PARAMS, mockSigner)).rejects.toThrow(
       /Call "shieldedPool.privateTransfer" not found/
     );
   });
 });
 
-// ─── isNullifierSpent ─────────────────────────────────────────────────────────
+// ─── shieldBatch ──────────────────────────────────────────────────────────────
 
-describe('ShieldedPoolModule.isNullifierSpent', () => {
-  it('returns true when is_spent is true', async () => {
-    const mod = new ShieldedPoolModule(queryClient({ is_spent: true }), mockMerkle);
-    expect(await mod.isNullifierSpent('0xnull')).toBe(true);
+const BATCH_ITEM_A = {
+  assetId: 0,
+  amount: 100n,
+  commitment: '0x' + 'ab'.repeat(32),
+  encryptedMemo: new Uint8Array(104),
+};
+
+const BATCH_ITEM_B = {
+  assetId: 1,
+  amount: 200n,
+  commitment: '0x' + 'cd'.repeat(32),
+};
+
+describe('ShieldedPoolModule.shieldBatch', () => {
+  it('returns a TxResult on success', async () => {
+    const mod = new ShieldedPoolModule(txClient('shieldBatch'));
+    const result = await mod.shieldBatch({ items: [BATCH_ITEM_A] }, mockSigner);
+    expect(result.ok).toBe(true);
+    expect(result.txHash).toBe('0xabc');
+    expect(result.blockNumber).toBe(42);
   });
 
-  it('returns false when is_spent is false', async () => {
-    const mod = new ShieldedPoolModule(queryClient({ is_spent: false }), mockMerkle);
-    expect(await mod.isNullifierSpent('0xnull')).toBe(false);
+  it('calls the shieldBatch tx entry exactly once', async () => {
+    const client = txClient('shieldBatch');
+    const mod = new ShieldedPoolModule(client);
+    await mod.shieldBatch({ items: [BATCH_ITEM_A, BATCH_ITEM_B] }, mockSigner);
+    expect(client._txEntry).toHaveBeenCalledTimes(1);
   });
 
-  it('calls the correct RPC method with the nullifier hex', async () => {
-    const client = queryClient({ is_spent: false });
-    const mod = new ShieldedPoolModule(client, mockMerkle);
-    await mod.isNullifierSpent('0xdeadbeef');
-    expect(vi.mocked(client.request)).toHaveBeenCalledWith(
-      'privacy_getNullifierStatus',
-      ['0xdeadbeef'],
+  it('calls signAndSubmit with the signer', async () => {
+    const client = txClient('shieldBatch');
+    const mod = new ShieldedPoolModule(client);
+    await mod.shieldBatch({ items: [BATCH_ITEM_A] }, mockSigner);
+    expect(client._signAndSubmit).toHaveBeenCalledWith(mockSigner);
+  });
+
+  it('passes the correct number of operations to the tx entry', async () => {
+    const client = txClient('shieldBatch');
+    const mod = new ShieldedPoolModule(client);
+    await mod.shieldBatch({ items: [BATCH_ITEM_A, BATCH_ITEM_B] }, mockSigner);
+    const [ops] = client._txEntry.mock.calls[0] as [unknown[]];
+    expect(ops).toHaveLength(2);
+  });
+
+  it('converts amount to string for SCALE encoding', async () => {
+    const client = txClient('shieldBatch');
+    const mod = new ShieldedPoolModule(client);
+    await mod.shieldBatch({ items: [BATCH_ITEM_A] }, mockSigner);
+    const [ops] = client._txEntry.mock.calls[0] as [Array<{ amount: unknown }>];
+    expect(typeof ops[0]!.amount).toBe('string');
+    expect(ops[0]!.amount).toBe('100');
+  });
+
+  it('uses a dummy memo when encryptedMemo is omitted', async () => {
+    const client = txClient('shieldBatch');
+    const mod = new ShieldedPoolModule(client);
+    // BATCH_ITEM_B has no encryptedMemo — should succeed using dummy
+    const result = await mod.shieldBatch({ items: [BATCH_ITEM_B] }, mockSigner);
+    expect(result.ok).toBe(true);
+  });
+
+  it('returns error info when tx fails', async () => {
+    const client = txClient('shieldBatch', FINALIZED_ERR);
+    const mod = new ShieldedPoolModule(client);
+    const result = await mod.shieldBatch({ items: [BATCH_ITEM_A] }, mockSigner);
+    expect(result.ok).toBe(false);
+    expect((result as { error?: string }).error).toBe('Module');
+  });
+
+  it('throws when pallet is missing', async () => {
+    const client = { request: vi.fn(), unsafe: { tx: {} } } as unknown as SubstrateClient;
+    const mod = new ShieldedPoolModule(client);
+    await expect(mod.shieldBatch({ items: [BATCH_ITEM_A] }, mockSigner)).rejects.toThrow(
+      /Pallet "shieldedPool" not found/
     );
   });
 
-  it('propagates RPC errors', async () => {
-    const mod = new ShieldedPoolModule(failingQueryClient(), mockMerkle);
-    await expect(mod.isNullifierSpent('0x1')).rejects.toThrow('RPC error');
-  });
-});
-
-// ─── getNullifierStatus ───────────────────────────────────────────────────────
-
-describe('ShieldedPoolModule.getNullifierStatus', () => {
-  const RAW = { nullifier: '0xnull', is_spent: true };
-
-  it('returns NullifierStatus with camelCase fields', async () => {
-    const mod = new ShieldedPoolModule(queryClient(RAW), mockMerkle);
-    const status = await mod.getNullifierStatus('0xnull');
-    expect(status).toEqual({ nullifier: '0xnull', isSpent: true });
-  });
-
-  it('isSpent is false when not spent', async () => {
-    const mod = new ShieldedPoolModule(queryClient({ nullifier: '0xabc', is_spent: false }), mockMerkle);
-    const status = await mod.getNullifierStatus('0xabc');
-    expect(status.isSpent).toBe(false);
-  });
-
-  it('calls the correct RPC method', async () => {
-    const client = queryClient(RAW);
-    const mod = new ShieldedPoolModule(client, mockMerkle);
-    await mod.getNullifierStatus('0xnull');
-    expect(vi.mocked(client.request)).toHaveBeenCalledWith(
-      'privacy_getNullifierStatus',
-      ['0xnull'],
+  it('throws when call is missing', async () => {
+    const client = {
+      request: vi.fn(),
+      unsafe: { tx: { shieldedPool: {} } },
+    } as unknown as SubstrateClient;
+    const mod = new ShieldedPoolModule(client);
+    await expect(mod.shieldBatch({ items: [BATCH_ITEM_A] }, mockSigner)).rejects.toThrow(
+      /Call "shieldedPool.shieldBatch" not found/
     );
   });
 });
 
-// ─── getPoolBalance ───────────────────────────────────────────────────────────
-
-describe('ShieldedPoolModule.getPoolBalance', () => {
-  it('returns PoolBalance with BigInt balance from string', async () => {
-    const mod = new ShieldedPoolModule(queryClient({ balance: '5000' }), mockMerkle);
-    const result = await mod.getPoolBalance(0);
-    expect(result).toEqual({ assetId: 0, balance: 5000n });
-  });
-
-  it('returns PoolBalance with BigInt balance from number', async () => {
-    const mod = new ShieldedPoolModule(queryClient({ balance: 1234 }), mockMerkle);
-    const result = await mod.getPoolBalance(1);
-    expect(result).toEqual({ assetId: 1, balance: 1234n });
-  });
-
-  it('includes the correct assetId in the result', async () => {
-    const mod = new ShieldedPoolModule(queryClient({ balance: '0' }), mockMerkle);
-    const result = await mod.getPoolBalance(42);
-    expect(result.assetId).toBe(42);
-  });
-
-  it('calls the correct RPC method with the assetId', async () => {
-    const client = queryClient({ balance: '0' });
-    const mod = new ShieldedPoolModule(client, mockMerkle);
-    await mod.getPoolBalance(3);
-    expect(vi.mocked(client.request)).toHaveBeenCalledWith(
-      'shieldedPool_getPoolBalance',
-      [3],
-    );
-  });
-
-  it('propagates RPC errors', async () => {
-    const mod = new ShieldedPoolModule(failingQueryClient(), mockMerkle);
-    await expect(mod.getPoolBalance(0)).rejects.toThrow('RPC error');
-  });
-});
-
-// ─── getPoolStats ─────────────────────────────────────────────────────────────
-
-describe('ShieldedPoolModule.getPoolStats', () => {
-  const MOCK_TREE_INFO = { root: '0xabc', treeSize: 5, depth: 20 };
-
-  /** Merkle module stub that resolves to MOCK_TREE_INFO. */
-  function merkleWithInfo(): MerkleModule {
-    return {
-      getTreeInfo: vi.fn().mockResolvedValue(MOCK_TREE_INFO),
-    } as unknown as MerkleModule;
-  }
-
-  it('returns merkle and balance combined', async () => {
-    const mod = new ShieldedPoolModule(queryClient({ balance: '9000' }), merkleWithInfo());
-    const stats = await mod.getPoolStats(0);
-    expect(stats.merkle).toEqual(MOCK_TREE_INFO);
-    expect(stats.balance).toEqual({ assetId: 0, balance: 9000n });
-  });
-
-  it('defaults assetId to 0', async () => {
-    const client = queryClient({ balance: '1' });
-    const mod = new ShieldedPoolModule(client, merkleWithInfo());
-    const stats = await mod.getPoolStats();
-    expect(stats.balance.assetId).toBe(0);
-  });
-
-  it('passes custom assetId to getPoolBalance', async () => {
-    const client = queryClient({ balance: '1' });
-    const mod = new ShieldedPoolModule(client, merkleWithInfo());
-    const stats = await mod.getPoolStats(7);
-    expect(stats.balance.assetId).toBe(7);
-    expect(vi.mocked(client.request)).toHaveBeenCalledWith('shieldedPool_getPoolBalance', [7]);
-  });
-
-  it('propagates RPC errors from getPoolBalance', async () => {
-    const mod = new ShieldedPoolModule(failingQueryClient(), merkleWithInfo());
-    await expect(mod.getPoolStats()).rejects.toThrow('RPC error');
-  });
-
-  it('propagates errors from merkle.getTreeInfo', async () => {
-    const badMerkle = {
-      getTreeInfo: vi.fn().mockRejectedValue(new Error('Merkle error')),
-    } as unknown as MerkleModule;
-    const mod = new ShieldedPoolModule(queryClient({ balance: '1' }), badMerkle);
-    await expect(mod.getPoolStats()).rejects.toThrow('Merkle error');
-  });
-});

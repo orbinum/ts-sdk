@@ -3,8 +3,12 @@ import { ShieldedPoolPrecompile } from '../../src/precompiles/ShieldedPoolPrecom
 import { SP_SEL, PRECOMPILE_ADDR } from '../../src/precompiles/addresses';
 import { toHex } from '../../src/utils/hex';
 import type { EvmClient } from '../../src/evm/EvmClient';
-import type { EvmSigner } from '../../src/precompiles/ShieldedPoolPrecompile';
-import type { ShieldParams, UnshieldParams, PrivateTransferParams } from '../../src/types';
+import type { EvmSigner } from '../../src/precompiles/types';
+import type {
+  ShieldParams,
+  UnshieldParams,
+  PrivateTransferParams,
+} from '../../src/shielded-pool/types';
 
 // ─── Mock helpers ─────────────────────────────────────────────────────────────
 

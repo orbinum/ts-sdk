@@ -3,16 +3,7 @@ import { fromHex, ensureHexPrefix } from '../utils/hex';
 import { normalizeEvmAddress } from '../utils/address';
 import { encodeHex, hexToBytes, decodeAddress, decodeBool, decodeString } from './abi';
 import { PRECOMPILE_ADDR, AM_SEL } from './addresses';
-import type { EvmTxRequest, EvmSigner } from './ShieldedPoolPrecompile';
-
-// ─── Return types ─────────────────────────────────────────────────────────────
-
-export type ResolvedAlias = {
-    /** AccountId32 hex of the alias owner (as 0x-prefixed 20-byte EVM address). */
-    owner: string;
-    /** EVM address of the owner, or null if unset. */
-    evmAddress: string | null;
-};
+import type { EvmSigner, ResolvedAlias } from './types';
 
 // ─── AccountMappingPrecompile ─────────────────────────────────────────────────
 
@@ -298,10 +289,7 @@ export class AccountMappingPrecompile {
     /**
      * Updates the signer's public profile metadata.
      * Pass `null` for any field to leave it unchanged.
-     *
-     * Extrinsic: `accountMapping.setAccountMetadata(displayName, bio, avatar)`
-     */
-    async setAccountMetadata(
+    }
         displayName: string | null,
         bio: string | null,
         avatar: string | null,
@@ -330,5 +318,3 @@ export class AccountMappingPrecompile {
         return encodeHex(AM_SEL.MAP_ACCOUNT);
     }
 }
-
-export type { EvmTxRequest, EvmSigner };

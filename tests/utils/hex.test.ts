@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { toHex, fromHex, ensureHexPrefix, hexToNumber, hexToBigint } from '../../src/utils/hex';
+import * as publicIndex from '../../src/index';
 
 describe('toHex', () => {
   it('encodes empty array to "0x"', () => {
@@ -114,5 +115,19 @@ describe('hexToBigint', () => {
     const large = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
     const asHex = '0x' + large.toString(16);
     expect(hexToBigint(asHex)).toBe(large);
+  });
+});
+
+// ─── public re-exports (src/index.ts) ─────────────────────────────────────────
+
+describe('public index re-exports', () => {
+  it('exports hexToNumber', () => {
+    expect(typeof publicIndex.hexToNumber).toBe('function');
+    expect(publicIndex.hexToNumber('0x15')).toBe(21);
+  });
+
+  it('exports hexToBigint', () => {
+    expect(typeof publicIndex.hexToBigint).toBe('function');
+    expect(publicIndex.hexToBigint('0xde0b6b3a7640000')).toBe(1_000_000_000_000_000_000n);
   });
 });

@@ -17,16 +17,7 @@ import { poseidon2, poseidon4 } from 'poseidon-lite';
 import { EncryptedMemo } from './EncryptedMemo';
 import { fromHex, toHex } from '../utils/hex';
 import { bigintTo32Le, bytesToBigintLE } from '../utils/bytes';
-import type { ZkNote } from '../types';
-
-// ─── Public types ─────────────────────────────────────────────────────────────
-
-/** A single commitment record as returned by the indexer. */
-export interface ScanCommitment {
-    commitmentHex: string;
-    leafIndex: number;
-    encryptedMemo: string | null;
-}
+import type { ScanCommitment, ZkNote } from './types';
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 

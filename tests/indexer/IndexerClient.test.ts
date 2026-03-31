@@ -1,13 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { IndexerClient } from '../../src/indexer/IndexerClient';
 import type {
+    IndexedBlock,
+    IndexedEvmTx,
+    IndexedExtrinsic,
+    IndexerStats,
+    MerkleRoot,
+    PaginatedResult,
+    ShieldedAddressEvent,
     ShieldedCommitment,
     SpentNullifier,
     PrivateTransfer,
     Unshield,
-    MerkleRoot,
-    PaginatedResult,
-} from '../../src/indexer/IndexerClient';
+} from '../../src/indexer/types';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -273,5 +278,273 @@ describe('IndexerClient', () => {
     it('throws on non-ok, non-404 HTTP response', async () => {
         mockFetch({ error: 'Internal Server Error' }, 500);
         await expect(client.getCommitmentsCount()).rejects.toThrow('HTTP 500');
+    });
+
+    // ── getAddressExtrinsics ─────────────────────────────────────────────────
+
+    it('getAddressExtrinsics lowercases the address and returns paginated rows', async () => {
+        const row: IndexedExtrinsic = {
+            id: '1-0',
+            blockNumber: 1,
+            index: 0,
+            hash: '0xabc',
+            section: 'balances',
+            method: 'transferKeepAlive',
+            signer: '0xabc',
+            success: true,
+            feePaid: '1',
+            eventsJson: '[]',
+            argsJson: '{}',
+            timestampMs: 1000,
+        };
+        mockFetch({ data: [row], pagination: { page: 1, limit: 50, total: 1 } });
+
+        const result = await client.getAddressExtrinsics('0xABC', { limit: 50 });
+
+        expect(result.data).toEqual([row]);
+        expect(lastUrl()).toBe(`${BASE}/address/0xabc/extrinsics?limit=50`);
+    });
+
+    // ── getEvmTransactions ───────────────────────────────────────────────────
+
+    it('getEvmTransactions passes lowercased address and limit', async () => {
+        const row: IndexedEvmTx = {
+            hash: '0x1',
+            blockNumber: 1,
+            fromAddress: '0xabc',
+            toAddress: '0xdef',
+            value: '0',
+            gasUsed: 21000,
+            gasPrice: '1',
+            status: 1,
+            inputData: '0x',
+            nonce: 0,
+            transactionIndex: 0,
+            timestampMs: 1000,
+            evmBlockHash: '0xblock',
+        };
+        mockFetch({ data: [row], pagination: { page: 1, limit: 10, total: 1 } });
+
+        const result = await client.getEvmTransactions({ address: '0xABC', limit: 10 });
+
+        expect(result.data).toEqual([row]);
+        expect(lastUrl()).toBe(`${BASE}/evm/transactions?limit=10&address=0xabc`);
+    });
+
+    it('getEvmTransactionByHash returns null on 404', async () => {
+        mockFetch(null, 404);
+        const result = await client.getEvmTransactionByHash('0xABC');
+        expect(result).toBeNull();
+        expect(lastUrl()).toBe(`${BASE}/evm/transactions/0xabc`);
+    });
+
+    // ── getBlocks ────────────────────────────────────────────────────────────
+
+    it('getBlocks calls correct URL with no params', async () => {
+        mockFetch({ data: [], pagination: { page: 1, limit: 20, total: 0 } });
+        await client.getBlocks();
+        expect(lastUrl()).toBe(`${BASE}/blocks`);
+    });
+
+    it('getBlocks passes pagination params', async () => {
+        mockFetch({ data: [], pagination: { page: 2, limit: 10, total: 0 } });
+        await client.getBlocks({ page: 2, limit: 10 });
+        expect(lastUrl()).toBe(`${BASE}/blocks?page=2&limit=10`);
+    });
+
+    it('getBlocks returns paginated IndexedBlock array', async () => {
+        const block: IndexedBlock = {
+            number: 42,
+            hash: '0xblockhash',
+            parentHash: '0xparent',
+            extrinsicCount: 3,
+            evmTxCount: 0,
+            evmHash: null,
+            author: null,
+            timestampMs: 5000,
+        };
+        mockFetch({ data: [block], pagination: { page: 1, limit: 20, total: 1 } });
+        const result = await client.getBlocks();
+        expect(result.data).toHaveLength(1);
+        expect(result.data[0]!.number).toBe(42);
+    });
+
+    // ── getBlock ─────────────────────────────────────────────────────────────
+
+    it('getBlock returns block by number', async () => {
+        const block: IndexedBlock = {
+            number: 10,
+            hash: '0xhash10',
+            parentHash: '0xparent',
+            extrinsicCount: 1,
+            evmTxCount: 0,
+            evmHash: null,
+            author: null,
+            timestampMs: 1000,
+        };
+        mockFetch(block);
+        const result = await client.getBlock(10);
+        expect(result).not.toBeNull();
+        expect(result!.number).toBe(10);
+        expect(lastUrl()).toBe(`${BASE}/blocks/10`);
+    });
+
+    it('getBlock accepts string hash', async () => {
+        mockFetch({
+            number: 5, hash: '0xfoo', parentHash: '0xbar',
+            extrinsicCount: 0, evmTxCount: 0, evmHash: null, author: null, timestampMs: null,
+        });
+        await client.getBlock('0xfoo');
+        expect(lastUrl()).toBe(`${BASE}/blocks/0xfoo`);
+    });
+
+    it('getBlock returns null on 404', async () => {
+        mockFetch(null, 404);
+        const result = await client.getBlock(999);
+        expect(result).toBeNull();
+    });
+
+    // ── getAddressCommitments ────────────────────────────────────────────────
+
+    it('getAddressCommitments lowercases address and builds correct URL', async () => {
+        mockFetch({ data: [], pagination: { page: 1, limit: 20, total: 0 } });
+        await client.getAddressCommitments('0xABC');
+        expect(lastUrl()).toBe(`${BASE}/address/0xabc/shielded`);
+    });
+
+    it('getAddressCommitments passes pagination params', async () => {
+        mockFetch({ data: [], pagination: { page: 2, limit: 5, total: 0 } });
+        await client.getAddressCommitments('0xabc', { page: 2, limit: 5 });
+        expect(lastUrl()).toBe(`${BASE}/address/0xabc/shielded?page=2&limit=5`);
+    });
+
+    // ── getStats ─────────────────────────────────────────────────────────────
+
+    it('getStats returns indexer statistics', async () => {
+        const stats: IndexerStats = {
+            blocks: { indexed: 100, latest: 100, latestHash: '0xabc', latestTimestampMs: 1000 },
+            extrinsics: { total: 500 },
+            evm: { transactions: 200 },
+            shielded: { commitments: 50, spentNullifiers: 20, merkleRoot: '0xroot', treeSize: 64 },
+            zkVerifier: { total: 30, successful: 28 },
+        };
+        mockFetch(stats);
+        const result = await client.getStats();
+        expect(result.blocks.indexed).toBe(100);
+        expect(result.shielded.commitments).toBe(50);
+        expect(lastUrl()).toBe(`${BASE}/stats`);
+    });
+
+    // ── isHealthy ────────────────────────────────────────────────────────────
+
+    it('isHealthy returns true when /health responds ok', async () => {
+        mockFetch({}, 200);
+        const result = await client.isHealthy();
+        expect(result).toBe(true);
+    });
+
+    it('isHealthy returns false when /health responds with error status', async () => {
+        mockFetch({}, 503);
+        const result = await client.isHealthy();
+        expect(result).toBe(false);
+    });
+
+    it('isHealthy returns false when fetch throws', async () => {
+        vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network error')));
+        const result = await client.isHealthy();
+        expect(result).toBe(false);
+    });
+
+    // ── getAddressShieldedActivity ────────────────────────────────────────────
+
+    it('getAddressShieldedActivity calls correct URL with lowercase address', async () => {
+        mockFetch({ data: [], pagination: { page: 1, limit: 20, total: 0 } });
+        await client.getAddressShieldedActivity('0xABCDEF');
+        expect(lastUrl()).toBe(`${BASE}/shielded/address/0xabcdef`);
+    });
+
+    it('getAddressShieldedActivity passes page param', async () => {
+        mockFetch({ data: [], pagination: { page: 2, limit: 20, total: 0 } });
+        await client.getAddressShieldedActivity('0xabc', { page: 2 });
+        expect(lastUrl()).toBe(`${BASE}/shielded/address/0xabc?page=2`);
+    });
+
+    it('getAddressShieldedActivity passes limit param', async () => {
+        mockFetch({ data: [], pagination: { page: 1, limit: 5, total: 0 } });
+        await client.getAddressShieldedActivity('0xabc', { limit: 5 });
+        expect(lastUrl()).toBe(`${BASE}/shielded/address/0xabc?limit=5`);
+    });
+
+    it('getAddressShieldedActivity passes page and limit together', async () => {
+        mockFetch({ data: [], pagination: { page: 3, limit: 10, total: 0 } });
+        await client.getAddressShieldedActivity('0xabc', { page: 3, limit: 10 });
+        expect(lastUrl()).toBe(`${BASE}/shielded/address/0xabc?page=3&limit=10`);
+    });
+
+    it('getAddressShieldedActivity returns PaginatedResult<ShieldedAddressEvent>', async () => {
+        const commitment: ShieldedAddressEvent = {
+            kind: 'commitment',
+            commitmentHex: '0xc0ff',
+            blockNumber: 100,
+            extrinsicIndex: 1,
+            leafIndex: 5,
+            assetId: '0',
+            sender: '0xabc',
+            encryptedMemo: null,
+            timestampMs: 1_000_000,
+        };
+        const unshield: ShieldedAddressEvent = {
+            kind: 'unshield',
+            id: '100-2',
+            blockNumber: 100,
+            extrinsicIndex: 2,
+            nullifierHex: '0xabcd',
+            assetId: '0',
+            amount: '1000000000000',
+            recipient: '0xabc',
+            timestampMs: 1_000_001,
+        };
+        const transfer: ShieldedAddressEvent = {
+            kind: 'transfer',
+            id: '101-0',
+            blockNumber: 101,
+            extrinsicIndex: 0,
+            inputNullifiersJson: '["0xn1"]',
+            outputCommitmentsJson: '["0xc1"]',
+            leafIndicesJson: '[42]',
+            timestampMs: 1_000_002,
+        };
+        const payload: PaginatedResult<ShieldedAddressEvent> = {
+            data: [commitment, unshield, transfer],
+            pagination: { page: 1, limit: 20, total: 3 },
+        };
+        mockFetch(payload);
+        const result = await client.getAddressShieldedActivity('0xabc');
+        expect(result.data).toHaveLength(3);
+        expect(result.pagination.total).toBe(3);
+        expect(result.data[0]).toMatchObject({ kind: 'commitment', commitmentHex: '0xc0ff' });
+        expect(result.data[1]).toMatchObject({ kind: 'unshield', recipient: '0xabc' });
+        expect(result.data[2]).toMatchObject({ kind: 'transfer', blockNumber: 101 });
+    });
+
+    it('getAddressShieldedActivity encodes special chars in address', async () => {
+        mockFetch({ data: [], pagination: { page: 1, limit: 20, total: 0 } });
+        await client.getAddressShieldedActivity('5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY');
+        expect(lastUrl()).toContain('/shielded/address/');
+        expect(lastUrl()).not.toContain('GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY');
+    });
+
+    it('getAddressShieldedActivity throws on non-2xx response', async () => {
+        mockFetch({}, 500);
+        await expect(client.getAddressShieldedActivity('0xabc')).rejects.toThrow(
+            'IndexerClient: HTTP 500',
+        );
+    });
+
+    it('getAddressShieldedActivity returns empty data array when no activity', async () => {
+        mockFetch({ data: [], pagination: { page: 1, limit: 20, total: 0 } });
+        const result = await client.getAddressShieldedActivity('0xunknown');
+        expect(result.data).toEqual([]);
+        expect(result.pagination.total).toBe(0);
     });
 });

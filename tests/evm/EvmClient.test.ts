@@ -243,7 +243,6 @@ describe('EvmClient.getTransactionReceipt', () => {
       blockNumber: '0x1',
       status: '0x1',
     };
-    // getTransactionReceipt calls request<...> which throws on null — stub full chain
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -269,5 +268,17 @@ describe('EvmClient.getTransactionReceipt', () => {
     ) as { method: string; params: string[] };
     expect(body.method).toBe('eth_getTransactionReceipt');
     expect(body.params[0]).toBe('0xhash');
+  });
+
+  it('returns null for a pending transaction (result is null)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ jsonrpc: '2.0', id: 1, result: null }),
+      }),
+    );
+    const result = await new EvmClient('http://localhost').getTransactionReceipt('0xpending');
+    expect(result).toBeNull();
   });
 });
