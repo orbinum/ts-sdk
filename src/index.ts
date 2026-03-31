@@ -373,6 +373,11 @@ export type { PolkadotSigner } from 'polkadot-api';
 // Signers for Node.js (raw keypair testing)
 export { getPolkadotSigner } from 'polkadot-api/signer';
 // Signer bridge to @polkadot/extension-dapp (browser)
-export { getPolkadotSignerFromPjs } from 'polkadot-api/pjs-signer';
+export {
+    getPolkadotSignerFromPjs,
+    connectInjectedExtension,
+    getInjectedExtensions,
+} from 'polkadot-api/pjs-signer';
+export type { SignPayload, SignRaw } from 'polkadot-api/pjs-signer';
 // Ss58 address decoding
 export { getSs58AddressInfo } from 'polkadot-api';

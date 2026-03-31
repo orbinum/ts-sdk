@@ -5,6 +5,13 @@ All notable changes to the Orbinum TypeScript SDK will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-03-31
+
+### Added
+
+- **`connectInjectedExtension`**, **`getInjectedExtensions`** re-exported from `polkadot-api/pjs-signer` — consumers no longer need to install `polkadot-api` directly to use Substrate browser wallet extensions.
+- **`SignPayload`**, **`SignRaw`** types re-exported from `polkadot-api/pjs-signer`.
+
 ## [0.4.0] - 2026-03-31
 
 ### Added
