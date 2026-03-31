@@ -270,7 +270,7 @@ describe('SubstrateClient.blocks$', () => {
   it('delegates blocks$ to the underlying PolkadotClient', async () => {
     const fakeBlocks$ = { subscribe: vi.fn() };
     const { client, papi } = await makeClient();
-    (papi as unknown as Record<string, unknown>).blocks$ = fakeBlocks$;
+    (papi as unknown as Record<string, unknown>)['blocks$'] = fakeBlocks$;
     expect(client.blocks$).toBe(fakeBlocks$);
   });
 });
@@ -282,7 +282,7 @@ describe('SubstrateClient.getBlockHeader', () => {
     const fakeHeader = { number: 42, hash: '0xabc', parent: '0x000' };
     const mockGetBlockHeader = vi.fn().mockResolvedValue(fakeHeader);
     const { client, papi } = await makeClient();
-    (papi as unknown as Record<string, unknown>).getBlockHeader = mockGetBlockHeader;
+    (papi as unknown as Record<string, unknown>)['getBlockHeader'] = mockGetBlockHeader;
     const result = await client.getBlockHeader('best');
     expect(mockGetBlockHeader).toHaveBeenCalledWith('best');
     expect(result).toBe(fakeHeader);
@@ -499,8 +499,8 @@ describe('SubstrateClient.queryBlockEvents', () => {
 
     expect(result).not.toBeNull();
     expect(result).toHaveLength(1);
-    expect(result![0].event.section).toBe('shieldedPool');
-    expect(result![0].event.method).toBe('Shielded');
+    expect(result![0]!.event.section).toBe('shieldedPool');
+    expect(result![0]!.event.method).toBe('Shielded');
   });
 
   it('calls state_getStorage with the encoded key and blockHash', async () => {
@@ -612,8 +612,8 @@ describe('SubstrateClient.queryBlockEvents', () => {
     const result = await client.queryBlockEvents(BLOCK_HASH);
 
     expect(result).toHaveLength(3);
-    expect(result![1].event.section).toBe('balances');
-    expect(result![1].event.method).toBe('Transfer');
+    expect(result![1]!.event.section).toBe('balances');
+    expect(result![1]!.event.method).toBe('Transfer');
   });
 });
 
@@ -626,7 +626,7 @@ const toEventRecords = (d: unknown[]) =>
 describe('SubstrateClient._toEventRecords', () => {
   it('maps ApplyExtrinsic phase correctly', () => {
     const raw = [makeRawEvent('ApplyExtrinsic', 3, 'ShieldedPool', 'Shielded', {})];
-    const [rec] = toEventRecords(raw);
+    const rec = toEventRecords(raw)[0]!;
 
     expect(rec.phase.isApplyExtrinsic).toBe(true);
     expect(rec.phase.asApplyExtrinsic.toNumber()).toBe(3);
@@ -637,7 +637,7 @@ describe('SubstrateClient._toEventRecords', () => {
 
   it('maps non-ApplyExtrinsic phase correctly (Initialization)', () => {
     const raw = [makeRawEvent('Initialization', undefined, 'System', 'NewAccount', {})];
-    const [rec] = toEventRecords(raw);
+    const rec = toEventRecords(raw)[0]!;
 
     expect(rec.phase.isApplyExtrinsic).toBe(false);
     expect(rec.phase.asApplyExtrinsic.toNumber()).toBe(0);
@@ -645,19 +645,19 @@ describe('SubstrateClient._toEventRecords', () => {
 
   it('lowercases the first char of event.type to form section', () => {
     const raw = [makeRawEvent('ApplyExtrinsic', 0, 'AccountMapping', 'AliasRegistered', {})];
-    const [rec] = toEventRecords(raw);
+    const rec = toEventRecords(raw)[0]!;
     expect(rec.event.section).toBe('accountMapping');
   });
 
   it('preserves the method name as-is', () => {
     const raw = [makeRawEvent('ApplyExtrinsic', 0, 'ShieldedPool', 'Unshielded', {})];
-    const [rec] = toEventRecords(raw);
+    const rec = toEventRecords(raw)[0]!;
     expect(rec.event.method).toBe('Unshielded');
   });
 
   it('section stays unchanged when already lowercase', () => {
     const raw = [makeRawEvent('ApplyExtrinsic', 0, 'system', 'ExtrinsicFailed', {})];
-    const [rec] = toEventRecords(raw);
+    const rec = toEventRecords(raw)[0]!;
     expect(rec.event.section).toBe('system');
   });
 
@@ -679,8 +679,8 @@ describe('SubstrateClient._toEventRecords', () => {
     ];
     const result = toEventRecords(mixed as unknown[]);
     expect(result).toHaveLength(2);
-    expect(result[0].event.section).toBe('system');
-    expect(result[1].event.section).toBe('balances');
+    expect(result[0]!.event.section).toBe('system');
+    expect(result[1]!.event.section).toBe('balances');
   });
 
   it('asApplyExtrinsic.eq is index-specific per record', () => {
@@ -688,7 +688,7 @@ describe('SubstrateClient._toEventRecords', () => {
       makeRawEvent('ApplyExtrinsic', 2, 'System', 'ExtrinsicSuccess', {}),
       makeRawEvent('ApplyExtrinsic', 5, 'ShieldedPool', 'Shielded', {}),
     ];
-    const [r0, r1] = toEventRecords(raw);
+    const [r0, r1] = toEventRecords(raw) as [EventRecord, EventRecord];
     expect(r0.phase.asApplyExtrinsic.eq(2)).toBe(true);
     expect(r0.phase.asApplyExtrinsic.eq(5)).toBe(false);
     expect(r1.phase.asApplyExtrinsic.eq(5)).toBe(true);
@@ -705,21 +705,21 @@ describe('SubstrateClient._buildDataProxy', () => {
   it('wraps an array as an array-like with element accessors', () => {
     const proxy = buildDataProxy([42n, 'hello']);
     expect(proxy.length).toBe(2);
-    expect(proxy[0].toString()).toBe('42');
-    expect(proxy[1].toString()).toBe('hello');
+    expect(proxy[0]!.toString()).toBe('42');
+    expect(proxy[1]!.toString()).toBe('hello');
   });
 
   it('wraps an object using Object.values', () => {
     const proxy = buildDataProxy({ amount: 1000n, who: 'alice' });
     expect(proxy.length).toBe(2);
-    expect(proxy[0].toString()).toBe('1000');
-    expect(proxy[1].toString()).toBe('alice');
+    expect(proxy[0]!.toString()).toBe('1000');
+    expect(proxy[1]!.toString()).toBe('alice');
   });
 
   it('wraps a scalar value (non-array, non-object) as length-1', () => {
     const proxy = buildDataProxy(999n);
     expect(proxy.length).toBe(1);
-    expect(proxy[0].toString()).toBe('999');
+    expect(proxy[0]!.toString()).toBe('999');
   });
 
   it('toJSON on the proxy returns the jsonified value', () => {
@@ -736,13 +736,13 @@ describe('SubstrateClient._buildDataProxy', () => {
 
   it('bigint values serialize to string via toString()', () => {
     const proxy = buildDataProxy([1_000_000_000_000n]);
-    expect(proxy[0].toString()).toBe('1000000000000');
+    expect(proxy[0]!.toString()).toBe('1000000000000');
   });
 
   it('toJSON serializes bigint as string', () => {
     const proxy = buildDataProxy([999n]);
     const json = proxy.toJSON() as unknown[];
-    expect(json[0]).toBe('999');
+    expect(json[0]!).toBe('999');
   });
 
   it('null value is wrapped as scalar', () => {
@@ -752,8 +752,8 @@ describe('SubstrateClient._buildDataProxy', () => {
 
   it('element toJSON/toHuman are callable', () => {
     const proxy = buildDataProxy(['value']);
-    expect(() => proxy[0].toJSON()).not.toThrow();
-    expect(() => proxy[0].toHuman()).not.toThrow();
+    expect(() => proxy[0]!.toJSON()).not.toThrow();
+    expect(() => proxy[0]!.toHuman()).not.toThrow();
   });
 });
 

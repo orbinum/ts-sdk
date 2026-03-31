@@ -18,6 +18,7 @@ import { EncryptedMemo } from './EncryptedMemo';
 import { fromHex, toHex } from '../utils/hex';
 import { bigintTo32Le, bytesToBigintLE } from '../utils/bytes';
 import type { ScanCommitment, ZkNote } from './types';
+export type { ScanCommitment };
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
