@@ -59,7 +59,7 @@
   "dependencies": {
     "@noble/ciphers": "2.1.1",
     "@noble/hashes": "2.0.1",
-    "@orbinum/proof-generator": "file:../proof-generator",
+    "@orbinum/proof-generator": "3.6.0",
     "@polkadot-api/metadata-builders": "0.13.9",
     "@polkadot-api/substrate-bindings": "0.17.0",
     "@polkadot-api/tx-utils": "0.2.2",
