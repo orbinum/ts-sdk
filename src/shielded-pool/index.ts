@@ -1,6 +1,7 @@
-export { NoteBuilder } from './NoteBuilder';
-export { EncryptedMemo } from './EncryptedMemo';
-export { ShieldedPoolModule } from './ShieldedPoolModule';
+export { NoteBuilder } from './protocol/NoteBuilder';
+export { EncryptedMemo, ENCRYPTED_MEMO_SIZE } from './protocol/EncryptedMemo';
+export { serializeMemo } from './protocol/memo';
+export { ShieldedPoolModule } from './pallet/ShieldedPoolModule';
 export type {
     DecryptedMemo,
     MerkleTreeInfo,
@@ -8,27 +9,22 @@ export type {
     ShieldParams,
     ShieldBatchItem,
     ShieldBatchParams,
+    ClaimShieldedFeesParams,
     UnshieldParams,
     PrivateTransferInput,
     PrivateTransferOutput,
     PrivateTransferParams,
     NoteInput,
     ZkNote,
-    ShieldResult,
-} from './types';
-export { tryDecryptNote } from './NoteDecryptor';
+} from './protocol/types';
+export { tryDecryptNote, tryDecryptNoteVerbose, computeNullifier } from './protocol/NoteDecryptor';
+export { selectNotes, buildDummyTransferInput } from './protocol/coinSelection';
 export {
-    deriveViewingKey,
-    deriveOwnerPk,
-    deriveSpendingKeyMessage,
-    deriveSpendingKeyFromSignature,
-} from './PrivacyKeys';
-export { PrivacyKeyManager } from './PrivacyKeyManager';
-export {
-    deriveVaultKey,
-    encryptJson,
-    decryptJson,
-    vaultReplacer,
-    vaultReviver,
-} from './VaultCrypto';
-export { fromBase64, toBase64 } from './helpers';
+    generateDisclosureProof,
+    buildDisclosurePublicSignals,
+    deriveBabyJubjubKeypair,
+    decryptDisclosureSignals,
+    type DisclosureFlags,
+    type ArtifactProvider,
+    type DisclosureProofOutput,
+} from './protocol/disclosure';

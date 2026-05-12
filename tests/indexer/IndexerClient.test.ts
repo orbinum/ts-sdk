@@ -10,7 +10,7 @@ import type {
     ShieldedAddressEvent,
     ShieldedCommitment,
     SpentNullifier,
-    PrivateTransfer,
+    PrivateTransferTimestamp,
     Unshield,
 } from '../../src/indexer/types';
 
@@ -189,22 +189,50 @@ describe('IndexerClient', () => {
         expect(status.txType).toBeUndefined();
     });
 
-    // ── getTransfers ─────────────────────────────────────────────────────────
+    // ── getTransfersByNullifiers ──────────────────────────────────────────────
 
-    it('getTransfers calls correct URL', async () => {
-        const transfer: PrivateTransfer = {
-            id: '100-0',
+    it('getTransfersByNullifiers returns empty array for empty input', async () => {
+        const result = await client.getTransfersByNullifiers([]);
+        expect(result).toEqual([]);
+    });
+
+    it('getTransfersByNullifiers calls correct URL and returns PrivateTransferTimestamp', async () => {
+        const ts: PrivateTransferTimestamp = {
             blockNumber: 100,
             extrinsicIndex: 0,
-            inputNullifiersJson: '["0x01"]',
-            outputCommitmentsJson: '["0x02"]',
-            leafIndicesJson: '[5]',
+            hash: null,
             timestampMs: 3000,
         };
-        mockFetch({ data: [transfer], pagination: { page: 1, limit: 20, total: 1 } });
-        const result = await client.getTransfers();
-        expect(result.data[0]!.id).toBe('100-0');
-        expect(lastUrl()).toBe(`${BASE}/shielded/transfers`);
+        mockFetch({ data: [ts], total: 1 });
+        const result = await client.getTransfersByNullifiers(['0xnull1']);
+        expect(result).toHaveLength(1);
+        expect(result[0]!.blockNumber).toBe(100);
+        expect(result[0]).not.toHaveProperty('inputNullifiersJson');
+        expect(result[0]).not.toHaveProperty('outputCommitmentsJson');
+        expect(lastUrl()).toContain('/shielded/transfers/by-nullifiers');
+    });
+
+    // ── getTransfersByCommitments ─────────────────────────────────────────────
+
+    it('getTransfersByCommitments returns empty array for empty input', async () => {
+        const result = await client.getTransfersByCommitments([]);
+        expect(result).toEqual([]);
+    });
+
+    it('getTransfersByCommitments calls correct URL and returns PrivateTransferTimestamp', async () => {
+        const ts: PrivateTransferTimestamp = {
+            blockNumber: 200,
+            extrinsicIndex: 1,
+            hash: '0xabc',
+            timestampMs: null,
+        };
+        mockFetch({ data: [ts], total: 1 });
+        const result = await client.getTransfersByCommitments(['0xcomm1']);
+        expect(result).toHaveLength(1);
+        expect(result[0]!.blockNumber).toBe(200);
+        expect(result[0]).not.toHaveProperty('inputNullifiersJson');
+        expect(result[0]).not.toHaveProperty('outputCommitmentsJson');
+        expect(lastUrl()).toContain('/shielded/transfers/by-commitments');
     });
 
     // ── getUnshields ─────────────────────────────────────────────────────────
@@ -214,6 +242,7 @@ describe('IndexerClient', () => {
             id: '200-1',
             blockNumber: 200,
             extrinsicIndex: 1,
+            hash: null,
             nullifierHex: '0x03',
             assetId: '0',
             amount: '1000000',
@@ -498,6 +527,7 @@ describe('IndexerClient', () => {
             id: '100-2',
             blockNumber: 100,
             extrinsicIndex: 2,
+            hash: null,
             nullifierHex: '0xabcd',
             assetId: '0',
             amount: '1000000000000',
@@ -506,12 +536,9 @@ describe('IndexerClient', () => {
         };
         const transfer: ShieldedAddressEvent = {
             kind: 'transfer',
-            id: '101-0',
             blockNumber: 101,
             extrinsicIndex: 0,
-            inputNullifiersJson: '["0xn1"]',
-            outputCommitmentsJson: '["0xc1"]',
-            leafIndicesJson: '[42]',
+            hash: null,
             timestampMs: 1_000_002,
         };
         const payload: PaginatedResult<ShieldedAddressEvent> = {

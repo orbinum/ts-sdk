@@ -1,47 +1,50 @@
 import { describe, it, expect } from 'vitest';
 import {
-    deriveViewingKey,
+    deriveViewingSecretKey,
+    deriveViewingPublicKey,
     deriveOwnerPk,
     deriveSpendingKeyMessage,
     deriveSpendingKeyFromSignature,
-} from '../../src/shielded-pool/PrivacyKeys';
-import { BN254_R } from '../../src/shielded-pool/constants';
+    deriveMasterKeyBytes,
+} from '../../src/privacy-keys/PrivacyKeys';
+import { EncryptedMemo } from '../../src/shielded-pool/protocol/EncryptedMemo';
+import { BABYJUB_SUBORDER } from '../../src/utils/crypto-constants';
 
-// ─── deriveViewingKey ─────────────────────────────────────────────────────────
+// ─── deriveViewingSecretKey ──────────────────────────────────────────────────
 
-describe('deriveViewingKey', () => {
+describe('deriveViewingSecretKey', () => {
   it('returns a Uint8Array of exactly 32 bytes', () => {
-    const vk = deriveViewingKey(12345n);
+    const vk = deriveViewingSecretKey(12345n);
     expect(vk).toBeInstanceOf(Uint8Array);
     expect(vk).toHaveLength(32);
   });
 
   it('is deterministic — same input produces same output', () => {
     const sk = 9999999n;
-    const a = deriveViewingKey(sk);
-    const b = deriveViewingKey(sk);
+    const a = deriveViewingSecretKey(sk);
+    const b = deriveViewingSecretKey(sk);
     expect(a).toEqual(b);
   });
 
   it('different spending keys produce different viewing keys', () => {
-    const a = deriveViewingKey(1n);
-    const b = deriveViewingKey(2n);
+    const a = deriveViewingSecretKey(1n);
+    const b = deriveViewingSecretKey(2n);
     expect(a).not.toEqual(b);
   });
 
   it('works with spendingKey = 0n', () => {
-    const vk = deriveViewingKey(0n);
+    const vk = deriveViewingSecretKey(0n);
     expect(vk).toHaveLength(32);
   });
 
   it('works with a large spending key', () => {
     const large = 2n ** 200n - 1n;
-    const vk = deriveViewingKey(large);
+    const vk = deriveViewingSecretKey(large);
     expect(vk).toHaveLength(32);
   });
 
   it('output is not all zeros for a non-zero spending key', () => {
-    const vk = deriveViewingKey(1n);
+    const vk = deriveViewingSecretKey(1n);
     expect(vk.some((b) => b !== 0)).toBe(true);
   });
 });
@@ -121,10 +124,10 @@ describe('deriveSpendingKeyFromSignature', () => {
     expect(typeof sk).toBe('bigint');
   });
 
-  it('result is in range [1, BN254_R)', async () => {
+  it('result is in range [1, BABYJUB_SUBORDER)', async () => {
     const sk = await deriveSpendingKeyFromSignature(NON_ZERO_SIG, 1, '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
     expect(sk).toBeGreaterThanOrEqual(1n);
-    expect(sk).toBeLessThan(BN254_R);
+    expect(sk).toBeLessThan(BABYJUB_SUBORDER);
   });
 
   it('is deterministic — same inputs same output', async () => {
@@ -161,3 +164,127 @@ describe('deriveSpendingKeyFromSignature', () => {
     expect(withPrefix).toBe(withoutPrefix);
   });
 });
+
+// ─── deriveMasterKeyBytes ──────────────────────────────────────────────────────
+
+describe('deriveMasterKeyBytes', () => {
+  const ADDR = '0x1111111111111111111111111111111111111111';
+
+  it('returns a Uint8Array of exactly 32 bytes', async () => {
+    const mb = await deriveMasterKeyBytes(DUMMY_SIG, 1, ADDR);
+    expect(mb).toBeInstanceOf(Uint8Array);
+    expect(mb).toHaveLength(32);
+  });
+
+  it('is deterministic — same inputs produce same output', async () => {
+    const a = await deriveMasterKeyBytes(NON_ZERO_SIG, 1, ADDR);
+    const b = await deriveMasterKeyBytes(NON_ZERO_SIG, 1, ADDR);
+    expect(a).toEqual(b);
+  });
+
+  it('output is not all zeros for a non-zero signature', async () => {
+    const mb = await deriveMasterKeyBytes(NON_ZERO_SIG, 1, ADDR);
+    expect(mb.some((byte) => byte !== 0)).toBe(true);
+  });
+
+  it('different signatures produce different master bytes', async () => {
+    const sig2 = '0x' + 'cd'.repeat(65);
+    const a = await deriveMasterKeyBytes(NON_ZERO_SIG, 1, ADDR);
+    const b = await deriveMasterKeyBytes(sig2, 1, ADDR);
+    expect(a).not.toEqual(b);
+  });
+
+  it('different chainIds produce different master bytes', async () => {
+    const a = await deriveMasterKeyBytes(NON_ZERO_SIG, 1, ADDR);
+    const b = await deriveMasterKeyBytes(NON_ZERO_SIG, 42, ADDR);
+    expect(a).not.toEqual(b);
+  });
+
+  it('different addresses produce different master bytes', async () => {
+    const addr2 = '0x2222222222222222222222222222222222222222';
+    const a = await deriveMasterKeyBytes(NON_ZERO_SIG, 1, ADDR);
+    const b = await deriveMasterKeyBytes(NON_ZERO_SIG, 1, addr2);
+    expect(a).not.toEqual(b);
+  });
+
+  it('address is treated case-insensitively', async () => {
+    const a = await deriveMasterKeyBytes(NON_ZERO_SIG, 1, ADDR.toUpperCase());
+    const b = await deriveMasterKeyBytes(NON_ZERO_SIG, 1, ADDR.toLowerCase());
+    expect(a).toEqual(b);
+  });
+
+  it('accepts signature without 0x prefix', async () => {
+    const a = await deriveMasterKeyBytes(NON_ZERO_SIG, 1, ADDR);
+    const b = await deriveMasterKeyBytes(NON_ZERO_SIG.slice(2), 1, ADDR);
+    expect(a).toEqual(b);
+  });
+
+  it('master bytes differ from spendingKey scalar bytes (not identical output)', async () => {
+    const mb = await deriveMasterKeyBytes(NON_ZERO_SIG, 1, ADDR);
+    const sk = await deriveSpendingKeyFromSignature(NON_ZERO_SIG, 1, ADDR);
+    // sk = BigInt(mb) % BABYJUB_SUBORDER — the bigint representations differ
+    const skBigint = BigInt('0x' + Array.from(mb, (b) => b.toString(16).padStart(2, '0')).join('')) % BABYJUB_SUBORDER;
+    expect(sk).toBe(skBigint === 0n ? 1n : skBigint);
+  });
+});
+
+// ─── deriveViewingPublicKey ───────────────────────────────────────────────────
+
+describe('deriveViewingPublicKey', () => {
+  const ivsk = deriveViewingSecretKey(12345n);
+
+  it('returns a Uint8Array of exactly 32 bytes', () => {
+    const ivk = deriveViewingPublicKey(ivsk);
+    expect(ivk).toBeInstanceOf(Uint8Array);
+    expect(ivk).toHaveLength(32);
+  });
+
+  it('is deterministic — same ivsk produces same ivk', () => {
+    const a = deriveViewingPublicKey(ivsk);
+    const b = deriveViewingPublicKey(ivsk);
+    expect(a).toEqual(b);
+  });
+
+  it('different ivsk values produce different public keys', () => {
+    const ivsk2 = deriveViewingSecretKey(99999n);
+    const a = deriveViewingPublicKey(ivsk);
+    const b = deriveViewingPublicKey(ivsk2);
+    expect(a).not.toEqual(b);
+  });
+
+  it('output is not all zeros', () => {
+    const ivk = deriveViewingPublicKey(ivsk);
+    expect(ivk.some((b) => b !== 0)).toBe(true);
+  });
+
+  it('differs from the ivsk bytes (public key != private key)', () => {
+    const ivk = deriveViewingPublicKey(ivsk);
+    expect(ivk).not.toEqual(ivsk);
+  });
+
+  it('ivk es un punto BJJ válido (puede usarse en EncryptedMemo.encrypt)', () => {
+    const ivk = deriveViewingPublicKey(ivsk);
+    const commitment = new Uint8Array(32).fill(0x05);
+    // Si ivk es inválido, encrypt() lanza. Si es válido, devuelve 176 bytes.
+    const memo = EncryptedMemo.encrypt(1000n, new Uint8Array(32), new Uint8Array(32), 0, commitment, ivk);
+    expect(memo).toHaveLength(176);
+  });
+
+  it('end-to-end ECDH: memo cifrado con ivk es descifrable con ivsk', () => {
+    const ivk = deriveViewingPublicKey(ivsk);
+    const commitment = new Uint8Array(32).fill(0x06);
+    const memo = EncryptedMemo.encrypt(42000n, new Uint8Array(32), new Uint8Array(32), 1, commitment, ivk);
+    const result = EncryptedMemo.decrypt(memo, commitment, ivsk);
+    expect(result).not.toBeNull();
+    expect(result!.value).toBe(42000n);
+  });
+
+  it('seguridad ECDH: memo cifrado con ivk NO puede descifrarse con ivk solo', () => {
+    const ivk = deriveViewingPublicKey(ivsk);
+    const commitment = new Uint8Array(32).fill(0x07);
+    const memo = EncryptedMemo.encrypt(1n, new Uint8Array(32), new Uint8Array(32), 0, commitment, ivk);
+    // Intentar descifrar con la clave pública (no la secreta) debe fallar
+    expect(EncryptedMemo.decrypt(memo, commitment, ivk)).toBeNull();
+  });
+});
+

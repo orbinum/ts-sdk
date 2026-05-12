@@ -9,14 +9,15 @@ import type {
     RawTransferInput,
     RawTransferOutput,
     PrivateTransferArgs,
-} from '../../src/shielded-pool/types/pallet-extrinsics';
+} from '../../src/shielded-pool/pallet/extrinsics';
 import type {
     ShieldedEvent,
-    PrivateTransferEvent,
+    NullifiersSpentEvent,
+    CommitmentsInsertedEvent,
     UnshieldedEvent,
     MerkleRootUpdatedEvent,
     ShieldedPoolEvent,
-} from '../../src/shielded-pool/types/pallet-events';
+} from '../../src/shielded-pool/pallet/events';
 
 // ─── pallet-args structural tests ────────────────────────────────────────────
 
@@ -56,6 +57,8 @@ describe('pallet-args types', () => {
             assetId: 0,
             amount: 500n,
             recipient: '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
+            fee: 0n,
+            changeCommitment: new Array(32).fill(0),
         };
         expect(args.proof).toHaveLength(192);
         expect(typeof args.recipient).toBe('string');
@@ -76,6 +79,8 @@ describe('pallet-args types', () => {
             nullifiers: [input],
             outputs: [output],
             encryptedMemos: [new Array(104).fill(0)],
+            assetId: 0,
+            fee: 0n,
         };
         expect(args.nullifiers).toHaveLength(1);
         expect(args.outputs).toHaveLength(1);
@@ -96,24 +101,43 @@ describe('pallet-events types', () => {
         expect(ev.leafIndex).toBe(7);
     });
 
-    it('PrivateTransferEvent holds arrays', () => {
-        const ev: PrivateTransferEvent = {
+    it('NullifiersSpentEvent holds nullifiers array', () => {
+        const ev: NullifiersSpentEvent = {
             nullifiers: ['0x01', '0x02'],
+        };
+        expect(ev.nullifiers).toHaveLength(2);
+    });
+
+    it('CommitmentsInsertedEvent holds commitments, memos and indices', () => {
+        const ev: CommitmentsInsertedEvent = {
             commitments: ['0x03', '0x04'],
             encryptedMemos: ['0x05', '0x06'],
             leafIndices: [8, 9],
         };
-        expect(ev.nullifiers).toHaveLength(2);
+        expect(ev.commitments).toHaveLength(2);
         expect(ev.leafIndices).toEqual([8, 9]);
     });
 
-    it('UnshieldedEvent holds expected fields', () => {
+    it('UnshieldedEvent holds expected fields for total unshield', () => {
         const ev: UnshieldedEvent = {
             nullifier: '0x01',
             amount: 250n,
             recipient: '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
+            changeCommitment: null,
         };
         expect(ev.amount).toBe(250n);
+        expect(ev.changeCommitment).toBeNull();
+    });
+
+    it('UnshieldedEvent holds changeCommitment as hex string for partial unshield', () => {
+        const ev: UnshieldedEvent = {
+            nullifier: '0x01',
+            amount: 250n,
+            recipient: '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
+            changeCommitment: '0x' + 'ab'.repeat(32),
+        };
+        expect(typeof ev.changeCommitment).toBe('string');
+        expect(ev.changeCommitment).toMatch(/^0x[a-f0-9]{64}$/);
     });
 
     it('MerkleRootUpdatedEvent holds expected fields', () => {
@@ -142,26 +166,38 @@ describe('pallet-events types', () => {
         }
     });
 
-    it('ShieldedPoolEvent covers PrivateTransfer variant', () => {
+    it('ShieldedPoolEvent covers NullifiersSpent variant', () => {
         const event: ShieldedPoolEvent = {
-            type: 'PrivateTransfer',
+            type: 'NullifiersSpent',
             data: {
                 nullifiers: ['0x01'],
+            },
+        };
+        expect(event.type).toBe('NullifiersSpent');
+        if (event.type === 'NullifiersSpent') {
+            expect(event.data.nullifiers).toHaveLength(1);
+        }
+    });
+
+    it('ShieldedPoolEvent covers CommitmentsInserted variant', () => {
+        const event: ShieldedPoolEvent = {
+            type: 'CommitmentsInserted',
+            data: {
                 commitments: ['0x02'],
                 encryptedMemos: ['0x03'],
                 leafIndices: [1],
             },
         };
-        expect(event.type).toBe('PrivateTransfer');
-        if (event.type === 'PrivateTransfer') {
-            expect(event.data.nullifiers).toHaveLength(1);
+        expect(event.type).toBe('CommitmentsInserted');
+        if (event.type === 'CommitmentsInserted') {
+            expect(event.data.commitments).toHaveLength(1);
         }
     });
 
     it('ShieldedPoolEvent covers Unshielded variant', () => {
         const event: ShieldedPoolEvent = {
             type: 'Unshielded',
-            data: { nullifier: '0x01', amount: 10n, recipient: '0x02' },
+            data: { nullifier: '0x01', amount: 10n, recipient: '0x02', changeCommitment: null },
         };
         expect(event.type).toBe('Unshielded');
     });

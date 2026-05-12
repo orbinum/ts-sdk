@@ -19,8 +19,11 @@ export interface ShieldedEventData {
     index: number;
 }
 
-export interface PrivateTransferEventData {
+export interface NullifiersSpentEventData {
     nullifiers: string[];
+}
+
+export interface CommitmentsInsertedEventData {
     commitments: string[];
     memos: string[];
     indices: number[];
@@ -45,21 +48,18 @@ export interface AuditPolicySetData {
 }
 
 export interface DisclosureRequestedData {
-    requestor: string;
     target: string;
-    commitment: string;
-    reason?: string;
-}
-
-export interface DisclosureApprovedData {
-    who: string;
-    commitment: string;
     auditor: string;
+    commitment: string;
+    required_fields: { value: boolean; asset_id: boolean; owner: boolean };
+    auditor_bjj_pk_x: string;
+    auditor_bjj_pk_y: string;
 }
 
 export interface DisclosureRejectedData {
-    who: string;
+    target: string;
     auditor: string;
+    commitment: string;
     reason: string;
 }
 

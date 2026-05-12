@@ -425,3 +425,171 @@ describe('mapZkEventData — zk-verifier', () => {
         expect(result).toEqual({ circuit_id: 'transfer', version: 1 });
     });
 });
+
+// ─── mapZkEventData — disclosure events ──────────────────────────────────────
+
+describe('mapZkEventData — disclosure events (named keys)', () => {
+    it('maps Disclosed with auditor (named)', () => {
+        const result = mapZkEventData(
+            'disclosed',
+            named({ target: 'alice', auditor: 'bob', commitment: '0xabc', signals: '0xsig' }),
+        );
+        expect(result).toEqual({ target: 'alice', auditor: 'bob', commitment: '0xabc', signals: '0xsig' });
+    });
+
+    it('maps Disclosed without auditor (voluntary, null)', () => {
+        const result = mapZkEventData(
+            'Disclosed',
+            named({ target: 'alice', auditor: null, commitment: '0xabc', signals: '0xsig' }),
+        );
+        expect(result).toEqual({ target: 'alice', auditor: null, commitment: '0xabc', signals: '0xsig' });
+    });
+
+    it('maps Disclosed from positional keys', () => {
+        const result = mapZkEventData('disclosed', positional('alice', 'bob', '0xabc', '0xsig'));
+        expect(result).toEqual({ target: 'alice', auditor: 'bob', commitment: '0xabc', signals: '0xsig' });
+    });
+
+    it('maps DisclosureRequested (named)', () => {
+        const result = mapZkEventData(
+            'disclosureRequested',
+            named({ target: 'alice', auditor: 'bob', commitment: '0xc', required_fields: {}, auditor_bjj_pk_x: '0x1', auditor_bjj_pk_y: '0x2' }),
+        );
+        expect(result).toEqual({ target: 'alice', auditor: 'bob', commitment: '0xc', required_fields: {}, auditor_bjj_pk_x: '0x1', auditor_bjj_pk_y: '0x2' });
+    });
+
+    it('maps DisclosureRequested (positional)', () => {
+        const result = mapZkEventData(
+            'DisclosureRequested',
+            positional('alice', 'bob', '0xc', {}, '0x1', '0x2'),
+        );
+        expect(result).toEqual({ target: 'alice', auditor: 'bob', commitment: '0xc', required_fields: {}, auditor_bjj_pk_x: '0x1', auditor_bjj_pk_y: '0x2' });
+    });
+
+    it('maps DisclosureRejected (named)', () => {
+        const result = mapZkEventData(
+            'disclosureRejected',
+            named({ target: 'alice', auditor: 'bob', commitment: '0xc', reason: 'no thanks' }),
+        );
+        expect(result).toEqual({ target: 'alice', auditor: 'bob', commitment: '0xc', reason: 'no thanks' });
+    });
+
+    it('maps DisclosureRejected (positional)', () => {
+        const result = mapZkEventData(
+            'DisclosureRejected',
+            positional('alice', 'bob', '0xc', 'no thanks'),
+        );
+        expect(result).toEqual({ target: 'alice', auditor: 'bob', commitment: '0xc', reason: 'no thanks' });
+    });
+
+    it('maps DisclosureRequestExpired (named)', () => {
+        const result = mapZkEventData(
+            'disclosureRequestExpired',
+            named({ target: 'alice', auditor: 'bob' }),
+        );
+        expect(result).toEqual({ target: 'alice', auditor: 'bob' });
+    });
+
+    it('maps DisclosureRequestExpired (positional)', () => {
+        const result = mapZkEventData('disclosureRequestExpired', positional('alice', 'bob'));
+        expect(result).toEqual({ target: 'alice', auditor: 'bob' });
+    });
+
+    it('maps DisclosureRecordRevoked (named)', () => {
+        const result = mapZkEventData(
+            'disclosureRecordRevoked',
+            named({ who: 'alice', commitment: '0xdeadbeef' }),
+        );
+        expect(result).toEqual({ who: 'alice', commitment: '0xdeadbeef' });
+    });
+
+    it('maps DisclosureRecordRevoked (positional)', () => {
+        const result = mapZkEventData(
+            'DisclosureRecordRevoked',
+            positional('alice', '0xdeadbeef'),
+        );
+        expect(result).toEqual({ who: 'alice', commitment: '0xdeadbeef' });
+    });
+});
+
+// ─── mapExtrinsicArgs — shieldedpool disclosure calls ────────────────────────
+
+describe('mapExtrinsicArgs — shieldedpool disclosure calls', () => {
+    it('maps set_audit_policy (named)', () => {
+        const result = mapExtrinsicArgs(
+            'shieldedpool',
+            'setauditpolicy',
+            named({ auditors: ['bob'], conditions: ['Always'], max_frequency: 5, valid_until: 1000 }),
+        );
+        expect(result).toEqual({
+            auditors: ['bob'],
+            conditions: ['Always'],
+            max_frequency: 5,
+            valid_until: 1000,
+        });
+    });
+
+    it('maps request_disclosure (positional)', () => {
+        const result = mapExtrinsicArgs(
+            'shieldedpool',
+            'request_disclosure',
+            positional('alice', '0xcommit', {}, 'KYC check', '0x1', '0x2'),
+        );
+        expect(result).toEqual({ target: 'alice', commitment: '0xcommit', required_fields: {}, reason: 'KYC check', auditor_bjj_pk_x: '0x1', auditor_bjj_pk_y: '0x2' });
+    });
+
+    it('maps disclose (named)', () => {
+        const result = mapExtrinsicArgs(
+            'shieldedpool',
+            'disclose',
+            named({
+                commitment: '0xabc',
+                proof_bytes: '0xproof',
+                public_signals: '0xsigs',
+                auditor: 'bob',
+            }),
+        );
+        expect(result).toEqual({
+            commitment: '0xabc',
+            proof_bytes: '0xproof',
+            public_signals: '0xsigs',
+            auditor: 'bob',
+        });
+    });
+
+    it('maps reject_disclosure (positional)', () => {
+        const result = mapExtrinsicArgs(
+            'shieldedpool',
+            'reject_disclosure',
+            positional('bob', '0xcommit', 'no'),
+        );
+        expect(result).toEqual({ auditor: 'bob', commitment: '0xcommit', reason: 'no' });
+    });
+
+    it('maps prune_expired_request (named)', () => {
+        const result = mapExtrinsicArgs(
+            'shieldedpool',
+            'prune_expired_request',
+            named({ target: 'alice', auditor: 'bob' }),
+        );
+        expect(result).toEqual({ target: 'alice', auditor: 'bob' });
+    });
+
+    it('maps revoke_disclosure_record (named)', () => {
+        const result = mapExtrinsicArgs(
+            'shieldedpool',
+            'revoke_disclosure_record',
+            named({ commitment: '0xdeadbeef' }),
+        );
+        expect(result).toEqual({ commitment: '0xdeadbeef' });
+    });
+
+    it('maps batch_submit_disclosure_proofs (named)', () => {
+        const result = mapExtrinsicArgs(
+            'shieldedpool',
+            'batch_submit_disclosure_proofs',
+            named({ submissions: [{ commitment: '0xabc' }] }),
+        );
+        expect(result).toEqual({ submissions: [{ commitment: '0xabc' }] });
+    });
+});

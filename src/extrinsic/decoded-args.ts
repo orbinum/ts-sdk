@@ -52,34 +52,25 @@ export interface DecodedSetAuditPolicyArgs {
 
 export interface DecodedRequestDisclosureArgs {
     target: string;
-    reason: string;
-    evidence?: string;
-}
-
-export interface DecodedApproveDisclosureArgs {
-    auditor: string;
     commitment: string;
-    proof: string;
-    public_signals: string[];
-    extra_data: unknown;
+    required_fields: { value: boolean; asset_id: boolean; owner: boolean };
+    reason: string;
+    auditor_bjj_pk_x: string;
+    auditor_bjj_pk_y: string;
 }
 
 export interface DecodedRejectDisclosureArgs {
     auditor: string;
+    commitment: string;
     reason: string;
 }
 
 export interface DecodedSubmitDisclosureArgs {
     commitment: string;
-    proof: string;
-    public_signals: string[];
-    partial_data: unknown;
+    proof_bytes: string;
+    /** 256-byte ECDH public signals (hex). */
+    public_signals: string;
     auditor: string;
-}
-
-export interface DecodedBatchSubmitDisclosureArgs {
-    count: number;
-    submissions: DecodedSubmitDisclosureArgs[];
 }
 
 // ── pallet-balances ────────────────────────────────────────────────────────

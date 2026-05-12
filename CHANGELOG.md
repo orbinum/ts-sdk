@@ -5,6 +5,64 @@ All notable changes to the Orbinum TypeScript SDK will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-05-12
+
+### Added
+
+- **`vault/`** — AES-GCM-256 encrypted note vault primitives:
+  - `deriveVaultKey(masterBytes)`: HKDF-SHA-256 key derivation from 32-byte master material. Key is stable across circuit field changes — derived before modular reduction.
+  - `encryptJson(key, payload)` / `decryptJson(key, iv, ciphertext)`: WebCrypto AES-GCM encrypt/decrypt with bigint-safe JSON serialisation.
+  - `encryptNote(key, note)` / `decryptNoteRecord(key, record)`: per-note encrypt/decrypt returning `EncryptedNoteRecord`.
+  - `applyNoteStatus(record, update)`: applies a `NoteStatusUpdate` without re-encrypting the full payload.
+  - `VaultLockedError`: typed error thrown when vault operations are attempted without an unlocked key.
+  - Types: `EncryptedNoteRecord`, `NoteStatusUpdate`.
+  - `vaultReplacer` / `vaultReviver`: bigint-safe JSON replacer and reviver for vault serialisation.
+
+- **`proof-generator/`** — ZK proof generation wrappers delegating to `@orbinum/proof-generator`:
+  - `generateUnshieldProof(inputs, provider)`: builds a Groth16 unshield proof. Inputs: `merkleRoot`, `nullifier`, `amount`, `assetId`, `recipient`, `blinding`, `spendingKey`, `pathSiblings`, `leafIndex`, and optional `fee`, `changeValue`, `changeBlinding`, `changeOwnerPk`. Returns `UnshieldProofResult` with `proof`, `publicSignals`, and `changeCommitment`.
+  - `generateTransferProof(inputs, provider)`: builds a Groth16 private-transfer proof for exactly 2 inputs and 2 outputs. Inputs: `merkleRoot`, typed `TransferInputNote[2]`, `TransferOutputNote[2]`, and optional `fee`.
+  - `generateFeeClaimProof(inputs, provider)`: builds a Groth16 fee-claim proof for `claimShieldedFees`. Returns `FeeClaimProofOutput` with a 128-byte `proof` hex and 76-byte `publicSignals` buffer.
+  - `merkleProofToCircuit(pathSiblings, leafIndex, depth)`: adapts indexer Merkle proof data to the circuit's expected format.
+  - `CircuitType`, `WebArtifactProvider`: re-exported from `@orbinum/proof-generator` for consumers that do not install the package directly.
+  - Types: `ArtifactProvider`, `ProofResult`, `UnshieldProofInputs`, `UnshieldProofResult`, `TransferInputNote`, `TransferOutputNote`, `PrivateTransferProofInputs`, `FeeClaimProofInputs`, `FeeClaimProofOutput`.
+
+- **`relayer/`** — Typed client for relayer registry JSON-RPC endpoints:
+  - `RelayerStatusModule.isRelayer(ss58)`: returns whether an account is a registered relayer.
+  - `RelayerStatusModule.pendingFees(ss58, assetId)`: returns pending relayer fees as `bigint`.
+  - `RelayerStatusModule.registeredEvmAddress(ss58)`: returns the registered EVM address or `null`.
+  - `RelayerStatusModule.getRelayerInfo(ss58)`: convenience wrapper returning a `RelayerInfo` object.
+  - Type: `RelayerInfo`.
+
+- **`shielded-pool/pallet/`** — High-level Substrate pallet transaction module:
+  - `ShieldedPoolModule`: high-level class for all shielded-pool extrinsics, built on polkadot-api UnsafeApi:
+    - `shield(params, signer)`: deposits tokens into the shielded pool (signed tx).
+    - `unshield(params, signer?)`: withdraws tokens via ZK proof — submitted as unsigned (gasless) if no signer is provided.
+    - `privateTransfer(params, signer?)`: private transfer between two shielded addresses (unsigned gasless).
+    - `shieldBatch(params, signer)`: batch shield operation for multiple commitments.
+    - `claimShieldedFees(params, signer)`: claims accumulated relayer fees from the pool.
+    - Disclosure extrinsics: `requestDisclosure()`, `disclose()`, `rejectDisclosure()`, `pruneExpiredRequest()`, `revokeDisclosureRecord()`.
+  - Pallet event and extrinsic type re-exports via `shielded-pool/pallet/index.ts`.
+
+- **`shielded-pool/protocol/`** — Off-chain cryptographic protocol primitives:
+  - `NoteBuilder.build(input)`: constructs a `ZkNote` (commitment + nullifier + encrypted memo) from value, assetId, ownerPk, and optional viewing key. Supports stealth addresses: when `viewingPublicKey` and `recipientOwnerPk` are provided, generates a per-note `stealthOwnerPk` so notes are unlinkable across transfers. Hash scheme: `commitment = Poseidon4(value, assetId, ownerPk, blinding)`, `nullifier = Poseidon2(commitment, spendingKey)`.
+  - `tryDecryptNote(commitment, viewingSecretKey, spendingKey, ownOwnerPk)`: attempts to decrypt an on-chain commitment. Returns a `ZkNote` on success, `null` on key mismatch or commitment failure.
+  - `tryDecryptNoteVerbose(...)`: like `tryDecryptNote` but additionally returns a human-readable `reason` string for failed decryptions.
+  - `computeNullifier(commitment, spendingKey)`: computes `Poseidon2(commitment, spendingKey)`.
+  - `EncryptedMemo`: 168-byte ChaCha20-Poly1305 encrypted memo with ECDH ephemeral key. `EncryptedMemo.encrypt(payload, viewingPublicKey, commitment)` and `EncryptedMemo.decrypt(bytes, viewingSecretKey, commitment)`. Constant `ENCRYPTED_MEMO_SIZE = 168`.
+  - `selectNotes(notes, needed)`: greedy note selection — single note first, then smallest qualifying pair. Returns `null` if no combination covers `needed`.
+  - `buildDummyTransferInput(assetId)`: builds a zero-value dummy `TransferInputNote` for the second slot in single-note transfers (circuit-level dummy exemption).
+  - `generateDisclosureProof`, `deriveBabyJubjubKeypair(substrateSigningKey)`, `decryptDisclosure(publicSignals, auditorSk)`: selective disclosure utilities for auditor workflows.
+  - Types: `ZkNote`, `ScanCommitment`, `DecryptedMemo`, `MerkleTreeInfo`, `ShieldParams`, `UnshieldParams`, `PrivateTransferParams`, `PrivateTransferInput`, `PrivateTransferOutput`, `ShieldBatchParams`, `ClaimShieldedFeesParams`, `NoteInput`, `DisclosureFlags`.
+
+- **New utility functions in `utils/`:**
+  - `bjj.ts` — `recoverOwnerPkPoint(ownerPkAx)`: recovers the Baby JubJub `[Ax, Ay]` point from the Ax coordinate alone using the Tonelli-Shanks modular square-root algorithm and the twisted Edwards curve equation. Needed for stealth key derivation when only Ax is stored on-chain.
+  - `blinding.ts` — `randomBlinding()`: generates a cryptographically random Poseidon blinding factor in `[1, BN254_R)` using `crypto.getRandomValues`.
+  - `crypto-constants.ts` — exports `BABYJUB_SUBORDER` and `BN254_R` BN254 field and subgroup order constants.
+  - `encoding.ts` — `toBase64(buf)` / `fromBase64(b64)`: pure browser/Node base-64 encode/decode without external dependencies.
+  - `stealth.ts` — `deriveStealthOwnerPk(sharedSecret, ownerPkBigint, ownerPkPoint)`: derives the per-note stealth public key for a recipient note (sender side). `deriveStealthSk(sharedSecret, ownerPkBigint, spendingKey)`: derives the stealth spending key for a received note (recipient side). Scheme: `HKDF-SHA256(sharedSecret, salt=ownerPk_LE, info="orbinum-stealth-v1") % BABYJUB_SUBORDER`.
+
+- **New tests** for all added modules: `proof-generator/` (unshield, transfer, merkle, fee-claim), `shielded-pool/` (coinSelection, disclosure, helpers, stealth-integration), and `vault/` (noteOps, errors).
+
 ## [0.4.2] - 2026-03-31
 
 ### Fixed

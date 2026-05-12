@@ -70,6 +70,7 @@ describe('PrivacyModule.getPoolStats', () => {
             privacy_getPoolStats: {
                 merkle_root: '0xroot',
                 commitment_count: 12,
+                nullifier_count: 7,
                 total_balance: '1000000000000000000',
                 asset_balances: [
                     { asset_id: 0, balance: '900000000000000000' },
@@ -82,6 +83,7 @@ describe('PrivacyModule.getPoolStats', () => {
         expect(stats).toEqual({
             merkleRoot: '0xroot',
             commitmentCount: 12,
+            nullifierCount: 7,
             totalBalance: '1000000000000000000',
             assetBalances: [
                 { assetId: 0, balance: '900000000000000000' },
@@ -91,29 +93,43 @@ describe('PrivacyModule.getPoolStats', () => {
         });
         expect(substrate.request).toHaveBeenCalledWith('privacy_getPoolStats', []);
     });
+
+    it('exposes nullifierCount for active-notes estimation', async () => {
+        const substrate = makeSubstrate({
+            privacy_getPoolStats: {
+                merkle_root: '0xroot',
+                commitment_count: 20,
+                nullifier_count: 8,
+                total_balance: 0,
+                asset_balances: [],
+                tree_depth: 20,
+            },
+        });
+        const stats = await new PrivacyModule(substrate).getPoolStats();
+        expect(stats.nullifierCount).toBe(8);
+        expect(stats.commitmentCount - stats.nullifierCount).toBe(12); // estimated active notes
+    });
 });
 
 describe('PrivacyModule.getMerkleProofByCommitment', () => {
-    it('llama a getMerkleProof con el commitment hex y getMerkleRoot en paralelo', async () => {
+    it('usa privacy_getMerkleProofByCommitment para garantizar root y path atómicos', async () => {
         const substrate = makeSubstrate({
-            privacy_getMerkleRoot: '0xcurrentroot',
-            privacy_getMerkleProof: { path: ['0xaa', '0xbb'], leaf_index: 3, tree_depth: 32 },
+            privacy_getMerkleProofByCommitment: { root: '0xcurrentroot', path: ['0xaa', '0xbb'], leaf_index: 3, tree_depth: 20 },
         });
         const proof = await new PrivacyModule(substrate).getMerkleProofByCommitment('0xdeadbeef');
         expect(proof).toEqual({
             path: ['0xaa', '0xbb'],
             leafIndex: 3,
-            treeDepth: 32,
+            treeDepth: 20,
             root: '0xcurrentroot',
         });
-        expect(substrate.request).toHaveBeenCalledWith('privacy_getMerkleProof', ['0xdeadbeef']);
-        expect(substrate.request).toHaveBeenCalledWith('privacy_getMerkleRoot', []);
+        expect(substrate.request).toHaveBeenCalledWith('privacy_getMerkleProofByCommitment', ['0xdeadbeef']);
+        expect(substrate.request).not.toHaveBeenCalledWith('privacy_getMerkleRoot', []);
     });
 
-    it('incluye root en el resultado aunque proof no lo contenga nativamente', async () => {
+    it('incluye root en el resultado tomado del mismo endpoint atómico', async () => {
         const substrate = makeSubstrate({
-            privacy_getMerkleRoot: '0xabcdef',
-            privacy_getMerkleProof: { path: [], leaf_index: 0, tree_depth: 16 },
+            privacy_getMerkleProofByCommitment: { root: '0xabcdef', path: [], leaf_index: 0, tree_depth: 20 },
         });
         const proof = await new PrivacyModule(substrate).getMerkleProofByCommitment('0x01');
         expect(proof.root).toBe('0xabcdef');

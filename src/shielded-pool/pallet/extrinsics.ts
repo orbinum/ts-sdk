@@ -18,10 +18,48 @@
 export type Bytes32 = number[];
 
 /**
- * Structured disclosure public signals — exactly 76 bytes:
- *   commitment[0..32] | revealed_value[32..40] | revealed_asset_id[40..44] | owner_hash[44..76]
+ * 176-byte encrypted memo (ChaCha20-Poly1305 ECDH).
+ * Layout: nonce(12) || ciphertext(132) || tag(16) || ephPk(32) = 176 bytes.
+ */
+export type Bytes176 = number[];
+
+/**
+ * Disclosure public signals — exactly 256 bytes (ECDH Baby Jubjub layout):
+ *   commitment[0..32] | auditor_pk_x[32..64] | auditor_pk_y[64..96]
+ *   | epk_x[96..128] | epk_y[128..160] | enc_value[160..192]
+ *   | enc_asset_id[192..224] | enc_owner_hash[224..256]
  */
 export type DisclosurePublicSignals = number[];
+
+/**
+ * ECDH-encrypted note fields stored on-chain after a successful disclosure.
+ * Maps to `EncryptedDisclosureSignals` in Rust.
+ */
+export type EncryptedDisclosureSignals = {
+    /** Ephemeral public key x-coordinate (Baby Jubjub), 32 bytes LE. */
+    epkX: number[];
+    /** Ephemeral public key y-coordinate (Baby Jubjub), 32 bytes LE. */
+    epkY: number[];
+    /** Encrypted note value (field element LE). 0 if not disclosed. */
+    encValue: number[];
+    /** Encrypted asset ID (field element LE). 0 if not disclosed. */
+    encAssetId: number[];
+    /** Encrypted Poseidon(owner_pubkey) (field element LE). 0 if not disclosed. */
+    encOwnerHash: number[];
+};
+
+/**
+ * Bitmap of which note fields the auditor requires to be disclosed.
+ * Maps to `DisclosureFieldMask` in Rust.
+ */
+export type DisclosureFieldMask = {
+    /** Must disclose the note value (amount in planck). */
+    value: boolean;
+    /** Must disclose the asset ID. */
+    assetId: boolean;
+    /** Must disclose Poseidon(owner_pubkey). */
+    owner: boolean;
+};
 
 // ─── Supporting types ─────────────────────────────────────────────────────────
 
@@ -37,13 +75,12 @@ export type Auditor = {
 /**
  * A condition that must be satisfied before disclosure is permitted.
  * Maps to `DisclosureCondition` in Rust. Max 10 conditions per policy.
+ * Evaluation is OR — a single satisfied condition is enough.
  */
 export type DisclosureCondition =
-    | { type: 'MinValue'; value: bigint }
-    | { type: 'MaxValue'; value: bigint }
-    | { type: 'AssetId'; assetId: number }
-    | { type: 'RecipientIs'; recipient: string }
-    | { type: 'Custom'; encoded: number[] };
+    | { type: 'Always' }
+    | { type: 'TimeDelay'; afterBlock: number }
+    | { type: 'AmountThreshold'; minAmount: bigint };
 
 /**
  * A single entry in a batch disclosure proof submission.
@@ -112,9 +149,10 @@ export type RawTransferOutput = {
 };
 
 /**
- * Call index 1 — `private_transfer` (Signed origin)
+ * Call index 1 — `private_transfer` (Unsigned/gasless origin)
  * Transfers value between notes without revealing sender, recipient or amount.
- * Accepts 1–2 inputs and 1–2 outputs; total input value must equal total output value.
+ * Fee is embedded in the ZK proof: input_sum == output_sum + fee.
+ * The fee is paid to the block author (validator) by the pallet runtime.
  */
 export type PrivateTransferArgs = {
     /** Groth16 proof bytes — max 512 bytes. */
@@ -124,11 +162,16 @@ export type PrivateTransferArgs = {
     nullifiers: RawTransferInput[];
     outputs: RawTransferOutput[];
     encryptedMemos: number[][];
+    /** Asset ID being transferred (public input of the proof). */
+    assetId: number;
+    /** Gasless fee in planck. Paid to the block author (validator). */
+    fee: bigint;
 };
 
 /**
- * Call index 2 — `unshield` (Signed origin)
+ * Call index 2 — `unshield` (Unsigned/gasless origin)
  * Withdraws a note from the pool to a public account.
+ * Fee is embedded in the ZK proof: note_value == amount + fee + changeValue.
  */
 export type UnshieldArgs = {
     /** Groth16 proof bytes — max 512 bytes. */
@@ -138,9 +181,23 @@ export type UnshieldArgs = {
     /** 32-byte nullifier of the spent note (LE). */
     nullifier: Bytes32;
     assetId: number;
+    /** Net amount recipient receives (planck). */
     amount: bigint;
     /** SS58 or 0x-prefixed AccountId of the recipient. */
     recipient: string;
+    /** Gasless fee in planck. */
+    fee: bigint;
+    /**
+     * 32-byte change note commitment (LE). All zeros for total unshield.
+     * Must equal NoteCommitment(changeValue, assetId, changeOwnerPk, changeBlinding)
+     * when changeValue > 0 — enforced by the ZK circuit.
+     */
+    changeCommitment: Bytes32;
+    /**
+     * Encrypted memo for the change note (176 bytes, empty for total unshield).
+     * Enables note recovery via blockchain scan for partial unshield.
+     */
+    changeEncryptedMemo?: Bytes176;
 };
 
 /**
@@ -160,13 +217,21 @@ export type SetAuditPolicyArgs = {
 
 /**
  * Call index 5 — `request_disclosure` (Signed origin)
- * Auditor requests selective disclosure from a target account.
+ * Auditor requests selective disclosure from a target account for a specific commitment.
  */
 export type RequestDisclosureArgs = {
     /** AccountId of the disclosure target. */
     target: string;
+    /** 32-byte commitment the auditor wants disclosed (LE). */
+    commitment: number[];
+    /** Which note fields must be revealed. */
+    requiredFields: DisclosureFieldMask;
     /** Human-readable request reason — max 256 bytes UTF-8. */
     reason: string;
+    /** Auditor's Baby Jubjub public key x-coordinate (32 bytes LE). */
+    auditorBjjPkX: number[];
+    /** Auditor's Baby Jubjub public key y-coordinate (32 bytes LE). */
+    auditorBjjPkY: number[];
 };
 
 /**
@@ -176,21 +241,29 @@ export type RequestDisclosureArgs = {
 export type DiscloseArgs = {
     /** 32-byte note commitment to disclose (LE). */
     commitment: Bytes32;
-    /** Groth16 proof bytes — max 256 bytes. */
+    /** Groth16 proof bytes — max 128 bytes. */
     proofBytes: number[];
-    /** 76-byte public signals: commitment(32) | value(8) | asset_id(4) | owner_hash(32). */
+    /**
+     * 256-byte public signals (ECDH Baby Jubjub layout):
+     *   commitment[0..32] | auditor_pk_x[32..64] | auditor_pk_y[64..96]
+     *   | epk_x[96..128] | epk_y[128..160] | enc_value[160..192]
+     *   | enc_asset_id[192..224] | enc_owner_hash[224..256]
+     * Use `buildDisclosurePublicSignals()` to construct this.
+     */
     publicSignals: DisclosurePublicSignals;
-    /** Target auditor AccountId. Null = voluntary public disclosure. */
-    auditor: string | null;
+    /** Auditor AccountId — required (must match the DisclosureRequest). */
+    auditor: string;
 };
 
 /**
  * Call index 7 — `reject_disclosure` (Signed origin)
- * Disclosure target rejects a pending request from an auditor.
+ * Disclosure target rejects a pending request from an auditor for a specific commitment.
  */
 export type RejectDisclosureArgs = {
     /** AccountId of the auditor whose request is rejected. */
     auditor: string;
+    /** 32-byte commitment of the request being rejected (LE). */
+    commitment: number[];
     /** Rejection reason — max 256 bytes UTF-8. */
     reason: string;
 };
@@ -243,6 +316,8 @@ export type PruneExpiredRequestArgs = {
     target: string;
     /** AccountId of the auditor. */
     auditor: string;
+    /** 32-byte commitment of the expired request (LE). */
+    commitment: number[];
 };
 
 /**

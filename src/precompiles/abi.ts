@@ -1,4 +1,4 @@
-import { fromHex, toHex } from '../utils/hex';
+import { toHex } from '../utils/hex';
 import { bigintTo32Be } from '../utils/bytes';
 import { concat, encodeDynamicParam, encodeStaticParam, STATIC_TYPES } from './helpers';
 
@@ -96,10 +96,4 @@ export function decodeBytes(data: Uint8Array, slotOffset = 0): Uint8Array {
 /** Reads a dynamic `string` value (UTF-8 decoded). */
 export function decodeString(data: Uint8Array, slotOffset = 0): string {
     return new TextDecoder().decode(decodeBytes(data, slotOffset));
-}
-
-/** Converts a 0x-prefixed hex string returned by `eth_call` to bytes. */
-export function hexToBytes(hex: string): Uint8Array {
-    if (hex === '0x' || hex === '') return new Uint8Array(0);
-    return fromHex(hex.startsWith('0x') ? hex : '0x' + hex);
 }

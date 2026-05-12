@@ -8,7 +8,7 @@ import type {
   ShieldParams,
   UnshieldParams,
   PrivateTransferParams,
-} from '../../src/shielded-pool/types';
+} from '../../src/shielded-pool/protocol/types';
 
 // ─── Mock helpers ─────────────────────────────────────────────────────────────
 
@@ -31,6 +31,7 @@ const SHIELD_PARAMS: ShieldParams = {
   assetId: 1,
   amount: 1_000_000n,
   commitment: COMMITMENT,
+  encryptedMemo: new Uint8Array(176),
 };
 
 const UNSHIELD_PARAMS: UnshieldParams = {
@@ -46,7 +47,8 @@ const TRANSFER_PARAMS: PrivateTransferParams = {
   proof: PROOF,
   merkleRoot: ROOT,
   inputs:  [{ nullifier: NULLIFIER, commitment: COMMITMENT }],
-  outputs: [{ commitment: COMMITMENT }],
+  outputs: [{ commitment: COMMITMENT, encryptedMemo: new Uint8Array(176) }],
+  assetId: 0,
 };
 
 // ─── buildShieldCalldata ──────────────────────────────────────────────────────
@@ -70,13 +72,11 @@ describe('ShieldedPoolPrecompile.buildShieldCalldata', () => {
     expect(a).toBe(b);
   });
 
-  it('handles encryptedMemo when provided', () => {
+  it('throws when encryptedMemo has wrong size', () => {
     const precompile = new ShieldedPoolPrecompile(mockEvm());
-    const memo = new Uint8Array(104).fill(0xff);
-    const withMemo = precompile.buildShieldCalldata({ ...SHIELD_PARAMS, encryptedMemo: memo });
-    const withoutMemo = precompile.buildShieldCalldata(SHIELD_PARAMS);
-    // Different memos → different calldatas
-    expect(withMemo).not.toBe(withoutMemo);
+    expect(() =>
+      precompile.buildShieldCalldata({ ...SHIELD_PARAMS, encryptedMemo: new Uint8Array(104) })
+    ).toThrow(/EncryptedMemo: invalid size.*expected 176 bytes, got 104/);
   });
 });
 
@@ -102,9 +102,41 @@ describe('ShieldedPoolPrecompile.buildPrivateTransferCalldata', () => {
     const two = precompile.buildPrivateTransferCalldata({
       ...TRANSFER_PARAMS,
       inputs:  [{ nullifier: NULLIFIER, commitment: COMMITMENT }, { nullifier: NULLIFIER, commitment: COMMITMENT }],
-      outputs: [{ commitment: COMMITMENT }, { commitment: COMMITMENT }],
+      outputs: [{ commitment: COMMITMENT, encryptedMemo: new Uint8Array(176) }, { commitment: COMMITMENT, encryptedMemo: new Uint8Array(176) }],
     });
     expect(two.length).toBeGreaterThan(one.length);
+  });
+
+  it('encodes default fee 0n when not specified', () => {
+    const precompile = new ShieldedPoolPrecompile(mockEvm());
+    const without = precompile.buildPrivateTransferCalldata(TRANSFER_PARAMS);
+    const withZero = precompile.buildPrivateTransferCalldata({ ...TRANSFER_PARAMS, fee: 0n });
+    expect(without).toBe(withZero);
+  });
+
+  it('produces different calldata for different fee values', () => {
+    const precompile = new ShieldedPoolPrecompile(mockEvm());
+    const noFee  = precompile.buildPrivateTransferCalldata(TRANSFER_PARAMS);
+    const hasFee = precompile.buildPrivateTransferCalldata({ ...TRANSFER_PARAMS, fee: 1_000_000n });
+    expect(noFee).not.toBe(hasFee);
+  });
+
+  it('produces different calldata for different assetId values', () => {
+    const precompile = new ShieldedPoolPrecompile(mockEvm());
+    const asset0 = precompile.buildPrivateTransferCalldata(TRANSFER_PARAMS);
+    const asset1 = precompile.buildPrivateTransferCalldata({ ...TRANSFER_PARAMS, assetId: 1 });
+    expect(asset0).not.toBe(asset1);
+  });
+
+  it('throws when an output encryptedMemo has wrong size', () => {
+    const precompile = new ShieldedPoolPrecompile(mockEvm());
+    const params = {
+      ...TRANSFER_PARAMS,
+      outputs: [{ commitment: COMMITMENT, encryptedMemo: new Uint8Array(10) }],
+    };
+    expect(() => precompile.buildPrivateTransferCalldata(params)).toThrow(
+      /EncryptedMemo: invalid size.*expected 176 bytes, got 10/
+    );
   });
 });
 
@@ -135,6 +167,20 @@ describe('ShieldedPoolPrecompile.buildUnshieldCalldata', () => {
     const withFullRecipient = precompile.buildUnshieldCalldata(UNSHIELD_PARAMS);
     // Both should be valid hex (same length calldata)
     expect(withEvmRecipient.length).toBe(withFullRecipient.length);
+  });
+
+  it('encodes default fee 0n when not specified', () => {
+    const precompile = new ShieldedPoolPrecompile(mockEvm());
+    const without = precompile.buildUnshieldCalldata(UNSHIELD_PARAMS);
+    const withZero = precompile.buildUnshieldCalldata({ ...UNSHIELD_PARAMS, fee: 0n });
+    expect(without).toBe(withZero);
+  });
+
+  it('produces different calldata for different fee values', () => {
+    const precompile = new ShieldedPoolPrecompile(mockEvm());
+    const noFee  = precompile.buildUnshieldCalldata(UNSHIELD_PARAMS);
+    const hasFee = precompile.buildUnshieldCalldata({ ...UNSHIELD_PARAMS, fee: 1_000_000_000_000_000n });
+    expect(noFee).not.toBe(hasFee);
   });
 });
 

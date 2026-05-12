@@ -136,7 +136,7 @@ describe('OrbinumClient.connect', () => {
     it('creates IndexerClient when indexerUrl is provided', async () => {
         const substrate = makeSubstrate();
         vi.mocked(SubstrateClient.connect).mockResolvedValue(substrate);
-        vi.mocked(IndexerClient).mockImplementation((() => ({})) as never);
+        vi.mocked(IndexerClient).mockImplementation(function() { return {}; } as never);
 
         const client = await OrbinumClient.connect({
             substrateWs: 'ws://localhost:9944',
@@ -162,7 +162,7 @@ describe('OrbinumClient.connect', () => {
         const substrate = makeSubstrate();
         vi.mocked(SubstrateClient.connect).mockResolvedValue(substrate);
         vi.mocked(EvmClient).mockImplementation(makeEvm as never);
-        vi.mocked(EvmExplorer).mockImplementation((() => ({})) as never);
+        vi.mocked(EvmExplorer).mockImplementation(function() { return {}; } as never);
 
         const client = await OrbinumClient.connect({
             substrateWs: 'ws://localhost:9944',

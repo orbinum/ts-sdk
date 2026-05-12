@@ -5,37 +5,12 @@
  * Works in browser and Node.js 18+ (both expose the WebCrypto API as `crypto`).
  * Pure functions — no state, no side effects.
  *
- * Key derivation: HKDF-SHA-256(ikm=spendingKeyBytes, salt=empty, info="orbinum-vault-key-v1")
+ * Key derivation: HKDF-SHA-256(ikm=masterBytes, salt=empty, info="orbinum-vault-key-v1")
  * Cipher: AES-GCM 256
- *
- * BigInt serialisation uses `{ __bigint: "<decimal string>" }` so plain
- * `JSON.stringify` never receives a bigint. Use `vaultReplacer` / `vaultReviver`
- * for all vault payloads.
  */
 
-import { fromBase64, toBase64 } from './helpers';
-
-// ─── BigInt JSON helpers ──────────────────────────────────────────────────────
-
-/**
- * `JSON.stringify` replacer that serialises bigint values as
- * `{ __bigint: "<decimal string>" }` (JSON-safe).
- */
-export function vaultReplacer(_key: string, value: unknown): unknown {
-    if (typeof value === 'bigint') return { __bigint: value.toString() };
-    return value;
-}
-
-/**
- * `JSON.parse` reviver that deserialises `{ __bigint: "<decimal string>" }`
- * back into native bigint values.
- */
-export function vaultReviver(_key: string, value: unknown): unknown {
-    if (value !== null && typeof value === 'object' && '__bigint' in (value as object)) {
-        return BigInt((value as { __bigint: string }).__bigint);
-    }
-    return value;
-}
+import { fromBase64, toBase64 } from '../utils/encoding';
+import { vaultReplacer, vaultReviver } from './VaultJson';
 
 // ─── Key derivation ───────────────────────────────────────────────────────────
 
@@ -43,20 +18,18 @@ const VAULT_KEY_INFO = new TextEncoder().encode('orbinum-vault-key-v1');
 const IV_BYTES = 12;
 
 /**
- * Derives an AES-GCM-256 CryptoKey from spending key bytes using HKDF-SHA-256.
- * The spending key carries ≥256 bits of entropy so no salt / iteration
- * stretching is required.
+ * Derives an AES-GCM-256 CryptoKey from master key bytes using HKDF-SHA-256.
  *
- * @param spendingKeyBytes 32-byte spending key (little-endian bigint representation).
+ * IMPORTANT: pass masterBytes from deriveMasterKeyBytes(), NOT bigintTo32Le(spendingKey).
+ * The vault key must be stable across circuit field changes — it depends only on
+ * the wallet signature, never on the modulus used to reduce the circuit scalar.
+ *
+ * @param masterBytes 32-byte pre-modulus key material from deriveMasterKeyBytes().
  */
-export async function deriveVaultKey(spendingKeyBytes: Uint8Array): Promise<CryptoKey> {
-    const keyMaterial = await crypto.subtle.importKey(
-        'raw',
-        spendingKeyBytes.slice(0),
-        'HKDF',
-        false,
-        ['deriveKey']
-    );
+export async function deriveVaultKey(masterBytes: Uint8Array): Promise<CryptoKey> {
+    const keyMaterial = await crypto.subtle.importKey('raw', masterBytes.slice(0), 'HKDF', false, [
+        'deriveKey',
+    ]);
     return crypto.subtle.deriveKey(
         {
             name: 'HKDF',

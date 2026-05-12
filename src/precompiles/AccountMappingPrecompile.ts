@@ -1,7 +1,7 @@
 import type { EvmClient } from '../evm/EvmClient';
 import { fromHex, ensureHexPrefix } from '../utils/hex';
 import { normalizeEvmAddress } from '../utils/address';
-import { encodeHex, hexToBytes, decodeAddress, decodeBool, decodeString } from './abi';
+import { encodeHex, decodeAddress, decodeBool, decodeString } from './abi';
 import { PRECOMPILE_ADDR, AM_SEL } from './addresses';
 import type { EvmSigner, ResolvedAlias } from './types';
 
@@ -38,7 +38,7 @@ export class AccountMappingPrecompile {
     async resolveAlias(alias: string): Promise<ResolvedAlias | null> {
         try {
             const data = encodeHex(AM_SEL.RESOLVE_ALIAS, { type: 'string', value: alias });
-            const raw = hexToBytes(await this.evm.call(this.addr, data));
+            const raw = fromHex(await this.evm.call(this.addr, data));
             if (raw.length < 64) return null;
             const owner = decodeAddress(raw, 0);
             const evm = decodeAddress(raw, 32);
@@ -62,7 +62,7 @@ export class AccountMappingPrecompile {
                 type: 'address',
                 value: normalizeEvmAddress(evmAddress),
             });
-            const raw = hexToBytes(await this.evm.call(this.addr, data));
+            const raw = fromHex(await this.evm.call(this.addr, data));
             if (raw.length === 0) return null;
             const alias = decodeString(raw, 0);
             return alias.length > 0 ? alias : null;
@@ -83,7 +83,7 @@ export class AccountMappingPrecompile {
                 { type: 'string', value: alias },
                 { type: 'bytes32', value: commitmentBytes }
             );
-            const raw = hexToBytes(await this.evm.call(this.addr, data));
+            const raw = fromHex(await this.evm.call(this.addr, data));
             if (raw.length < 32) return false;
             return decodeBool(raw, 0);
         } catch {

@@ -2,10 +2,11 @@ import { SubstrateClient } from '../substrate/SubstrateClient';
 import { EvmClient } from '../evm/EvmClient';
 import { EvmExplorer } from '../evm-explorer/EvmExplorer';
 import { IndexerClient } from '../indexer/IndexerClient';
-import { ShieldedPoolModule } from '../shielded-pool/ShieldedPoolModule';
+import { ShieldedPoolModule } from '../shielded-pool/pallet/ShieldedPoolModule';
 import { AccountMappingModule } from '../account-mapping/AccountMappingModule';
 import { PrivacyModule } from '../rpc-v2/PrivacyModule';
 import { ZkVerifierModule } from '../zk-verifier/ZkVerifierModule';
+import { RelayerStatusModule } from '../relayer/RelayerStatusModule';
 import { ShieldedPoolPrecompile } from '../precompiles/ShieldedPoolPrecompile';
 import { AccountMappingPrecompile } from '../precompiles/AccountMappingPrecompile';
 import { CryptoPrecompiles } from '../precompiles/CryptoPrecompiles';
@@ -42,41 +43,46 @@ export type { OrbinumClientConfig };
  * ```
  */
 export class OrbinumClient {
-    /** Raw access to the Substrate WebSocket connection and RPC. */
+    /** Raw Substrate WebSocket connection — use for custom RPC calls or low-level access. */
     readonly substrate: SubstrateClient;
-    /** Raw access to the EVM HTTP JSON-RPC endpoint (if configured). */
+    /** Raw EVM HTTP JSON-RPC client. `null` when `evmRpc` is not configured. */
     readonly evm: EvmClient | null;
     /**
-     * High-level EVM block and transaction explorer (if `evmRpc` is configured).
+     * High-level EVM block and transaction explorer.
      * Provides enriched queries for blocks, transactions, addresses, and token transfers.
+     * `null` when `evmRpc` is not configured.
      */
     readonly evmExplorer: EvmExplorer | null;
     /**
-     * HTTP client for the Orbinum indexer REST API (if `indexerUrl` is configured).
+     * HTTP client for the Orbinum indexer REST API.
      * Provides paginated access to indexed blocks, extrinsics, shielded events, and nullifiers.
+     * `null` when `indexerUrl` is not configured.
      */
     readonly indexer: IndexerClient | null;
-    /** Shielded-pool operations: shield, unshield, privateTransfer, and merkle queries. */
+    /** Shielded-pool extrinsics and Merkle tree queries (`shield`, `unshield`, `privateTransfer`, …). */
     readonly shieldedPool: ShieldedPoolModule;
-    /** Account mapping: aliases, chain links, metadata, marketplace, and identity extrinsics. */
+    /** Account-mapping extrinsics: aliases, chain links, metadata, marketplace, and identity. */
     readonly accountMapping: AccountMappingModule;
-    /** Typed access to Orbinum `privacy_*` RPC endpoints. */
+    /** Typed access to `privacy_*` custom RPC endpoints. */
     readonly privacy: PrivacyModule;
-    /** Typed access to zkVerifier_* RPC endpoints. */
+    /** Typed access to `zkVerifier_*` custom RPC endpoints. */
     readonly zkVerifier: ZkVerifierModule;
+    /** Typed access to `relayer_*` RPC endpoints (registry lookup and pending fee queries). */
+    readonly relayerStatus: RelayerStatusModule;
     /**
-     * EVM precompiles: shielded pool + account mapping callable from an EVM wallet.
-     * Only available when `evmRpc` is configured. Methods throw if `evm` is null.
+     * Precompile modules for interacting with Orbinum contracts from an EVM wallet.
+     * `null` when `evmRpc` is not configured. Methods on each sub-module throw if `evm` is `null`.
      */
     readonly precompiles: {
-        /** `ShieldedPoolPrecompile` (0x0801): shield/unshield/transfer via EVM wallet. */
+        /** `ShieldedPoolPrecompile` at `0x0801`: shield / unshield / transfer via EVM wallet. */
         shieldedPool: ShieldedPoolPrecompile;
-        /** `AccountMappingPrecompile` (0x0800): identity management via EVM wallet. */
+        /** `AccountMappingPrecompile` at `0x0800`: identity management via EVM wallet. */
         accountMapping: AccountMappingPrecompile;
-        /** Cryptographic precompiles: ECRecover, Keccak-256, Curve25519. */
+        /** Built-in cryptographic precompiles: ECRecover, Keccak-256, Curve25519. */
         crypto: CryptoPrecompiles;
     } | null;
 
+    /** @internal Use `OrbinumClient.connect()` to obtain an instance. */
     private constructor(
         substrate: SubstrateClient,
         evm: EvmClient | null,
@@ -90,6 +96,7 @@ export class OrbinumClient {
         this.accountMapping = new AccountMappingModule(substrate);
         this.privacy = new PrivacyModule(substrate);
         this.zkVerifier = new ZkVerifierModule(substrate);
+        this.relayerStatus = new RelayerStatusModule(substrate);
         this.precompiles = evm
             ? {
                   shieldedPool: new ShieldedPoolPrecompile(evm),
@@ -100,8 +107,10 @@ export class OrbinumClient {
     }
 
     /**
-     * Connects to an Orbinum node and returns a ready-to-use `OrbinumClient`.
-     * Throws if the Substrate node is unreachable within `connectTimeoutMs`.
+     * Creates and connects an `OrbinumClient` from the given configuration.
+     *
+     * Establishes the Substrate WebSocket connection and, if configured, instantiates
+     * the EVM and indexer clients. Throws if the node is unreachable within `connectTimeoutMs`.
      */
     static async connect(config: OrbinumClientConfig): Promise<OrbinumClient> {
         const substrate = await SubstrateClient.connect(
@@ -115,7 +124,7 @@ export class OrbinumClient {
         return new OrbinumClient(substrate, evm, indexer);
     }
 
-    /** Closes the WebSocket connection to the Substrate node. */
+    /** Closes the underlying Substrate WebSocket connection and releases all resources. */
     destroy(): void {
         this.substrate.destroy();
     }

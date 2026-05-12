@@ -33,14 +33,23 @@ export class PrivacyModule {
 
     /**
      * Returns the Merkle inclusion proof for a given commitment hex,
-     * bundled with the current Merkle root.
+     * bundled with the Merkle root.
+     *
+     * Uses `privacy_getMerkleProofByCommitment` which resolves root and proof
+     * under the **same block hash**, guaranteeing that the returned path is
+     * consistent with the returned root.
      */
     async getMerkleProofByCommitment(commitmentHex: string): Promise<PrivacyMerkleProof> {
-        const [proof, root] = await Promise.all([
-            this.getMerkleProof(commitmentHex),
-            this.getMerkleRoot(),
-        ]);
-        return { ...proof, root };
+        const raw = await this.substrate.request<RawRpcV2MerkleProof>(
+            'privacy_getMerkleProofByCommitment',
+            [commitmentHex]
+        );
+        return {
+            path: raw.path,
+            leafIndex: raw.leaf_index,
+            treeDepth: raw.tree_depth,
+            root: raw.root,
+        };
     }
 
     /** Returns the spend status of a nullifier. */
@@ -61,6 +70,7 @@ export class PrivacyModule {
         return {
             merkleRoot: raw.merkle_root,
             commitmentCount: raw.commitment_count,
+            nullifierCount: raw.nullifier_count,
             totalBalance: raw.total_balance.toString(),
             assetBalances: raw.asset_balances.map(mapAssetBalance),
             treeDepth: raw.tree_depth,

@@ -11,6 +11,11 @@ export {
     computePathIndices,
     leHexToBigint,
 } from './bytes';
+export { toBase64, fromBase64 } from './encoding';
+export { deriveStealthOwnerPk, deriveStealthSk } from './stealth';
+export { recoverOwnerPkPoint } from './bjj';
+export { BN254_R, BABYJUB_SUBORDER } from './crypto-constants';
+export { randomBlinding } from './blinding';
 export {
     normalizeEvmAddress,
     isSs58,

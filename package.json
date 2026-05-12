@@ -1,6 +1,6 @@
 {
   "name": "@orbinum/sdk",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "Official TypeScript SDK for Orbinum.",
   "author": "Orbinum",
   "license": "ISC",
@@ -26,6 +26,7 @@
     "lint": "eslint src/**/*.ts",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
+    "check": "npm run typecheck:all && npm run lint && npm run format:check && npm run build && npm run test",
     "clean": "rm -rf dist node_modules package-lock.json yarn.lock pnpm-lock.yaml"
   },
   "repository": {
@@ -45,27 +46,28 @@
   },
   "homepage": "https://github.com/orbinum/ts-sdk#readme",
   "devDependencies": {
-    "@eslint/js": "^10.0.1",
-    "@types/node": "^25.2.1",
-    "eslint": "^10.0.3",
-    "prettier": "^3.8.1",
-    "ts-node": "^10.9.2",
-    "tsup": "^8.5.1",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.57.0",
-    "vitest": "^3.2.4"
+    "@eslint/js": "10.0.1",
+    "@types/node": "25.5.2",
+    "eslint": "10.2.0",
+    "prettier": "3.8.1",
+    "ts-node": "10.9.2",
+    "tsup": "8.5.1",
+    "typescript": "6.0.2",
+    "typescript-eslint": "8.58.0",
+    "vitest": "4.1.3"
   },
   "dependencies": {
-    "@noble/ciphers": "^2.1.1",
-    "@noble/hashes": "^2.0.1",
-    "@polkadot-api/metadata-builders": "^0.13.9",
-    "@polkadot-api/substrate-bindings": "^0.17.0",
-    "@polkadot-api/tx-utils": "^0.2.2",
-    "@polkadot/util-crypto": "^14.0.3",
-    "@scure/base": "^2.0.0",
-    "@zk-kit/baby-jubjub": "^1.0.3",
-    "polkadot-api": "^1.23.3",
-    "poseidon-lite": "^0.3.0"
+    "@noble/ciphers": "2.1.1",
+    "@noble/hashes": "2.0.1",
+    "@orbinum/proof-generator": "file:../proof-generator",
+    "@polkadot-api/metadata-builders": "0.13.9",
+    "@polkadot-api/substrate-bindings": "0.17.0",
+    "@polkadot-api/tx-utils": "0.2.2",
+    "@polkadot/util-crypto": "14.0.3",
+    "@scure/base": "2.0.0",
+    "@zk-kit/baby-jubjub": "1.0.3",
+    "polkadot-api": "1.23.3",
+    "poseidon-lite": "0.3.0"
   },
   "packageManager": "pnpm@10.32.1+sha512.a706938f0e89ac1456b6563eab4edf1d1faf3368d1191fc5c59790e96dc918e4456ab2e67d613de1043d2e8c81f87303e6b40d4ffeca9df15ef1ad567348f2be"
 }

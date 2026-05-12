@@ -219,7 +219,11 @@ export function mapExtrinsicArgs(
         if (m_norm === 'requestdisclosure') {
             return {
                 target: get(0, 'target'),
-                reason: get(1, 'reason'),
+                commitment: get(1, 'commitment'),
+                required_fields: get(2, 'required_fields'),
+                reason: get(3, 'reason'),
+                auditor_bjj_pk_x: get(4, 'auditor_bjj_pk_x'),
+                auditor_bjj_pk_y: get(5, 'auditor_bjj_pk_y'),
             };
         }
         if (m_norm === 'disclose') {
@@ -233,7 +237,8 @@ export function mapExtrinsicArgs(
         if (m_norm === 'rejectdisclosure') {
             return {
                 auditor: get(0, 'auditor'),
-                reason: get(1, 'reason'),
+                commitment: get(1, 'commitment'),
+                reason: get(2, 'reason'),
             };
         }
         if (m_norm === 'registerasset') {
@@ -253,10 +258,12 @@ export function mapExtrinsicArgs(
         if (m_norm === 'batchsubmitdisclosureproofs') {
             return { submissions: get(0, 'submissions') };
         }
+        // NOTE: batch_submit_disclosure_proofs was removed from the pallet (v0.7+).
         if (m_norm === 'pruneexpiredrequest') {
             return {
                 target: get(0, 'target'),
                 auditor: get(1, 'auditor'),
+                commitment: get(2, 'commitment'),
             };
         }
         if (m_norm === 'revokedisclosurerecord') {
@@ -521,9 +528,10 @@ export function mapZkEventData(
 
     if (m_norm === 'disclosed') {
         return {
-            who: get(0, 'who'),
-            commitment: get(1, 'commitment'),
-            auditor: get(2, 'auditor'),
+            target: get(0, 'target'),
+            auditor: get(1, 'auditor'),
+            commitment: get(2, 'commitment'),
+            signals: get(3, 'signals'),
         };
     }
 
@@ -531,7 +539,10 @@ export function mapZkEventData(
         return {
             target: get(0, 'target'),
             auditor: get(1, 'auditor'),
-            reason: get(2, 'reason'),
+            commitment: get(2, 'commitment'),
+            required_fields: get(3, 'required_fields'),
+            auditor_bjj_pk_x: get(4, 'auditor_bjj_pk_x'),
+            auditor_bjj_pk_y: get(5, 'auditor_bjj_pk_y'),
         };
     }
 
@@ -539,7 +550,8 @@ export function mapZkEventData(
         return {
             target: get(0, 'target'),
             auditor: get(1, 'auditor'),
-            reason: get(2, 'reason'),
+            commitment: get(2, 'commitment'),
+            reason: get(3, 'reason'),
         };
     }
 
@@ -547,6 +559,7 @@ export function mapZkEventData(
         return {
             target: get(0, 'target'),
             auditor: get(1, 'auditor'),
+            commitment: get(2, 'commitment'),
         };
     }
 

@@ -9,8 +9,9 @@ export type {
     ShieldedAddressEvent,
     ShieldedCommitment,
     SpentNullifier,
-    PrivateTransfer,
+    PrivateTransferTimestamp,
     Unshield,
     MerkleRoot,
     NullifierStatusResult,
+    StealthScanHint,
 } from './types';

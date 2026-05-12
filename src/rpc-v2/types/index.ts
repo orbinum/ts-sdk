@@ -4,7 +4,6 @@ export type RpcV2MerkleProof = {
     treeDepth: number;
 };
 
-/** Prueba Merkle enriquecida con el `root` actual del árbol. Devuelta por `getMerkleProofByCommitment`. */
 export type PrivacyMerkleProof = RpcV2MerkleProof & { root: string };
 
 export type RpcV2NullifierStatus = {
@@ -14,14 +13,13 @@ export type RpcV2NullifierStatus = {
 
 export type RpcV2PoolAssetBalance = {
     assetId: number;
-    /** Balance serializado como string decimal para preservar `u128`. */
     balance: string;
 };
 
 export type RpcV2PoolStats = {
     merkleRoot: string;
     commitmentCount: number;
-    /** Total pool balance serializado como string decimal para preservar `u128`. */
+    nullifierCount: number;
     totalBalance: string;
     assetBalances: RpcV2PoolAssetBalance[];
     treeDepth: number;

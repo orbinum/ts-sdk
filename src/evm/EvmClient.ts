@@ -1,5 +1,6 @@
 import { hexToNumber, hexToBigint } from '../utils/hex';
 
+/** Internal shape of a single JSON-RPC 2.0 response. */
 type JsonRpcResponse<T> = {
     jsonrpc: '2.0';
     id: number;
@@ -7,6 +8,7 @@ type JsonRpcResponse<T> = {
     error?: { code: number; message: string };
 };
 
+/** Internal shape of a JSON-RPC 2.0 batch response. */
 type JsonRpcBatchResponse<T> = Array<JsonRpcResponse<T>>;
 
 /**
@@ -14,10 +16,12 @@ type JsonRpcBatchResponse<T> = Array<JsonRpcResponse<T>>;
  * Follows the standard Ethereum JSON-RPC specification.
  */
 export class EvmClient {
+    /** @param rpcUrl - HTTP URL of the EVM JSON-RPC endpoint (e.g. `"http://localhost:9933"`). */
     constructor(private readonly rpcUrl: string) {}
 
     /**
-     * Performs a single JSON-RPC call.
+     * Performs a single JSON-RPC call and returns the typed result.
+     * Throws on HTTP errors, RPC-level errors, or a `null` result.
      */
     async request<T>(method: string, params: unknown[] = []): Promise<T> {
         const res = await fetch(this.rpcUrl, {
@@ -38,6 +42,7 @@ export class EvmClient {
 
     /**
      * Performs multiple JSON-RPC calls in a single HTTP request (batch).
+     * Results are returned in the same order as `calls`, as a typed tuple.
      */
     async batchRequest<T extends unknown[]>(
         calls: Array<{ method: string; params?: unknown[] }>
@@ -91,25 +96,19 @@ export class EvmClient {
         return hexToBigint(hex);
     }
 
-    /**
-     * Submits a signed raw transaction. Returns the transaction hash.
-     */
+    /** Submits a signed raw transaction. Returns the transaction hash. */
     async sendRawTransaction(signedHex: string): Promise<string> {
         return this.request<string>('eth_sendRawTransaction', [signedHex]);
     }
 
-    /**
-     * Executes a read-only call without creating a transaction.
-     */
+    /** Executes a read-only call without creating a transaction. Returns the raw ABI-encoded response. */
     async call(to: string, data: string, from?: string): Promise<string> {
         const txObj: Record<string, string> = { to, data };
         if (from) txObj['from'] = from;
         return this.request<string>('eth_call', [txObj, 'latest']);
     }
 
-    /**
-     * Estimates the gas for a transaction.
-     */
+    /** Estimates the gas required for a transaction. Returns the estimate in wei as a `bigint`. */
     async estimateGas(params: {
         from?: string;
         to: string;
@@ -120,9 +119,7 @@ export class EvmClient {
         return hexToBigint(hex);
     }
 
-    /**
-     * Returns a transaction receipt by hash, or null if not yet mined.
-     */
+    /** Returns a transaction receipt by hash, or `null` if the transaction has not been mined yet. */
     async getTransactionReceipt(txHash: string): Promise<Record<string, unknown> | null> {
         const res = await fetch(this.rpcUrl, {
             method: 'POST',
@@ -140,5 +137,73 @@ export class EvmClient {
             throw new Error(`EVM RPC [${json.error.code}]: ${json.error.message}`);
         }
         return json.result ?? null;
+    }
+
+    /**
+     * Polls `eth_getTransactionReceipt` until the transaction is included in a block.
+     *
+     * @param txHash - The transaction hash to wait for.
+     * @param intervalMs - Polling interval in milliseconds (default: 500).
+     * @param timeoutMs - Maximum time to wait in milliseconds (default: 60_000).
+     * @returns The transaction receipt once mined.
+     * @throws If the transaction is not mined within `timeoutMs` or if it reverted (`status == 0x0`).
+     */
+    async waitForReceipt(
+        txHash: string,
+        intervalMs = 500,
+        timeoutMs = 60_000
+    ): Promise<Record<string, unknown>> {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            const receipt = await this.getTransactionReceipt(txHash);
+            if (receipt !== null) {
+                if (receipt['status'] === '0x0') {
+                    // Build revert detail. Start with any reason the node put directly in the receipt.
+                    let revertDetail = '';
+                    const nodeReason = receipt['revertReason'] as string | undefined;
+                    if (nodeReason) revertDetail = ` | revertReason: ${nodeReason}`;
+
+                    if (!revertDetail) {
+                        // Try eth_call at the same block to get the EVM revert data.
+                        // `receipt['blockNumber']` is a hex number (e.g. "0x1a3f") which is the
+                        // correct format for eth_call's block parameter (Frontier only accepts
+                        // a hex block-number, not a block hash).
+                        try {
+                            const blockParam =
+                                (receipt['blockNumber'] as string | undefined) ?? 'latest';
+                            const rawTx = await this.request<Record<string, unknown> | null>(
+                                'eth_getTransactionByHash',
+                                [txHash]
+                            ).catch(() => null);
+                            if (rawTx) {
+                                // Frontier uses 'input' for the calldata field.
+                                const calldata = (rawTx['input'] ?? rawTx['data']) as
+                                    | string
+                                    | undefined;
+                                if (calldata) {
+                                    const revertData = await this.request<string>('eth_call', [
+                                        { from: rawTx['from'], to: rawTx['to'], data: calldata },
+                                        blockParam,
+                                    ]).catch((err: unknown) =>
+                                        err instanceof Error ? err.message : String(err)
+                                    );
+                                    revertDetail = ` | eth_call: ${revertData}`;
+                                }
+                            }
+                        } catch {
+                            // Revert reason is best-effort — ignore failures silently.
+                        }
+                    }
+
+                    throw new Error(
+                        `Transaction reverted on-chain: ${txHash}${revertDetail}` +
+                            ` | receipt: ${JSON.stringify(receipt)}`
+                    );
+                }
+                return receipt;
+            }
+            await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
+        }
+        throw new Error(`Transaction not mined within ${timeoutMs}ms: ${txHash}`);
     }
 }

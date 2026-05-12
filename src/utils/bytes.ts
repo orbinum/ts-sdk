@@ -1,3 +1,5 @@
+import { fromHex } from './hex';
+
 /**
  * Serialises a bigint as a 32-byte little-endian Uint8Array.
  */
@@ -69,10 +71,5 @@ export function computePathIndices(leafIndex: number, depth: number): number[] {
  * Equivalent to `bytesToBigintLE(fromHex(hex))`.
  */
 export function leHexToBigint(hex: string): bigint {
-    const h = hex.startsWith('0x') ? hex.slice(2) : hex;
-    const bytes = new Uint8Array(h.length / 2);
-    for (let i = 0; i < bytes.length; i++) {
-        bytes[i] = parseInt(h.slice(i * 2, i * 2 + 2), 16);
-    }
-    return bytesToBigintLE(bytes);
+    return bytesToBigintLE(fromHex(hex));
 }

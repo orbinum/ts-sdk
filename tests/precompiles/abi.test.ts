@@ -2,13 +2,13 @@ import { describe, it, expect } from 'vitest';
 import {
   encode,
   encodeHex,
-  hexToBytes,
   decodeUint,
   decodeAddress,
   decodeBool,
   decodeBytes,
   decodeString,
 } from '../../src/precompiles/abi';
+import { fromHex } from '../../src/utils/hex';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -32,23 +32,23 @@ function addressSlot(hex: string): Uint8Array {
   return s;
 }
 
-// ─── hexToBytes ───────────────────────────────────────────────────────────────
+// ─── fromHex (via utils/hex) ─────────────────────────────────────────────────
 
-describe('hexToBytes', () => {
+describe('fromHex', () => {
   it("returns empty array for '0x'", () => {
-    expect(hexToBytes('0x')).toEqual(new Uint8Array(0));
+    expect(fromHex('0x')).toEqual(new Uint8Array(0));
   });
 
   it('returns empty array for empty string', () => {
-    expect(hexToBytes('')).toEqual(new Uint8Array(0));
+    expect(fromHex('')).toEqual(new Uint8Array(0));
   });
 
   it('decodes 0x1234 to [0x12, 0x34]', () => {
-    expect(hexToBytes('0x1234')).toEqual(new Uint8Array([0x12, 0x34]));
+    expect(fromHex('0x1234')).toEqual(new Uint8Array([0x12, 0x34]));
   });
 
   it('handles string without 0x prefix', () => {
-    expect(hexToBytes('deadbeef')).toEqual(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
+    expect(fromHex('deadbeef')).toEqual(new Uint8Array([0xde, 0xad, 0xbe, 0xef]));
   });
 });
 

@@ -1,20 +1,25 @@
+/** Configuration passed to `OrbinumClient.connect()`. */
 export type OrbinumClientConfig = {
-    /** WebSocket URL of the Orbinum node (e.g. "ws://localhost:9944") */
+    /** WebSocket URL of the Orbinum Substrate node (e.g. `"ws://localhost:9944"`). */
     substrateWs: string;
-    /** HTTP URL of the EVM JSON-RPC endpoint (e.g. "http://localhost:9933") */
+    /** HTTP URL of the EVM JSON-RPC endpoint (e.g. `"http://localhost:9933"`). Omit to disable EVM support. */
     evmRpc?: string;
-    /** Base URL of the Orbinum indexer REST API (e.g. "https://indexer.orbinum.io") */
+    /** Base URL of the Orbinum indexer REST API (e.g. `"https://indexer.orbinum.io"`). Omit to disable indexer support. */
     indexerUrl?: string;
-    /** Connection timeout in ms. Default: 15_000 */
+    /** Timeout for the initial WebSocket handshake in milliseconds. Default: `15_000`. */
     connectTimeoutMs?: number;
 };
 
+/** Result returned by extrinsic-submitting methods (shield, unshield, transfer, …). */
 export type TxResult = {
+    /** 0x-prefixed hash of the submitted extrinsic. */
     txHash: string;
+    /** 0x-prefixed hash of the block that included the extrinsic. */
     blockHash: string;
+    /** Number of the block that included the extrinsic. */
     blockNumber: number;
-    /** Whether the extrinsic succeeded (no ExtrinsicFailed event). */
+    /** `true` when the extrinsic succeeded (no `ExtrinsicFailed` event emitted). */
     ok: boolean;
-    /** Dispatch error type string when ok = false. */
+    /** Dispatch error type string. Only present when `ok` is `false`. */
     error?: string;
 };

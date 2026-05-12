@@ -29,14 +29,22 @@ export type ShieldedEvent = {
 };
 
 /**
- * Emitted by `private_transfer()`.
- * Rust variant: `PrivateTransfer { nullifiers, commitments, encrypted_memos, leaf_indices }`
- * Max 2 inputs / 2 outputs.
+ * Emitted by `private_transfer()` when input nullifiers are spent.
+ * Rust variant: `NullifiersSpent { nullifiers }`
+ * Emitted independently of CommitmentsInserted to prevent graph correlation.
  */
-export type PrivateTransferEvent = {
-    /** Input nullifiers — max 2. 0x-prefixed 32-byte hex each. */
+export type NullifiersSpentEvent = {
+    /** Input nullifiers consumed — max 2. 0x-prefixed 32-byte hex each. */
     nullifiers: string[];
-    /** Output commitments — max 2. 0x-prefixed 32-byte hex each. */
+};
+
+/**
+ * Emitted by `private_transfer()` when output commitments are inserted.
+ * Rust variant: `CommitmentsInserted { commitments, encrypted_memos, leaf_indices }`
+ * Emitted independently of NullifiersSpent to prevent graph correlation.
+ */
+export type CommitmentsInsertedEvent = {
+    /** Output commitments created — max 2. 0x-prefixed 32-byte hex each. */
     commitments: string[];
     /** Encrypted memos for each output — max 2. */
     encryptedMemos: string[];
@@ -46,7 +54,7 @@ export type PrivateTransferEvent = {
 
 /**
  * Emitted by `unshield()` when a note is withdrawn to the public chain.
- * Rust variant: `Unshielded { nullifier, amount, recipient }`
+ * Rust variant: `Unshielded { nullifier, amount, recipient, change_commitment }`
  */
 export type UnshieldedEvent = {
     /** 0x-prefixed 32-byte Poseidon nullifier (LE). */
@@ -54,6 +62,11 @@ export type UnshieldedEvent = {
     amount: bigint;
     /** SS58 AccountId of the recipient. */
     recipient: string;
+    /**
+     * 0x-prefixed 32-byte change note commitment (LE), or null for total unshield.
+     * When present, the commitment has been inserted into the Merkle tree.
+     */
+    changeCommitment: string | null;
 };
 
 /**
@@ -176,7 +189,8 @@ export type AssetUnverifiedEvent = {
 /** All events emitted by pallet-shielded-pool as a discriminated union. */
 export type ShieldedPoolEvent =
     | { type: 'Shielded'; data: ShieldedEvent }
-    | { type: 'PrivateTransfer'; data: PrivateTransferEvent }
+    | { type: 'NullifiersSpent'; data: NullifiersSpentEvent }
+    | { type: 'CommitmentsInserted'; data: CommitmentsInsertedEvent }
     | { type: 'Unshielded'; data: UnshieldedEvent }
     | { type: 'MerkleRootUpdated'; data: MerkleRootUpdatedEvent }
     | { type: 'AuditPolicySet'; data: AuditPolicySetEvent }

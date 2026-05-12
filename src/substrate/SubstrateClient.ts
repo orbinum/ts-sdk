@@ -268,6 +268,15 @@ export class SubstrateClient {
     }
 
     /**
+     * Submits a bare (unsigned) extrinsic hex and waits for finalization.
+     * Used for gasless private_transfer and unshield transactions.
+     * The bare tx hex is produced by `tx.getBareTx()` from polkadot-api.
+     */
+    async submitUnsignedAndWatch(bareTxHex: string): Promise<TxFinalizedPayload> {
+        return this._papi.submit(bareTxHex);
+    }
+
+    /**
      * Convenience: wrap raw call bytes and sign+submit in one step.
      */
     async signAndSubmit(callData: Uint8Array, signer: PolkadotSigner): Promise<TxFinalizedPayload> {
@@ -324,17 +333,14 @@ export class SubstrateClient {
 
     private static _buildDataProxy(value: unknown): EventRecord['event']['data'] {
         const formatValue = (v: unknown): string => {
-            if (v instanceof Uint8Array) return fromHex(v as unknown as `0x${string}`).toString();
+            if (v instanceof Uint8Array) return toHex(v);
             if (typeof v === 'bigint') return v.toString();
             return String(v);
         };
         const jsonifyValue = (v: unknown): unknown => {
             if (v === null || v === undefined) return v;
             if (typeof v === 'bigint') return v.toString();
-            if (v instanceof Uint8Array)
-                return `0x${Array.from(v)
-                    .map((b) => b.toString(16).padStart(2, '0'))
-                    .join('')}`;
+            if (v instanceof Uint8Array) return toHex(v);
             if (Array.isArray(v)) return v.map(jsonifyValue);
             if (typeof v === 'object') {
                 const obj = v as Record<string, unknown>;

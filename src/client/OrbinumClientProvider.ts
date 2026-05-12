@@ -3,29 +3,42 @@ import type { OrbinumClientConfig } from './types';
 
 // ─── Connection state ─────────────────────────────────────────────────────────
 
+/** Lifecycle state of the provider's underlying `OrbinumClient` connection. */
 export type ConnectionStatus =
-    | 'idle'
-    | 'connecting'
-    | 'connected'
-    | 'disconnected'
-    | 'reconnecting';
+    | 'idle' // Not yet connected; `connect()` has not been called.
+    | 'connecting' // Initial connection attempt in progress.
+    | 'connected' // Client is live and heartbeat is running.
+    | 'disconnected' // Connection lost; reconnect will be scheduled automatically.
+    | 'reconnecting'; // Waiting for the next reconnect attempt (exponential backoff).
 
+/** Payload emitted to every `StatusListener` on each status transition. */
 export type StatusChangeEvent = {
+    /** The new connection status. */
     status: ConnectionStatus;
+    /** Human-readable error description. Only present on `'disconnected'` transitions. */
     error?: string;
 };
 
+/** Callback invoked whenever the provider's `ConnectionStatus` changes. */
 export type StatusListener = (event: StatusChangeEvent) => void;
 
+/** Configuration for `OrbinumClientProvider`. Extends `OrbinumClientConfig` with reconnection and heartbeat tuning. */
 export interface ClientProviderConfig {
+    /** WebSocket URL of the Orbinum Substrate node (e.g. `"ws://localhost:9944"`). */
     substrateWs: string;
+    /** HTTP URL of the EVM JSON-RPC endpoint (e.g. `"http://localhost:9933"`). Omit to disable EVM support. */
     evmRpc?: string;
-    /** Base URL of the Orbinum indexer REST API (e.g. "https://indexer.orbinum.io") */
+    /** Base URL of the Orbinum indexer REST API (e.g. `"https://indexer.orbinum.io"`). Omit to disable indexer support. */
     indexerUrl?: string;
+    /** Timeout for the initial WebSocket handshake in milliseconds. Default: `8_000`. */
     connectTimeoutMs?: number;
+    /** Interval between heartbeat probes in milliseconds. Default: `5_000`. */
     heartbeatIntervalMs?: number;
+    /** Maximum time to wait for a heartbeat response before treating the node as unreachable. Default: `4_000`. */
     heartbeatTimeoutMs?: number;
+    /** Initial reconnect delay in milliseconds (doubles on each failure). Default: `3_000`. */
     reconnectBaseMs?: number;
+    /** Maximum reconnect delay cap in milliseconds. Default: `30_000`. */
     reconnectMaxMs?: number;
 }
 
@@ -77,6 +90,7 @@ export class OrbinumClientProvider {
     // ─── Events ─────────────────────────────────────────────────────────────
     private _listeners: Set<StatusListener> = new Set();
 
+    /** Creates a new provider with the given configuration. Does not connect automatically — call `connect()` to initiate. */
     constructor(config: ClientProviderConfig) {
         this.config = config;
         this.connectTimeoutMs = config.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
@@ -88,10 +102,12 @@ export class OrbinumClientProvider {
 
     // ─── Status ─────────────────────────────────────────────────────────────
 
+    /** Current connection status. Reflects the last state set by the provider internals. */
     get status(): ConnectionStatus {
         return this._status;
     }
 
+    /** Updates internal status and notifies all registered listeners. Swallows listener exceptions to avoid cascading failures. */
     private setStatus(status: ConnectionStatus, error?: string): void {
         this._status = status;
         const event: StatusChangeEvent = { status, ...(error ? { error } : {}) };
@@ -104,6 +120,10 @@ export class OrbinumClientProvider {
         });
     }
 
+    /**
+     * Registers a listener that is called on every status transition.
+     * Returns an unsubscribe function — call it to stop receiving events.
+     */
     onStatusChange(listener: StatusListener): () => void {
         this._listeners.add(listener);
         return () => {
@@ -113,11 +133,19 @@ export class OrbinumClientProvider {
 
     // ─── Lifecycle ──────────────────────────────────────────────────────────
 
+    /**
+     * Initiates the first connection attempt. No-op if the provider is not in `'idle'` state.
+     * Call this once after constructing the provider.
+     */
     connect(): void {
         if (this._status !== 'idle') return;
         this.startConnectAttempt();
     }
 
+    /**
+     * Tears down the active client and any pending reconnect timers,
+     * then resets the provider back to `'idle'` so `connect()` can be called again.
+     */
     reset(): void {
         this.cancelReconnect();
         this.teardownClient();
@@ -127,6 +155,7 @@ export class OrbinumClientProvider {
 
     // ─── Internal connection flow ───────────────────────────────────────────
 
+    /** Transitions to `'connecting'`, kicks off `attemptConnect`, and schedules a reconnect if it fails. */
     private startConnectAttempt(): void {
         this.setStatus('connecting');
         this._connectingPromise = this.attemptConnect();
@@ -135,6 +164,11 @@ export class OrbinumClientProvider {
         });
     }
 
+    /**
+     * Performs a single connection attempt race against `connectTimeoutMs`.
+     * On success: stores the client, starts the heartbeat, and returns it.
+     * On failure: destroys any orphaned client and transitions to `'disconnected'`.
+     */
     private async attemptConnect(): Promise<OrbinumClient> {
         let timeoutId: ReturnType<typeof setTimeout> | null = null;
         let orphanClient: OrbinumClient | null = null;
@@ -191,6 +225,7 @@ export class OrbinumClientProvider {
 
     // ─── Heartbeat ──────────────────────────────────────────────────────────
 
+    /** Starts the periodic heartbeat loop. Replaces any existing timer. */
     private startHeartbeat(): void {
         this.stopHeartbeat();
         this._heartbeatTimer = setInterval(async () => {
@@ -204,6 +239,7 @@ export class OrbinumClientProvider {
         }, this.heartbeatIntervalMs);
     }
 
+    /** Clears the heartbeat interval timer if active. */
     private stopHeartbeat(): void {
         if (this._heartbeatTimer) {
             clearInterval(this._heartbeatTimer);
@@ -211,6 +247,10 @@ export class OrbinumClientProvider {
         }
     }
 
+    /**
+     * Sends a `system_health` RPC ping and waits up to `heartbeatTimeoutMs`.
+     * Returns `true` if the node responds in time, `false` otherwise.
+     */
     private async probe(): Promise<boolean> {
         if (!this._orbinumClient) return false;
         try {
@@ -228,6 +268,10 @@ export class OrbinumClientProvider {
 
     // ─── Reconnection ───────────────────────────────────────────────────────
 
+    /**
+     * Schedules the next connection attempt using exponential backoff
+     * (capped at `reconnectMaxMs`), then transitions to `'reconnecting'`.
+     */
     private scheduleReconnect(): void {
         if (this._reconnectTimer) clearTimeout(this._reconnectTimer);
         const delay = Math.min(
@@ -242,6 +286,7 @@ export class OrbinumClientProvider {
         }, delay);
     }
 
+    /** Clears any pending reconnect timer without triggering a new attempt. */
     private cancelReconnect(): void {
         if (this._reconnectTimer) {
             clearTimeout(this._reconnectTimer);
@@ -251,6 +296,7 @@ export class OrbinumClientProvider {
 
     // ─── Client teardown ────────────────────────────────────────────────────
 
+    /** Stops the heartbeat, destroys the active client, and clears all in-progress promises. */
     private teardownClient(): void {
         this.stopHeartbeat();
         try {
@@ -264,12 +310,20 @@ export class OrbinumClientProvider {
 
     // ─── Client access ──────────────────────────────────────────────────────
 
+    /**
+     * Returns the active `OrbinumClient`, or awaits the in-progress connection attempt.
+     * Throws if the provider is `'idle'`, `'disconnected'`, or `'reconnecting'`.
+     */
     async getOrbinumClient(): Promise<OrbinumClient> {
         if (this._orbinumClient) return this._orbinumClient;
         if (this._connectingPromise) return this._connectingPromise;
         throw new Error(`OrbinumClientProvider: cannot get client in status '${this._status}'`);
     }
 
+    /**
+     * Same as `getOrbinumClient()` but returns `null` instead of throwing.
+     * Useful in contexts where a missing client is an acceptable no-op.
+     */
     async tryGetOrbinumClient(): Promise<OrbinumClient | null> {
         try {
             return await this.getOrbinumClient();
@@ -280,17 +334,30 @@ export class OrbinumClientProvider {
 
     // ─── Convenience RPC helpers ────────────────────────────────────────────
 
+    /**
+     * Sends a single Substrate JSON-RPC request and returns the typed result.
+     * Waits for the client to be ready before dispatching.
+     */
     async rpcSend<T>(method: string, params: unknown[] = []): Promise<T> {
         const client = await this.getOrbinumClient();
         return client.substrate.request<T>(method, params);
     }
 
+    /**
+     * Sends a single EVM JSON-RPC request and returns the typed result.
+     * Throws if `evmRpc` was not configured.
+     */
     async evmRpc<T>(method: string, params: unknown[] = []): Promise<T> {
         const client = await this.getOrbinumClient();
         if (!client.evm) throw new Error('EVM RPC not configured');
         return client.evm.request<T>(method, params);
     }
 
+    /**
+     * Sends multiple EVM JSON-RPC calls as a single batch request.
+     * Returns a tuple of typed results in the same order as `calls`.
+     * Throws if `evmRpc` was not configured.
+     */
     async evmRpcBatch<T extends unknown[]>(
         calls: Array<{ method: string; params?: unknown[] }>
     ): Promise<T> {

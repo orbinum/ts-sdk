@@ -76,12 +76,20 @@ export const AM_SEL = {
 
 /** Function selectors for `ShieldedPoolPrecompile`. */
 export const SP_SEL = {
-    // shield(uint32,uint256,bytes32,bytes)                                  → 0x781442b9
-    SHIELD: new Uint8Array([0x78, 0x14, 0x42, 0xb9]),
-    // privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[])            → 0xdcd5b898
-    PRIVATE_TRANSFER: new Uint8Array([0xdc, 0xd5, 0xb8, 0x98]),
-    // unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32)                → 0xdcf1bff2
-    UNSHIELD: new Uint8Array([0xdc, 0xf1, 0xbf, 0xf2]),
+    // shield(uint32,bytes32,bytes)                                               → 0x9feb22ea  (payable, amount = msg.value)
+    SHIELD: new Uint8Array([0x9f, 0xeb, 0x22, 0xea]),
+    // privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256)    → 0x8c0f5d24
+    PRIVATE_TRANSFER: new Uint8Array([0x8c, 0x0f, 0x5d, 0x24]),
+    // unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32)               → 0xd21d9a79
+    UNSHIELD: new Uint8Array([0xd2, 0x1d, 0x9a, 0x79]),
+    // requestDisclosure(bytes32,bytes32,bool,bool,bool,bytes,bytes32,bytes32)      → 0xe7022933  (caller = auditor)
+    REQUEST_DISCLOSURE: new Uint8Array([0xe7, 0x02, 0x29, 0x33]),
+    // disclose(bytes32,bytes,bytes,bytes32)                                        → 0xea8a4165  (caller = note owner)
+    DISCLOSE: new Uint8Array([0xea, 0x8a, 0x41, 0x65]),
+    // rejectDisclosure(bytes32,bytes32,bytes)                                      → 0x72b895a9  (caller = target)
+    REJECT_DISCLOSURE: new Uint8Array([0x72, 0xb8, 0x95, 0xa9]),
+    // pruneExpiredRequest(bytes32,bytes32,bytes32)                                 → 0x0c338dcf  (permissionless)
+    PRUNE_EXPIRED_REQUEST: new Uint8Array([0x0c, 0x33, 0x8d, 0xcf]),
 } as const;
 
 // ─── Known Precompiles registry ───────────────────────────────────────────────
@@ -131,9 +139,13 @@ export const KNOWN_PRECOMPILES: Record<string, KnownPrecompileInfo> = {
     '0x0000000000000000000000000000000000000801': {
         name: 'ShieldedPool',
         functions: {
-            '781442b9': 'shield(uint32,uint256,bytes32,bytes)',
-            dcd5b898: 'privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[])',
-            dcf1bff2: 'unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32)',
+            '9feb22ea': 'shield(uint32,bytes32,bytes)',
+            '8c0f5d24': 'privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256)',
+            d21d9a79: 'unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32)',
+            e7022933: 'requestDisclosure(bytes32,bytes32,bool,bool,bool,bytes,bytes32,bytes32)',
+            ea8a4165: 'disclose(bytes32,bytes,bytes,bytes32)',
+            '72b895a9': 'rejectDisclosure(bytes32,bytes32,bytes)',
+            '0c338dcf': 'pruneExpiredRequest(bytes32,bytes32,bytes32)',
         },
     },
 };

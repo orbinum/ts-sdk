@@ -40,18 +40,12 @@ export interface SpentNullifier {
     timestampMs: number | null;
 }
 
-/** A private transfer event stored by the indexer. */
-export interface PrivateTransfer {
-    /** "{blockNumber}-{extrinsicIndex}" */
-    id: string;
+/** Temporal metadata for a private transfer. No graph data (inputs ↔ outputs) exposed. */
+export interface PrivateTransferTimestamp {
     blockNumber: number;
     extrinsicIndex: number | null;
-    /** JSON-encoded array of nullifier hex strings. */
-    inputNullifiersJson: string;
-    /** JSON-encoded array of commitment hex strings. */
-    outputCommitmentsJson: string;
-    /** JSON-encoded array of leaf index numbers. */
-    leafIndicesJson: string;
+    /** Blake2-256 hash of the raw extrinsic, 0x-prefixed. Null if the extrinsic was not decoded. */
+    hash: string | null;
     timestampMs: number | null;
 }
 
@@ -61,6 +55,8 @@ export interface Unshield {
     id: string;
     blockNumber: number;
     extrinsicIndex: number | null;
+    /** Blake2-256 hash of the raw extrinsic, 0x-prefixed. Null if the extrinsic was not decoded. */
+    hash: string | null;
     nullifierHex: string;
     /** Asset ID as decimal string. */
     assetId: string;
@@ -168,4 +164,22 @@ export interface IndexerStats {
 export type ShieldedAddressEvent =
     | ({ kind: 'commitment' } & ShieldedCommitment)
     | ({ kind: 'unshield' } & Unshield)
-    | ({ kind: 'transfer' } & PrivateTransfer);
+    | ({ kind: 'transfer' } & PrivateTransferTimestamp);
+
+/**
+ * Lightweight hint returned by the stealth scan endpoint.
+ * Contains only the fields required for a wallet to:
+ *   1. Compute ECDH shared secret: ephPkHex × ivsk
+ *   2. Attempt ChaCha20-Poly1305 decryption of encryptedMemo
+ * Ordered ascending by leafIndex for incremental cursor compatibility.
+ */
+export interface StealthScanHint {
+    leafIndex: number;
+    commitmentHex: string;
+    /** Asset ID as decimal string (e.g. "0"). */
+    assetId: string;
+    /** Ephemeral public key (last 32 bytes of encrypted_memo), 0x-prefixed. null if memo absent. */
+    ephPkHex: string | null;
+    /** Full 168-byte encrypted memo (0x-prefixed hex). null if not present. */
+    encryptedMemo: string | null;
+}

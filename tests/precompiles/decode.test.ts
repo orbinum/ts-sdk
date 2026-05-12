@@ -44,6 +44,7 @@ describe('decodePrecompileCalldata — null cases', () => {
             assetId: 0,
             amount: 1n,
             commitment: COMMITMENT,
+            encryptedMemo: new Uint8Array(176),
         });
         const upper = SP_ADDR.toUpperCase();
         const result = decodePrecompileCalldata(upper, calldata);
@@ -52,39 +53,39 @@ describe('decodePrecompileCalldata — null cases', () => {
     });
 });
 
-// ─── shield(uint32,uint256,bytes32,bytes) — round-trip ────────────────────────
+// ─── shield(uint32,bytes32,bytes) — round-trip ───────────────────────────────
+// amount is msg.value (NOT in calldata)
 
 describe('decodePrecompileCalldata — shield', () => {
     const sp = new ShieldedPoolPrecompile(mockEvm());
 
     it('decodes fnSig correctly', () => {
-        const calldata = sp.buildShieldCalldata({ assetId: 0, amount: 1_000n, commitment: COMMITMENT });
+        const calldata = sp.buildShieldCalldata({ assetId: 0, amount: 1_000n, commitment: COMMITMENT, encryptedMemo: new Uint8Array(176) });
         const result = decodePrecompileCalldata(SP_ADDR, calldata);
-        expect(result?.fnSig).toBe('shield(uint32,uint256,bytes32,bytes)');
+        expect(result?.fnSig).toBe('shield(uint32,bytes32,bytes)');
     });
 
     it('round-trips assetId', () => {
-        const calldata = sp.buildShieldCalldata({ assetId: 7, amount: 1n, commitment: COMMITMENT });
+        const calldata = sp.buildShieldCalldata({ assetId: 7, amount: 1n, commitment: COMMITMENT, encryptedMemo: new Uint8Array(176) });
         const result = decodePrecompileCalldata(SP_ADDR, calldata);
         expect(result?.args['assetId']).toBe(7n);
     });
 
-    it('round-trips amount', () => {
-        const amount = 1_000_000_000_000_000_000n; // 1 ORB in planck
-        const calldata = sp.buildShieldCalldata({ assetId: 0, amount, commitment: COMMITMENT });
+    it('amount is NOT present in args (it is msg.value)', () => {
+        const calldata = sp.buildShieldCalldata({ assetId: 0, amount: 1_000_000_000_000_000_000n, commitment: COMMITMENT, encryptedMemo: new Uint8Array(176) });
         const result = decodePrecompileCalldata(SP_ADDR, calldata);
-        expect(result?.args['amount']).toBe(amount);
+        expect(result?.args['amount']).toBeUndefined();
     });
 
     it('round-trips commitment as 0x-prefixed hex', () => {
-        const calldata = sp.buildShieldCalldata({ assetId: 0, amount: 1n, commitment: COMMITMENT });
+        const calldata = sp.buildShieldCalldata({ assetId: 0, amount: 1n, commitment: COMMITMENT, encryptedMemo: new Uint8Array(176) });
         const result = decodePrecompileCalldata(SP_ADDR, calldata);
         expect(typeof result?.args['commitment']).toBe('string');
         expect((result?.args['commitment'] as string).toLowerCase()).toBe(COMMITMENT.toLowerCase());
     });
 });
 
-// ─── unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32) — round-trip ──────
+// ─── unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32) — round-trip ──────
 
 describe('decodePrecompileCalldata — unshield', () => {
     const sp = new ShieldedPoolPrecompile(mockEvm());
@@ -101,7 +102,7 @@ describe('decodePrecompileCalldata — unshield', () => {
     it('decodes fnSig correctly', () => {
         const calldata = sp.buildUnshieldCalldata(params);
         const result = decodePrecompileCalldata(SP_ADDR, calldata);
-        expect(result?.fnSig).toBe('unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32)');
+        expect(result?.fnSig).toBe('unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32)');
     });
 
     it('round-trips root', () => {
@@ -133,44 +134,52 @@ describe('decodePrecompileCalldata — unshield', () => {
         const result = decodePrecompileCalldata(SP_ADDR, calldata);
         expect((result?.args['recipient'] as string).toLowerCase()).toBe(RECIPIENT.toLowerCase());
     });
+
+    it('decodes fee as 0n when not specified', () => {
+        const calldata = sp.buildUnshieldCalldata(params);
+        const result = decodePrecompileCalldata(SP_ADDR, calldata);
+        expect(result?.args['fee']).toBe(0n);
+    });
+
+    it('round-trips fee', () => {
+        const calldata = sp.buildUnshieldCalldata({ ...params, fee: 1_000_000_000_000_000n });
+        const result = decodePrecompileCalldata(SP_ADDR, calldata);
+        expect(result?.args['fee']).toBe(1_000_000_000_000_000n);
+    });
 });
 
-// ─── privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[]) — round-trip ──
+// ─── privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256) — round-trip ──
 
 describe('decodePrecompileCalldata — privateTransfer', () => {
     const sp = new ShieldedPoolPrecompile(mockEvm());
 
+    const BASE_TRANSFER = {
+        proof: PROOF,
+        merkleRoot: ROOT,
+        inputs: [{ nullifier: NULLIFIER, commitment: COMMITMENT }],
+        outputs: [{ commitment: COMMITMENT, encryptedMemo: new Uint8Array(176) }],
+        assetId: 0,
+    };
+
     it('decodes fnSig correctly', () => {
-        const calldata = sp.buildPrivateTransferCalldata({
-            proof: PROOF,
-            merkleRoot: ROOT,
-            inputs: [{ nullifier: NULLIFIER, commitment: COMMITMENT }],
-            outputs: [{ commitment: COMMITMENT }],
-        });
+        const calldata = sp.buildPrivateTransferCalldata(BASE_TRANSFER);
         const result = decodePrecompileCalldata(SP_ADDR, calldata);
-        expect(result?.fnSig).toBe('privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[])');
+        expect(result?.fnSig).toBe('privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256)');
     });
 
     it('round-trips root', () => {
-        const calldata = sp.buildPrivateTransferCalldata({
-            proof: PROOF,
-            merkleRoot: ROOT,
-            inputs: [{ nullifier: NULLIFIER, commitment: COMMITMENT }],
-            outputs: [{ commitment: COMMITMENT }],
-        });
+        const calldata = sp.buildPrivateTransferCalldata(BASE_TRANSFER);
         const result = decodePrecompileCalldata(SP_ADDR, calldata);
         expect((result?.args['root'] as string).toLowerCase()).toBe(ROOT.toLowerCase());
     });
 
     it('counts nullifiers correctly', () => {
         const calldata = sp.buildPrivateTransferCalldata({
-            proof: PROOF,
-            merkleRoot: ROOT,
+            ...BASE_TRANSFER,
             inputs: [
                 { nullifier: NULLIFIER, commitment: COMMITMENT },
                 { nullifier: NULLIFIER, commitment: COMMITMENT },
             ],
-            outputs: [{ commitment: COMMITMENT }],
         });
         const result = decodePrecompileCalldata(SP_ADDR, calldata);
         expect(result?.args['nullifiers']).toBe(2);
@@ -178,16 +187,32 @@ describe('decodePrecompileCalldata — privateTransfer', () => {
 
     it('counts commitments correctly', () => {
         const calldata = sp.buildPrivateTransferCalldata({
-            proof: PROOF,
-            merkleRoot: ROOT,
-            inputs: [{ nullifier: NULLIFIER, commitment: COMMITMENT }],
+            ...BASE_TRANSFER,
             outputs: [
-                { commitment: COMMITMENT },
-                { commitment: COMMITMENT },
+                { commitment: COMMITMENT, encryptedMemo: new Uint8Array(176) },
+                { commitment: COMMITMENT, encryptedMemo: new Uint8Array(176) },
             ],
         });
         const result = decodePrecompileCalldata(SP_ADDR, calldata);
         expect(result?.args['commitments']).toBe(2);
+    });
+
+    it('round-trips assetId', () => {
+        const calldata = sp.buildPrivateTransferCalldata({ ...BASE_TRANSFER, assetId: 3 });
+        const result = decodePrecompileCalldata(SP_ADDR, calldata);
+        expect(result?.args['assetId']).toBe(3n);
+    });
+
+    it('round-trips fee', () => {
+        const calldata = sp.buildPrivateTransferCalldata({ ...BASE_TRANSFER, fee: 1_000_000n });
+        const result = decodePrecompileCalldata(SP_ADDR, calldata);
+        expect(result?.args['fee']).toBe(1_000_000n);
+    });
+
+    it('decodes fee as 0n when not specified', () => {
+        const calldata = sp.buildPrivateTransferCalldata(BASE_TRANSFER);
+        const result = decodePrecompileCalldata(SP_ADDR, calldata);
+        expect(result?.args['fee']).toBe(0n);
     });
 });
 

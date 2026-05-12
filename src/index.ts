@@ -60,35 +60,80 @@ export type {
 export {
     NoteBuilder,
     EncryptedMemo,
+    ENCRYPTED_MEMO_SIZE,
     ShieldedPoolModule,
-    PrivacyKeyManager,
     tryDecryptNote,
-    deriveViewingKey,
+    tryDecryptNoteVerbose,
+    computeNullifier,
+    selectNotes,
+    buildDummyTransferInput,
+    generateDisclosureProof,
+    buildDisclosurePublicSignals,
+    deriveBabyJubjubKeypair,
+    decryptDisclosureSignals,
+    type DisclosureFlags,
+    type DisclosureProofOutput,
+} from './shielded-pool/index';
+export { BN254_R, BABYJUB_SUBORDER } from './utils/crypto-constants';
+export { randomBlinding } from './utils/blinding';
+
+// ─── Privacy keys ─────────────────────────────────────────────────────────────
+export {
+    PrivacyKeyManager,
+    deriveViewingSecretKey,
+    deriveViewingPublicKey,
     deriveOwnerPk,
     deriveSpendingKeyMessage,
     deriveSpendingKeyFromSignature,
+    deriveMasterKeyBytes,
+} from './privacy-keys/index';
+
+// ─── Vault ────────────────────────────────────────────────────────────────────
+export {
     deriveVaultKey,
     encryptJson,
     decryptJson,
-    fromBase64,
-    toBase64,
     vaultReplacer,
     vaultReviver,
-} from './shielded-pool/index';
-export type { DecryptedMemo, ScanCommitment } from './shielded-pool/index';
+    VaultLockedError,
+    applyNoteStatus,
+    encryptNote,
+    decryptNoteRecord,
+} from './vault/index';
+export type { EncryptedNoteRecord, NoteStatusUpdate } from './vault/index';
+
+// ─── Proof generator ─────────────────────────────────────────────────────────
+export {
+    generateUnshieldProof,
+    generateTransferProof,
+    generateFeeClaimProof,
+    CircuitType,
+    WebArtifactProvider,
+} from './proof-generator';
+export type {
+    ArtifactProvider,
+    ProofResult,
+    UnshieldProofInputs,
+    TransferInputNote,
+    TransferOutputNote,
+    PrivateTransferProofInputs,
+    FeeClaimProofInputs,
+} from './proof-generator';
 export type {
     MerkleTreeInfo,
     ShieldParams,
     ShieldBatchItem,
     ShieldBatchParams,
-    ShieldResult,
+    ClaimShieldedFeesParams,
     UnshieldParams,
     PrivateTransferInput,
     PrivateTransferOutput,
     PrivateTransferParams,
     NoteInput,
     ZkNote,
-} from './shielded-pool/types';
+    DecryptedMemo,
+    ScanCommitment,
+} from './shielded-pool/protocol/types';
 
 // ─── Account mapping ─────────────────────────────────────────────────────────
 export { AccountMappingModule } from './account-mapping/index';
@@ -126,14 +171,23 @@ export type {
     ResolvedAlias,
     KnownPrecompileInfo,
     DecodedPrecompile,
+    RequestDisclosureParams,
+    DiscloseParams,
+    RejectDisclosureParams,
+    PruneExpiredRequestParams,
 } from './precompiles/index';
+
+// ─── Relayer ─────────────────────────────────────────────────────────────────
+export { RelayerStatusModule } from './relayer/index';
+export type { RelayerInfo } from './relayer/index';
 
 // ─── Runtime event types ─────────────────────────────────────────────────────
 
 // pallet-shielded-pool events
 export type {
     ShieldedEvent,
-    PrivateTransferEvent,
+    NullifiersSpentEvent,
+    CommitmentsInsertedEvent,
     UnshieldedEvent,
     MerkleRootUpdatedEvent,
     AuditPolicySetEvent,
@@ -146,7 +200,7 @@ export type {
     AssetVerifiedEvent,
     AssetUnverifiedEvent,
     ShieldedPoolEvent,
-} from './shielded-pool/types/pallet-events';
+} from './shielded-pool/pallet/events';
 
 // pallet-zk-verifier events
 export type {
@@ -188,9 +242,10 @@ export type {
 export type {
     Bytes32,
     DisclosurePublicSignals,
+    EncryptedDisclosureSignals,
+    DisclosureFieldMask,
     Auditor,
     DisclosureCondition,
-    BatchDisclosureSubmission,
     ShieldOperation,
     ShieldArgs,
     ShieldBatchArgs,
@@ -198,18 +253,16 @@ export type {
     RawTransferOutput,
     PrivateTransferArgs,
     UnshieldArgs,
-    SetAuditPolicyArgs,
     RequestDisclosureArgs,
     DiscloseArgs,
     RejectDisclosureArgs,
-    BatchSubmitDisclosureProofsArgs,
     RegisterAssetArgs,
     VerifyAssetArgs,
     UnverifyAssetArgs,
     PruneExpiredRequestArgs,
     RevokeDisclosureRecordArgs,
     ShieldedPoolCall,
-} from './shielded-pool/types/pallet-extrinsics';
+} from './shielded-pool/pallet/extrinsics';
 
 // pallet-zk-verifier
 export type {
@@ -256,10 +309,11 @@ export type {
     ShieldedAddressEvent,
     ShieldedCommitment,
     SpentNullifier,
-    PrivateTransfer,
+    PrivateTransferTimestamp,
     Unshield,
     MerkleRoot,
     NullifierStatusResult,
+    StealthScanHint,
 } from './indexer';
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
@@ -267,7 +321,10 @@ export { formatBalance, formatORB } from './utils/format';
 export type { FormatOptions } from './utils/format';
 export { shortHash, truncateMiddle } from './utils/string';
 export { toHex, fromHex, ensureHexPrefix, hexToNumber, hexToBigint } from './utils/hex';
-export { toTxResult } from './utils/tx';
+export { toTxResult, type UnsafeTxOptions } from './utils/tx';
+export { toBase64, fromBase64 } from './utils/encoding';
+export { deriveStealthOwnerPk, deriveStealthSk } from './utils/stealth';
+export { recoverOwnerPkPoint } from './utils/bjj';
 export {
     bigintTo32Le,
     bigintTo32Be,
@@ -304,12 +361,9 @@ export type {
     DecodedShieldBatchArgs,
     DecodedPrivateTransferArgs,
     DecodedUnshieldArgs,
-    DecodedSetAuditPolicyArgs,
     DecodedRequestDisclosureArgs,
-    DecodedApproveDisclosureArgs,
     DecodedRejectDisclosureArgs,
     DecodedSubmitDisclosureArgs,
-    DecodedBatchSubmitDisclosureArgs,
     DecodedTransferArgs,
     DecodedTransferKeepAliveArgs,
     DecodedTransferAllArgs,
@@ -328,16 +382,14 @@ export type {
 
 export type {
     ShieldedEventData,
-    PrivateTransferEventData,
+    NullifiersSpentEventData,
+    CommitmentsInsertedEventData,
     UnshieldedEventData,
     MerkleRootUpdatedData,
-    AuditPolicySetData,
     DisclosureRequestedData,
-    DisclosureApprovedData,
     DisclosureRejectedData,
     DisclosureSubmittedData,
     DisclosureVerifiedData,
-    AuditTrailRecordedData,
     TransferEventData,
     EndowedEventData,
     ReservedEventData,

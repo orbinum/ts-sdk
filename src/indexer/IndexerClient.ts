@@ -7,10 +7,11 @@ import type {
     MerkleRoot,
     NullifierStatusResult,
     PaginatedResult,
-    PrivateTransfer,
+    PrivateTransferTimestamp,
     ShieldedAddressEvent,
     ShieldedCommitment,
     SpentNullifier,
+    StealthScanHint,
     Unshield,
 } from './types';
 
@@ -47,6 +48,25 @@ export class IndexerClient {
             throw new Error(`IndexerClient: HTTP ${res.status} for ${path}`);
         }
         return res.json() as Promise<T>;
+    }
+
+    private async post<T>(path: string, body: unknown): Promise<T> {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+        try {
+            const res = await fetch(`${this.baseUrl}${path}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+                signal: controller.signal,
+            });
+            if (!res.ok) {
+                throw new Error(`IndexerClient: HTTP ${res.status} for POST ${path}`);
+            }
+            return res.json() as Promise<T>;
+        } finally {
+            clearTimeout(timer);
+        }
     }
 
     private async getOrNull<T>(path: string): Promise<T | null> {
@@ -96,6 +116,26 @@ export class IndexerClient {
         );
     }
 
+    /**
+     * Returns a paginated list of stealth scan hints ordered ascending by leafIndex.
+     * Each hint contains only the fields required for ECDH triage and decryption:
+     * leafIndex, commitmentHex, assetId, ephPkHex, encryptedMemo.
+     *
+     * Use `sinceLeafIndex` for incremental scans (cursor = last seen leafIndex + 1).
+     */
+    async getScanHints(params?: {
+        page?: number;
+        limit?: number;
+        sinceLeafIndex?: number;
+    }): Promise<PaginatedResult<StealthScanHint>> {
+        const qs = this.buildQuery({
+            page: params?.page,
+            limit: params?.limit,
+            since_leaf_index: params?.sinceLeafIndex,
+        });
+        return this.get<PaginatedResult<StealthScanHint>>(`/shielded/scan-hints${qs}`);
+    }
+
     // ─── Nullifiers ────────────────────────────────────────────────────────────
 
     /** Returns a paginated list of spent nullifiers. */
@@ -114,15 +154,53 @@ export class IndexerClient {
         );
     }
 
+    /**
+     * Batch-checks which of the given nullifiers are spent.
+     * Returns only the nullifiers that exist in the spent set.
+     * Accepts up to 100 nullifiers (0x-prefixed hex).
+     */
+    async getNullifiersBatch(nullifiers: string[]): Promise<SpentNullifier[]> {
+        if (nullifiers.length === 0) return [];
+        const res = await this.post<{ data: SpentNullifier[] }>('/shielded/nullifiers/batch', {
+            nullifiers: nullifiers.map((n) => n.toLowerCase()),
+        });
+        return res.data;
+    }
+
     // ─── Private transfers ─────────────────────────────────────────────────────
 
-    /** Returns a paginated list of private transfer events. */
-    async getTransfers(params?: {
-        page?: number;
-        limit?: number;
-    }): Promise<PaginatedResult<PrivateTransfer>> {
-        const qs = this.buildQuery({ page: params?.page, limit: params?.limit });
-        return this.get<PaginatedResult<PrivateTransfer>>(`/shielded/transfers${qs}`);
+    /**
+     * Returns temporal metadata for private transfers that spent any of the given nullifiers.
+     * Only blockNumber, extrinsicIndex, timestampMs, and hash are returned — no cross-link
+     * between inputs and outputs to prevent graph reconstruction.
+     * Accepts up to 50 nullifiers (0x-prefixed hex).
+     */
+    async getTransfersByNullifiers(nullifiers: string[]): Promise<PrivateTransferTimestamp[]> {
+        if (nullifiers.length === 0) return [];
+        const qs = this.buildQuery({
+            nullifiers: nullifiers.map((n) => n.toLowerCase()).join(','),
+        });
+        const res = await this.get<{ data: PrivateTransferTimestamp[]; total: number }>(
+            `/shielded/transfers/by-nullifiers${qs}`
+        );
+        return res.data;
+    }
+
+    /**
+     * Returns temporal metadata for private transfers that produced any of the given commitments.
+     * Only blockNumber, extrinsicIndex, timestampMs, and hash are returned — no cross-link
+     * between outputs and inputs to prevent graph reconstruction.
+     * Accepts up to 50 commitments (0x-prefixed hex).
+     */
+    async getTransfersByCommitments(commitments: string[]): Promise<PrivateTransferTimestamp[]> {
+        if (commitments.length === 0) return [];
+        const qs = this.buildQuery({
+            commitments: commitments.map((c) => c.toLowerCase()).join(','),
+        });
+        const res = await this.get<{ data: PrivateTransferTimestamp[]; total: number }>(
+            `/shielded/transfers/by-commitments${qs}`
+        );
+        return res.data;
     }
 
     // ─── Unshields ─────────────────────────────────────────────────────────────
@@ -214,6 +292,20 @@ export class IndexerClient {
         const qs = this.buildQuery({ page: params?.page, limit: params?.limit });
         return this.get<PaginatedResult<ShieldedCommitment>>(
             `/address/${encodeURIComponent(address.toLowerCase())}/shielded${qs}`
+        );
+    }
+
+    /**
+     * Returns a paginated list of unshield events where the given address is the recipient.
+     * Accepts a 0x-prefixed EVM address or an SS58 Substrate address.
+     */
+    async getAddressUnshields(
+        address: string,
+        params?: { page?: number; limit?: number }
+    ): Promise<PaginatedResult<Unshield>> {
+        const qs = this.buildQuery({ page: params?.page, limit: params?.limit });
+        return this.get<PaginatedResult<Unshield>>(
+            `/address/${encodeURIComponent(address)}/unshields${qs}`
         );
     }
 

@@ -15,6 +15,7 @@ import type {
 // Raw RPC response shapes
 // ---------------------------------------------------------------------------
 
+/** Raw JSON-RPC shape of an EVM block (hex-encoded numeric fields). */
 interface RawEvmBlock {
     hash: string;
     parentHash: string;
@@ -26,6 +27,7 @@ interface RawEvmBlock {
     gasLimit: string;
 }
 
+/** Raw JSON-RPC shape of an EVM transaction (hex-encoded numeric fields). */
 interface RawEvmTx {
     hash: string;
     from: string;
@@ -39,12 +41,14 @@ interface RawEvmTx {
     blockHash?: string;
 }
 
+/** Raw JSON-RPC shape of an EVM transaction receipt (hex-encoded numeric fields). */
 interface RawEvmReceipt {
     status: string;
     gasUsed: string;
     contractAddress?: string | null;
 }
 
+/** Raw JSON-RPC shape of an EVM log entry (hex-encoded numeric fields). */
 interface RawEvmLog {
     address: string;
     topics: string[];
@@ -63,10 +67,12 @@ interface RawEvmLog {
  * Provides typed block/tx/address/token methods for explorer applications.
  */
 export class EvmExplorer {
+    /** @param evm - Underlying `EvmClient` used for all RPC calls. */
     constructor(private readonly evm: EvmClient) {}
 
     // --- Blocks ---
 
+    /** Returns the `count` most recent blocks in descending order (latest first). */
     async getLatestBlocks(count = 10): Promise<EvmBlock[]> {
         const latest = await this.evm.getBlockNumber();
         const nums = Array.from({ length: Math.min(count, latest + 1) }, (_, i) => latest - i);
@@ -85,11 +91,13 @@ export class EvmExplorer {
             .map((b) => this.parseBlock(b));
     }
 
+    /** Returns a single block by number or hash, or `null` if not found. */
     async getBlock(hashOrNumber: string | number): Promise<EvmBlock | null> {
         const b = await this.fetchBlock(hashOrNumber, false);
         return b ? this.parseBlock(b) : null;
     }
 
+    /** Returns all transactions in a block (with receipts), or `[]` if the block is not found. */
     async getBlockTransactions(hashOrNumber: string | number): Promise<EvmTransaction[]> {
         try {
             const b = await this.fetchBlock(hashOrNumber, true);
@@ -108,6 +116,7 @@ export class EvmExplorer {
 
     // --- Transactions ---
 
+    /** Returns a single transaction with its receipt, or `null` if not found. */
     async getTransaction(hash: string): Promise<EvmTransaction | null> {
         try {
             const [tx, receipt] = await Promise.all([
@@ -123,6 +132,10 @@ export class EvmExplorer {
         }
     }
 
+    /**
+     * Returns lightweight summaries of all transactions sent from or to `address`
+     * within the last `maxBlocks` blocks, sorted by block number descending.
+     */
     async getTransactionsByAddress(address: string, maxBlocks = 300): Promise<EvmTxSummary[]> {
         const addr = address.toLowerCase();
         const latest = await this.evm.getBlockNumber();
@@ -186,6 +199,10 @@ export class EvmExplorer {
 
     // --- Address ---
 
+    /**
+     * Returns aggregated on-chain data for an EVM address: balance, nonce,
+     * bytecode (truncated), and up to 50 recent logs from the last 5 000 blocks.
+     */
     async getAddressInfo(address: string): Promise<EvmAddressInfo> {
         const latest = await this.evm.getBlockNumber().catch(() => 0);
         const fromBlock = `0x${Math.max(0, latest - 5000).toString(16)}`;
@@ -232,6 +249,7 @@ export class EvmExplorer {
         };
     }
 
+    /** Returns the native token balance of `address`, formatted as a decimal string (no symbol). */
     async getBalance(address: string): Promise<string> {
         try {
             const val = await this.evm.getBalance(address);
@@ -241,6 +259,7 @@ export class EvmExplorer {
         }
     }
 
+    /** Returns the current transaction count (nonce) for `address`, or `0` on error. */
     async getNonce(address: string): Promise<number> {
         try {
             return await this.evm.getTransactionCount(address);
@@ -249,6 +268,7 @@ export class EvmExplorer {
         }
     }
 
+    /** Returns `true` when `address` has non-empty deployed bytecode. */
     async getIsContract(address: string): Promise<boolean> {
         try {
             const code = await this.evm.request<string>('eth_getCode', [address, 'latest']);
@@ -260,6 +280,10 @@ export class EvmExplorer {
 
     // --- Tokens ---
 
+    /**
+     * Fetches ERC-20 metadata for a token contract via ABI calls.
+     * Returns `null` when the address does not look like an ERC-20 token.
+     */
     async getTokenInfo(address: string): Promise<TokenInfo | null> {
         const addr = address.toLowerCase();
         const [name, symbol, decimals, totalSupply] = await this.evm
@@ -284,6 +308,10 @@ export class EvmExplorer {
         };
     }
 
+    /**
+     * Returns ERC-20 `Transfer` events for `address` from the last 5 000 blocks.
+     * When `holderAddress` is provided, restricts results to transfers sent or received by that address.
+     */
     async getTokenTransfers(address: string, holderAddress?: string): Promise<TokenTransfer[]> {
         const TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
         const latest = await this.evm.getBlockNumber().catch(() => 0);
@@ -326,6 +354,7 @@ export class EvmExplorer {
         }));
     }
 
+    /** Returns the raw ERC-20 balance of `holderAddress` for the token at `tokenAddress` (0x-prefixed hex). */
     async getTokenBalance(tokenAddress: string, holderAddress: string): Promise<string> {
         const padded = holderAddress.replace(/^0x/, '').toLowerCase().padStart(64, '0');
         const result = await this.ethCall(tokenAddress, `0x70a08231${padded}`);
@@ -334,6 +363,7 @@ export class EvmExplorer {
 
     // --- Private: parsers ---
 
+    /** Maps a raw RPC block object to the public `EvmBlock` shape. */
     private parseBlock(b: RawEvmBlock): EvmBlock {
         return {
             hash: b.hash,
@@ -347,6 +377,7 @@ export class EvmExplorer {
         };
     }
 
+    /** Maps a raw RPC transaction + optional receipt to the public `EvmTransaction` shape. */
     private parseTx(tx: RawEvmTx, receipt: RawEvmReceipt | null): EvmTransaction {
         const parsed: EvmTransaction = {
             hash: tx.hash,
@@ -368,6 +399,10 @@ export class EvmExplorer {
 
     // --- Private: fetch helpers ---
 
+    /**
+     * Fetches a raw block by number or hash. Accepts a plain integer, a decimal string,
+     * or a 0x-prefixed hash. Returns `null` on any RPC error.
+     */
     private async fetchBlock(
         hashOrNumber: string | number,
         withTxObjects: boolean
@@ -389,6 +424,7 @@ export class EvmExplorer {
         }
     }
 
+    /** Executes a read-only `eth_call` and returns the raw hex result, or `null` on error. */
     private async ethCall(to: string, data: string): Promise<string | null> {
         try {
             return await this.evm.call(to, data);
@@ -399,6 +435,7 @@ export class EvmExplorer {
 
     // --- Private static: ABI decoders ---
 
+    /** Decodes an ABI-encoded `string` return value from a raw 0x-prefixed hex string. */
     private static decodeAbiString(hex: string): string {
         if (!hex || hex === '0x') return '';
         const data = hex.startsWith('0x') ? hex.slice(2) : hex;
@@ -414,12 +451,14 @@ export class EvmExplorer {
         }
     }
 
+    /** Decodes an ABI-encoded `uint256` return value to a `bigint`. */
     private static decodeAbiUint(hex: string): bigint {
         if (!hex || hex === '0x') return 0n;
         const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
         return BigInt(`0x${clean || '0'}`);
     }
 
+    /** Converts a 0x-prefixed hex number to its decimal string representation. Returns `'0'` on parse error. */
     private static hexToDecimalStr(hex: string): string {
         try {
             return BigInt(hex).toString();
