@@ -45,4 +45,4 @@ Each module can also be instantiated independently without `OrbinumClient`.
 
 ## License
 
-ISC
+MIT
