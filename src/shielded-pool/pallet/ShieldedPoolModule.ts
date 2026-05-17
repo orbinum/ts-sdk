@@ -17,13 +17,6 @@ import type {
     ShieldBatchParams,
     ClaimShieldedFeesParams,
 } from '../protocol/types';
-import type {
-    RequestDisclosureArgs,
-    DiscloseArgs,
-    RejectDisclosureArgs,
-    PruneExpiredRequestArgs,
-    RevokeDisclosureRecordArgs,
-} from './extrinsics';
 
 // ─── ShieldedPoolModule ───────────────────────────────────────────────────────
 
@@ -189,7 +182,7 @@ export class ShieldedPoolModule {
     /**
      * Claims accrued relay fees into the shielded pool.
      * This is a SIGNED transaction — the relayer must sign it with their wallet.
-     * Before calling this, generate a ZK disclosure proof with generateFeeClaimProof().
+     * Before calling this, generate a ZK value proof with generateFeeClaimProof() (not yet implemented).
      *
      * Extrinsic: shieldedPool.claim_shielded_fees(commitment, amount, asset_id, memo, proof, public_signals)
      */
@@ -207,131 +200,6 @@ export class ShieldedPoolModule {
             encrypted_memo: Binary.fromBytes(params.encryptedMemo),
             proof: Binary.fromBytes(params.proof),
             public_signals: Binary.fromBytes(params.publicSignals),
-        });
-        return toTxResult(
-            await (txOptions !== undefined
-                ? tx.signAndSubmit(signer, txOptions)
-                : tx.signAndSubmit(signer))
-        );
-    }
-
-    // ─── Selective Disclosure ──────────────────────────────────────────────────
-
-    /**
-     * Requests a selective disclosure from a target account for a specific commitment.
-     * The auditor's Baby Jubjub public key is included so the note owner knows
-     * which key to encrypt to when generating the proof.
-     * Extrinsic: shieldedPool.request_disclosure(target, commitment, required_fields,
-     *                                             reason, auditor_bjj_pk_x, auditor_bjj_pk_y)
-     */
-    async requestDisclosure(
-        params: RequestDisclosureArgs,
-        signer: PolkadotSigner,
-        txOptions?: UnsafeTxOptions
-    ): Promise<TxResult> {
-        const entry = resolveTx(this.substrate.unsafe, 'ShieldedPool', 'request_disclosure');
-        const tx = callUnsafeTx(entry, {
-            target: params.target,
-            commitment: Binary.fromBytes(new Uint8Array(params.commitment)),
-            required_fields: {
-                value: params.requiredFields.value,
-                asset_id: params.requiredFields.assetId,
-                owner: params.requiredFields.owner,
-            },
-            reason: Binary.fromText(params.reason),
-            auditor_bjj_pk_x: Binary.fromBytes(new Uint8Array(params.auditorBjjPkX)),
-            auditor_bjj_pk_y: Binary.fromBytes(new Uint8Array(params.auditorBjjPkY)),
-        });
-        return toTxResult(
-            await (txOptions !== undefined
-                ? tx.signAndSubmit(signer, txOptions)
-                : tx.signAndSubmit(signer))
-        );
-    }
-
-    /**
-     * Submits a Groth16 ZK disclosure proof for a note commitment.
-     * The proof reveals the selected fields (value, asset_id, owner_hash) on-chain.
-     * Use generateDisclosureProof() + buildDisclosurePublicSignals() before calling this.
-     * Extrinsic: shieldedPool.disclose(commitment, proof_bytes, public_signals, auditor)
-     */
-    async disclose(
-        params: DiscloseArgs,
-        signer: PolkadotSigner,
-        txOptions?: UnsafeTxOptions
-    ): Promise<TxResult> {
-        const entry = resolveTx(this.substrate.unsafe, 'ShieldedPool', 'disclose');
-        const tx = callUnsafeTx(entry, {
-            commitment: Binary.fromBytes(new Uint8Array(params.commitment)),
-            proof_bytes: Binary.fromBytes(new Uint8Array(params.proofBytes)),
-            public_signals: Binary.fromBytes(new Uint8Array(params.publicSignals)),
-            auditor: params.auditor,
-        });
-        return toTxResult(
-            await (txOptions !== undefined
-                ? tx.signAndSubmit(signer, txOptions)
-                : tx.signAndSubmit(signer))
-        );
-    }
-
-    /**
-     * Rejects a pending disclosure request from an auditor for a specific commitment.
-     * Extrinsic: shieldedPool.reject_disclosure(auditor, commitment, reason)
-     */
-    async rejectDisclosure(
-        params: RejectDisclosureArgs,
-        signer: PolkadotSigner,
-        txOptions?: UnsafeTxOptions
-    ): Promise<TxResult> {
-        const entry = resolveTx(this.substrate.unsafe, 'ShieldedPool', 'reject_disclosure');
-        const tx = callUnsafeTx(entry, {
-            auditor: params.auditor,
-            commitment: Binary.fromBytes(new Uint8Array(params.commitment)),
-            reason: Binary.fromText(params.reason),
-        });
-        return toTxResult(
-            await (txOptions !== undefined
-                ? tx.signAndSubmit(signer, txOptions)
-                : tx.signAndSubmit(signer))
-        );
-    }
-
-    /**
-     * Cleans up a disclosure request that has passed its expiration block.
-     * Permissionless — any account can prune expired requests.
-     * Extrinsic: shieldedPool.prune_expired_request(target, auditor, commitment)
-     */
-    async pruneExpiredRequest(
-        params: PruneExpiredRequestArgs,
-        signer: PolkadotSigner,
-        txOptions?: UnsafeTxOptions
-    ): Promise<TxResult> {
-        const entry = resolveTx(this.substrate.unsafe, 'ShieldedPool', 'prune_expired_request');
-        const tx = callUnsafeTx(entry, {
-            target: params.target,
-            auditor: params.auditor,
-            commitment: Binary.fromBytes(new Uint8Array(params.commitment)),
-        });
-        return toTxResult(
-            await (txOptions !== undefined
-                ? tx.signAndSubmit(signer, txOptions)
-                : tx.signAndSubmit(signer))
-        );
-    }
-
-    /**
-     * Revokes a previously submitted voluntary disclosure record.
-     * Only applies to self-disclosures (auditor = None). Auditor-requested records are permanent.
-     * Extrinsic: shieldedPool.revoke_disclosure_record(commitment)
-     */
-    async revokeDisclosureRecord(
-        params: RevokeDisclosureRecordArgs,
-        signer: PolkadotSigner,
-        txOptions?: UnsafeTxOptions
-    ): Promise<TxResult> {
-        const entry = resolveTx(this.substrate.unsafe, 'ShieldedPool', 'revoke_disclosure_record');
-        const tx = callUnsafeTx(entry, {
-            commitment: Binary.fromBytes(new Uint8Array(params.commitment)),
         });
         return toTxResult(
             await (txOptions !== undefined

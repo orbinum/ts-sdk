@@ -82,14 +82,8 @@ export const SP_SEL = {
     PRIVATE_TRANSFER: new Uint8Array([0x8c, 0x0f, 0x5d, 0x24]),
     // unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32)               → 0xd21d9a79
     UNSHIELD: new Uint8Array([0xd2, 0x1d, 0x9a, 0x79]),
-    // requestDisclosure(bytes32,bytes32,bool,bool,bool,bytes,bytes32,bytes32)      → 0xe7022933  (caller = auditor)
-    REQUEST_DISCLOSURE: new Uint8Array([0xe7, 0x02, 0x29, 0x33]),
-    // disclose(bytes32,bytes,bytes,bytes32)                                        → 0xea8a4165  (caller = note owner)
-    DISCLOSE: new Uint8Array([0xea, 0x8a, 0x41, 0x65]),
-    // rejectDisclosure(bytes32,bytes32,bytes)                                      → 0x72b895a9  (caller = target)
-    REJECT_DISCLOSURE: new Uint8Array([0x72, 0xb8, 0x95, 0xa9]),
-    // pruneExpiredRequest(bytes32,bytes32,bytes32)                                 → 0x0c338dcf  (permissionless)
-    PRUNE_EXPIRED_REQUEST: new Uint8Array([0x0c, 0x33, 0x8d, 0xcf]),
+    // claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes)                → 0x42e1e74c
+    CLAIM_SHIELDED_FEES: new Uint8Array([0x42, 0xe1, 0xe7, 0x4c]),
 } as const;
 
 // ─── Known Precompiles registry ───────────────────────────────────────────────
@@ -142,10 +136,7 @@ export const KNOWN_PRECOMPILES: Record<string, KnownPrecompileInfo> = {
             '9feb22ea': 'shield(uint32,bytes32,bytes)',
             '8c0f5d24': 'privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256)',
             d21d9a79: 'unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32)',
-            e7022933: 'requestDisclosure(bytes32,bytes32,bool,bool,bool,bytes,bytes32,bytes32)',
-            ea8a4165: 'disclose(bytes32,bytes,bytes,bytes32)',
-            '72b895a9': 'rejectDisclosure(bytes32,bytes32,bytes)',
-            '0c338dcf': 'pruneExpiredRequest(bytes32,bytes32,bytes32)',
+            '42e1e74c': 'claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes)',
         },
     },
 };

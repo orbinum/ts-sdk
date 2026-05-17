@@ -102,5 +102,25 @@ export function decodePrecompileCalldata(address: string, input: string): Decode
         }
     }
 
+    // claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes)
+    // ABI head after selector (6 fixed slots × 32 = 192 bytes):
+    // [0-31]   commitment (bytes32)
+    // [32-63]  amount (uint256)
+    // [64-95]  asset_id (uint32, right-aligned)
+    // [96-127] offset → memo
+    // [128-159] offset → proof
+    // [160-191] offset → publicSignals
+    if (fnSig.startsWith('claimShieldedFees(')) {
+        try {
+            const data = fromHex(input.slice(10));
+            const commitment = toHex(data.slice(0, 32));
+            const amount = decodeUint(data, 32);
+            const assetId = decodeUint(data, 64);
+            return { fnSig, args: { commitment, amount, assetId } };
+        } catch {
+            return { fnSig, args: {} };
+        }
+    }
+
     return { fnSig, args: {} };
 }

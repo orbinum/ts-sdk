@@ -5,6 +5,64 @@ All notable changes to the Orbinum TypeScript SDK will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-05-17
+
+### Added
+
+- **`shielded-pool/protocol/NoteDisclosure`** — off-chain note disclosure utilities:
+  - `createNoteDisclosureKey(note)`: serialises the plaintext preimage of a `ZkNote` into a compact shareable string with prefix `orbdisc:<base64url(JSON)>`. Reveals `value`, `assetId`, `ownerPk` (BJJ Ax), and `blinding` — never `spendingKey`, `nullifier`, or any viewing secret.
+  - `decodeNoteDisclosureKey(key)`: parses and cryptographically verifies a disclosure key by recomputing `Poseidon4(value, assetId, ownerPk, blinding)` and comparing it against the embedded commitment hex. Returns `NoteDisclosureKey | null`; `null` on any parse or verification failure.
+  - Type `NoteDisclosureKey`: `{ version: 1, commitment, value, assetId, ownerPk, blinding }` (all fields as `bigint`).
+  - Exported from `shielded-pool/protocol`.
+
+- **`IndexerClient`** — new relayer and registered-asset endpoints:
+  - `getRelayers(params?)`: paginated list of relayers; optional filters `page`, `limit`, `active`.
+  - `getRelayer(evmAddress)`: single relayer by EVM address, or `null` if not found.
+  - `getRelayFees(params?)`: paginated relay fee events; optional filters `relayer`, `type` (`'accumulated' | 'consumed'`).
+  - `getRelayFeesSummary(relayer)`: aggregated relay fee balances per asset for a given relayer account (`accumulated`, `consumed`, `pending` as bigint-safe strings).
+  - `getRegisteredAssets(params?)`: paginated list of assets registered via `register_asset`.
+  - `getRegisteredAsset(assetId)`: single registered asset by ID, or `null` if not found.
+  - New types: `Relayer`, `RelayFeeEvent`, `RelayFeeSummaryEntry`, `RegisteredAsset`.
+  - `ShieldedCommitment.source` field: `'shield' | 'transfer' | 'unshield'` — indicates the on-chain origin of a commitment.
+
+- **`precompiles/ShieldedPoolPrecompile`** — claim shielded fees support:
+  - `buildClaimShieldedFeesCalldata(params)`: ABI-encodes a `claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes)` call. Validates: `proof` non-empty, `publicSignals` exactly 76 bytes, `encryptedMemo` exactly 176 bytes.
+  - `claimShieldedFees(params, signer)`: sends the encoded calldata to the `SHIELDED_POOL` precompile address.
+  - `estimateClaimShieldedFeesGas(params, from)`: estimates EVM gas for a `claimShieldedFees` call.
+  - `SP_SEL.CLAIM_SHIELDED_FEES` selector `0x42e1e74c` added to `precompiles/addresses`.
+  - `precompiles/decode`: calldata decoder now recognises and partially decodes `claimShieldedFees` calls, returning `commitment`, `amount`, and `assetId`.
+  - `ClaimShieldedFeesParams` exported from `precompiles/types`.
+
+- **`proof-generator/fee-claim`** — `generateFeeClaimProof` fully implemented (previously a deprecated stub):
+  - Uses `CircuitType.ValueProof` (`'value_proof'`) via `@orbinum/proof-generator`.
+  - Circuit input mapping: `amount → value`, `assetId → asset_id`, `ownerPubkey → owner_pubkey` (all as decimal strings).
+  - Returns `FeeClaimProofOutput`: `proof` (128-byte Groth16 as `0x`-prefixed hex) and `publicSignals` (`number[]` of 76 bytes) with layout: commitment LE [0–32], value u64 LE [32–40], asset_id u32 LE [40–44], owner_hash LE [44–76].
+  - Validates `amount > 0n` before invoking the circuit.
+  - Accepts optional `provider` and `verbose` options.
+
+- **New tests:**
+  - `tests/proof-generator/fee-claim.test.ts` — 24 tests covering circuit type, input field mapping, 76-byte buffer layout, validation, provider handling, and determinism.
+  - `tests/precompiles/ShieldedPoolPrecompile.test.ts` — 228 lines added: `buildClaimShieldedFeesCalldata` (selector, determinism, field encoding, error cases), `claimShieldedFees` signer call, and `estimateClaimShieldedFeesGas`.
+  - `tests/shielded-pool/NoteDisclosure.test.ts` — 27 tests for `createNoteDisclosureKey` and `decodeNoteDisclosureKey` (roundtrip, commitment verification, tamper rejection, unknown prefix/version handling).
+  - `tests/indexer/IndexerClient.test.ts` — relayer and registered-asset endpoint tests added.
+
+### Changed
+
+- **`@orbinum/proof-generator`** dependency updated from `3.6.0` to `3.7.0`.
+
+### Removed
+
+> **Breaking changes** — the selective disclosure API has been removed across all surfaces.
+
+- **`shielded-pool/protocol/disclosure.ts`** deleted — `generateDisclosureProof`, `deriveBabyJubjubKeypair`, `decryptDisclosure`, and `buildDisclosurePublicSignals` are no longer available.
+- **`ShieldedPoolModule`** — disclosure extrinsics removed: `requestDisclosure`, `disclose`, `rejectDisclosure`, `pruneExpiredRequest`, `revokeDisclosureRecord`.
+- **`ShieldedPoolPrecompile`** — removed `buildRequestDisclosureCalldata`, `requestDisclosure`, `buildDiscloseCalldata`, `disclose`.
+- **`precompiles/types`** — removed: `RequestDisclosureParams`, `DiscloseParams`, `RejectDisclosureParams`, `PruneExpiredRequestParams`.
+- **`extrinsic/decoded-args`** — removed: `DecodedSetAuditPolicyArgs`, `DecodedRequestDisclosureArgs`, `DecodedRejectDisclosureArgs`.
+- **`shielded-pool/pallet/events`** — removed: `AuditPolicySetEvent`, `DisclosedEvent`, and all disclosure-related event types.
+- **`shielded-pool/pallet/extrinsics`** — removed: `RequestDisclosureArgs`, `DiscloseArgs`, `RejectDisclosureArgs`, `PruneExpiredRequestArgs`, `RevokeDisclosureRecordArgs`.
+- `tests/shielded-pool/disclosure.test.ts` deleted.
+
 ## [0.5.0] - 2026-05-12
 
 ### Added

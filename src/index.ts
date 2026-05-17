@@ -67,13 +67,10 @@ export {
     computeNullifier,
     selectNotes,
     buildDummyTransferInput,
-    generateDisclosureProof,
-    buildDisclosurePublicSignals,
-    deriveBabyJubjubKeypair,
-    decryptDisclosureSignals,
-    type DisclosureFlags,
-    type DisclosureProofOutput,
+    createNoteDisclosureKey,
+    decodeNoteDisclosureKey,
 } from './shielded-pool/index';
+export type { NoteDisclosure } from './shielded-pool/protocol/NoteDisclosure';
 export { BN254_R, BABYJUB_SUBORDER } from './utils/crypto-constants';
 export { randomBlinding } from './utils/blinding';
 
@@ -171,10 +168,6 @@ export type {
     ResolvedAlias,
     KnownPrecompileInfo,
     DecodedPrecompile,
-    RequestDisclosureParams,
-    DiscloseParams,
-    RejectDisclosureParams,
-    PruneExpiredRequestParams,
 } from './precompiles/index';
 
 // ─── Relayer ─────────────────────────────────────────────────────────────────
@@ -190,12 +183,6 @@ export type {
     CommitmentsInsertedEvent,
     UnshieldedEvent,
     MerkleRootUpdatedEvent,
-    AuditPolicySetEvent,
-    DisclosedEvent,
-    DisclosureRequestedEvent,
-    DisclosureRejectedEvent,
-    DisclosureRequestExpiredEvent,
-    DisclosureRecordRevokedEvent,
     AssetRegisteredEvent,
     AssetVerifiedEvent,
     AssetUnverifiedEvent,
@@ -241,11 +228,6 @@ export type {
 // pallet-shielded-pool
 export type {
     Bytes32,
-    DisclosurePublicSignals,
-    EncryptedDisclosureSignals,
-    DisclosureFieldMask,
-    Auditor,
-    DisclosureCondition,
     ShieldOperation,
     ShieldArgs,
     ShieldBatchArgs,
@@ -253,14 +235,9 @@ export type {
     RawTransferOutput,
     PrivateTransferArgs,
     UnshieldArgs,
-    RequestDisclosureArgs,
-    DiscloseArgs,
-    RejectDisclosureArgs,
     RegisterAssetArgs,
     VerifyAssetArgs,
     UnverifyAssetArgs,
-    PruneExpiredRequestArgs,
-    RevokeDisclosureRecordArgs,
     ShieldedPoolCall,
 } from './shielded-pool/pallet/extrinsics';
 
@@ -314,6 +291,10 @@ export type {
     MerkleRoot,
     NullifierStatusResult,
     StealthScanHint,
+    Relayer,
+    RelayFeeEvent,
+    RelayFeeSummaryEntry,
+    RegisteredAsset,
 } from './indexer';
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
@@ -361,9 +342,6 @@ export type {
     DecodedShieldBatchArgs,
     DecodedPrivateTransferArgs,
     DecodedUnshieldArgs,
-    DecodedRequestDisclosureArgs,
-    DecodedRejectDisclosureArgs,
-    DecodedSubmitDisclosureArgs,
     DecodedTransferArgs,
     DecodedTransferKeepAliveArgs,
     DecodedTransferAllArgs,
@@ -386,10 +364,6 @@ export type {
     CommitmentsInsertedEventData,
     UnshieldedEventData,
     MerkleRootUpdatedData,
-    DisclosureRequestedData,
-    DisclosureRejectedData,
-    DisclosureSubmittedData,
-    DisclosureVerifiedData,
     TransferEventData,
     EndowedEventData,
     ReservedEventData,

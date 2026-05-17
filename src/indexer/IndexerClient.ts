@@ -8,6 +8,10 @@ import type {
     NullifierStatusResult,
     PaginatedResult,
     PrivateTransferTimestamp,
+    RegisteredAsset,
+    RelayFeeEvent,
+    RelayFeeSummaryEntry,
+    Relayer,
     ShieldedAddressEvent,
     ShieldedCommitment,
     SpentNullifier,
@@ -322,6 +326,66 @@ export class IndexerClient {
         return this.get<PaginatedResult<ShieldedAddressEvent>>(
             `/shielded/address/${encodeURIComponent(address.toLowerCase())}${qs}`
         );
+    }
+
+    // ─── Relayers ──────────────────────────────────────────────────────────────
+
+    /** Returns a paginated list of relayers. Filter by active status with `active`. */
+    async getRelayers(params?: {
+        page?: number;
+        limit?: number;
+        active?: boolean;
+    }): Promise<PaginatedResult<Relayer>> {
+        const qs = this.buildQuery({
+            page: params?.page,
+            limit: params?.limit,
+            active: params?.active === undefined ? undefined : params.active ? 'true' : 'false',
+        });
+        return this.get<PaginatedResult<Relayer>>(`/relayers${qs}`);
+    }
+
+    /** Returns a single relayer by EVM address, or null if not found. */
+    async getRelayer(evmAddress: string): Promise<Relayer | null> {
+        return this.getOrNull<Relayer>(`/relayers/${encodeURIComponent(evmAddress.toLowerCase())}`);
+    }
+
+    /** Returns a paginated list of relay fee events. */
+    async getRelayFees(params?: {
+        page?: number;
+        limit?: number;
+        relayer?: string;
+        type?: 'accumulated' | 'consumed';
+    }): Promise<PaginatedResult<RelayFeeEvent>> {
+        const qs = this.buildQuery({
+            page: params?.page,
+            limit: params?.limit,
+            relayer: params?.relayer,
+            type: params?.type,
+        });
+        return this.get<PaginatedResult<RelayFeeEvent>>(`/relayers/fees${qs}`);
+    }
+
+    /** Returns aggregated relay fee balances per asset for a given relayer account. */
+    async getRelayFeesSummary(relayer: string): Promise<RelayFeeSummaryEntry[]> {
+        return this.get<RelayFeeSummaryEntry[]>(
+            `/relayers/fees/summary/${encodeURIComponent(relayer)}`
+        );
+    }
+
+    // ─── Registered assets ─────────────────────────────────────────────────────
+
+    /** Returns a paginated list of assets registered via register_asset. */
+    async getRegisteredAssets(params?: {
+        page?: number;
+        limit?: number;
+    }): Promise<PaginatedResult<RegisteredAsset>> {
+        const qs = this.buildQuery({ page: params?.page, limit: params?.limit });
+        return this.get<PaginatedResult<RegisteredAsset>>(`/shielded/assets${qs}`);
+    }
+
+    /** Returns a single registered asset by its ID, or null if not found. */
+    async getRegisteredAsset(assetId: string): Promise<RegisteredAsset | null> {
+        return this.getOrNull<RegisteredAsset>(`/shielded/assets/${encodeURIComponent(assetId)}`);
     }
 
     // ─── Stats & Health ────────────────────────────────────────────────────────

@@ -82,82 +82,6 @@ export type MerkleRootUpdatedEvent = {
     treeSize: number;
 };
 
-// ─── Audit policy ─────────────────────────────────────────────────────────────
-
-/**
- * Emitted by `set_audit_policy()` when an account sets or updates its audit policy.
- * Rust variant: `AuditPolicySet { account, version }`
- */
-export type AuditPolicySetEvent = {
-    /** SS58 AccountId of the policy owner. */
-    account: string;
-    /** Policy version number (monotonically increasing). */
-    version: number;
-};
-
-// ─── Disclosure ───────────────────────────────────────────────────────────────
-
-/**
- * Emitted by `disclose()` when a note is disclosed.
- * Rust variant: `Disclosed { who, commitment, auditor }`
- */
-export type DisclosedEvent = {
-    /** SS58 AccountId of the discloser. */
-    who: string;
-    /** 0x-prefixed 32-byte commitment of the disclosed note. */
-    commitment: string;
-    /** SS58 AccountId of the auditor, or null for voluntary disclosure. */
-    auditor: string | null;
-};
-
-/**
- * Emitted by `request_disclosure()` when an auditor requests a note disclosure.
- * Rust variant: `DisclosureRequested { target, auditor, reason }`
- */
-export type DisclosureRequestedEvent = {
-    /** SS58 AccountId of the note owner (disclosure target). */
-    target: string;
-    /** SS58 AccountId of the requesting auditor. */
-    auditor: string;
-    /** Reason string (max 256 bytes, UTF-8). */
-    reason: string;
-};
-
-/**
- * Emitted by `reject_disclosure()` when a note owner rejects a disclosure request.
- * Rust variant: `DisclosureRejected { target, auditor, reason }`
- */
-export type DisclosureRejectedEvent = {
-    /** SS58 AccountId of the note owner. */
-    target: string;
-    /** SS58 AccountId of the auditor whose request was rejected. */
-    auditor: string;
-    /** Rejection reason string (max 256 bytes, UTF-8). */
-    reason: string;
-};
-
-/**
- * Emitted when a pending disclosure request expires (on_finalize pruning).
- * Rust variant: `DisclosureRequestExpired { target, auditor }`
- */
-export type DisclosureRequestExpiredEvent = {
-    /** SS58 AccountId of the note owner. */
-    target: string;
-    /** SS58 AccountId of the auditor. */
-    auditor: string;
-};
-
-/**
- * Emitted by `revoke_disclosure_record()` when an account revokes a previous disclosure.
- * Rust variant: `DisclosureRecordRevoked { who, commitment }`
- */
-export type DisclosureRecordRevokedEvent = {
-    /** SS58 AccountId of the note owner. */
-    who: string;
-    /** 0x-prefixed 32-byte commitment of the revoked note. */
-    commitment: string;
-};
-
 // ─── Asset registry ───────────────────────────────────────────────────────────
 
 /**
@@ -193,12 +117,6 @@ export type ShieldedPoolEvent =
     | { type: 'CommitmentsInserted'; data: CommitmentsInsertedEvent }
     | { type: 'Unshielded'; data: UnshieldedEvent }
     | { type: 'MerkleRootUpdated'; data: MerkleRootUpdatedEvent }
-    | { type: 'AuditPolicySet'; data: AuditPolicySetEvent }
-    | { type: 'Disclosed'; data: DisclosedEvent }
-    | { type: 'DisclosureRequested'; data: DisclosureRequestedEvent }
-    | { type: 'DisclosureRejected'; data: DisclosureRejectedEvent }
-    | { type: 'DisclosureRequestExpired'; data: DisclosureRequestExpiredEvent }
-    | { type: 'DisclosureRecordRevoked'; data: DisclosureRecordRevokedEvent }
     | { type: 'AssetRegistered'; data: AssetRegisteredEvent }
     | { type: 'AssetVerified'; data: AssetVerifiedEvent }
     | { type: 'AssetUnverified'; data: AssetUnverifiedEvent };
