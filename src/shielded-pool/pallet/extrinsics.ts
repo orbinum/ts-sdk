@@ -24,80 +24,6 @@ export type Bytes32 = number[];
 export type Bytes176 = number[];
 
 /**
- * Disclosure public signals — exactly 256 bytes (ECDH Baby Jubjub layout):
- *   commitment[0..32] | auditor_pk_x[32..64] | auditor_pk_y[64..96]
- *   | epk_x[96..128] | epk_y[128..160] | enc_value[160..192]
- *   | enc_asset_id[192..224] | enc_owner_hash[224..256]
- */
-export type DisclosurePublicSignals = number[];
-
-/**
- * ECDH-encrypted note fields stored on-chain after a successful disclosure.
- * Maps to `EncryptedDisclosureSignals` in Rust.
- */
-export type EncryptedDisclosureSignals = {
-    /** Ephemeral public key x-coordinate (Baby Jubjub), 32 bytes LE. */
-    epkX: number[];
-    /** Ephemeral public key y-coordinate (Baby Jubjub), 32 bytes LE. */
-    epkY: number[];
-    /** Encrypted note value (field element LE). 0 if not disclosed. */
-    encValue: number[];
-    /** Encrypted asset ID (field element LE). 0 if not disclosed. */
-    encAssetId: number[];
-    /** Encrypted Poseidon(owner_pubkey) (field element LE). 0 if not disclosed. */
-    encOwnerHash: number[];
-};
-
-/**
- * Bitmap of which note fields the auditor requires to be disclosed.
- * Maps to `DisclosureFieldMask` in Rust.
- */
-export type DisclosureFieldMask = {
-    /** Must disclose the note value (amount in planck). */
-    value: boolean;
-    /** Must disclose the asset ID. */
-    assetId: boolean;
-    /** Must disclose Poseidon(owner_pubkey). */
-    owner: boolean;
-};
-
-// ─── Supporting types ─────────────────────────────────────────────────────────
-
-/**
- * A single auditor entry in an audit policy.
- * Maps to `Auditor<AccountId>` in Rust.
- */
-export type Auditor = {
-    /** SS58 or 0x-prefixed AccountId of the authorized auditor. */
-    account: string;
-};
-
-/**
- * A condition that must be satisfied before disclosure is permitted.
- * Maps to `DisclosureCondition` in Rust. Max 10 conditions per policy.
- * Evaluation is OR — a single satisfied condition is enough.
- */
-export type DisclosureCondition =
-    | { type: 'Always' }
-    | { type: 'TimeDelay'; afterBlock: number }
-    | { type: 'AmountThreshold'; minAmount: bigint };
-
-/**
- * A single entry in a batch disclosure proof submission.
- * Maps to `BatchDisclosureSubmission<AccountId>` in Rust.
- */
-export type BatchDisclosureSubmission = {
-    /** 32-byte commitment (LE). */
-    commitment: Bytes32;
-    /** Groth16 proof bytes — max 256 bytes. */
-    proof: number[];
-    /** 76-byte public signals: commitment(32) | value(8) | asset_id(4) | owner_hash(32). */
-    publicSignals: DisclosurePublicSignals;
-    /** Optional auditor AccountId. Null = voluntary disclosure. */
-    auditor: string | null;
-};
-
-/**
  * A single shield operation for use in `shield_batch`.
  */
 export type ShieldOperation = {
@@ -201,82 +127,6 @@ export type UnshieldArgs = {
 };
 
 /**
- * Call index 4 — `set_audit_policy` (Signed origin)
- * Registers or replaces the caller's audit policy for selective disclosure.
- */
-export type SetAuditPolicyArgs = {
-    /** Up to 10 authorized auditors. */
-    auditors: Auditor[];
-    /** Up to 10 disclosure conditions. */
-    conditions: DisclosureCondition[];
-    /** Minimum blocks between disclosures to the same auditor. Null = no limit. */
-    maxFrequency: number | null;
-    /** Block after which the policy expires. Null = no expiry. */
-    validUntil: number | null;
-};
-
-/**
- * Call index 5 — `request_disclosure` (Signed origin)
- * Auditor requests selective disclosure from a target account for a specific commitment.
- */
-export type RequestDisclosureArgs = {
-    /** AccountId of the disclosure target. */
-    target: string;
-    /** 32-byte commitment the auditor wants disclosed (LE). */
-    commitment: number[];
-    /** Which note fields must be revealed. */
-    requiredFields: DisclosureFieldMask;
-    /** Human-readable request reason — max 256 bytes UTF-8. */
-    reason: string;
-    /** Auditor's Baby Jubjub public key x-coordinate (32 bytes LE). */
-    auditorBjjPkX: number[];
-    /** Auditor's Baby Jubjub public key y-coordinate (32 bytes LE). */
-    auditorBjjPkY: number[];
-};
-
-/**
- * Call index 6 — `disclose` (Signed origin)
- * Submit a Groth16 disclosure proof for a commitment.
- */
-export type DiscloseArgs = {
-    /** 32-byte note commitment to disclose (LE). */
-    commitment: Bytes32;
-    /** Groth16 proof bytes — max 128 bytes. */
-    proofBytes: number[];
-    /**
-     * 256-byte public signals (ECDH Baby Jubjub layout):
-     *   commitment[0..32] | auditor_pk_x[32..64] | auditor_pk_y[64..96]
-     *   | epk_x[96..128] | epk_y[128..160] | enc_value[160..192]
-     *   | enc_asset_id[192..224] | enc_owner_hash[224..256]
-     * Use `buildDisclosurePublicSignals()` to construct this.
-     */
-    publicSignals: DisclosurePublicSignals;
-    /** Auditor AccountId — required (must match the DisclosureRequest). */
-    auditor: string;
-};
-
-/**
- * Call index 7 — `reject_disclosure` (Signed origin)
- * Disclosure target rejects a pending request from an auditor for a specific commitment.
- */
-export type RejectDisclosureArgs = {
-    /** AccountId of the auditor whose request is rejected. */
-    auditor: string;
-    /** 32-byte commitment of the request being rejected (LE). */
-    commitment: number[];
-    /** Rejection reason — max 256 bytes UTF-8. */
-    reason: string;
-};
-
-/**
- * Call index 13 — `batch_submit_disclosure_proofs` (Signed origin)
- * Submit up to 10 disclosure proofs in one extrinsic.
- */
-export type BatchSubmitDisclosureProofsArgs = {
-    submissions: BatchDisclosureSubmission[];
-};
-
-/**
  * Call index 9 — `register_asset` (Root origin)
  * Registers a new asset in the shielded pool registry.
  */
@@ -307,28 +157,6 @@ export type UnverifyAssetArgs = {
     assetId: number;
 };
 
-/**
- * Call index 14 — `prune_expired_request` (Signed origin)
- * Cleans up a disclosure request that has passed its expiration block.
- */
-export type PruneExpiredRequestArgs = {
-    /** AccountId of the disclosure target. */
-    target: string;
-    /** AccountId of the auditor. */
-    auditor: string;
-    /** 32-byte commitment of the expired request (LE). */
-    commitment: number[];
-};
-
-/**
- * Call index 15 — `revoke_disclosure_record` (Signed origin)
- * Allows the note owner to revoke a previously submitted disclosure record.
- */
-export type RevokeDisclosureRecordArgs = {
-    /** 32-byte commitment whose disclosure record should be revoked (LE). */
-    commitment: Bytes32;
-};
-
 // ─── Discriminated call union ─────────────────────────────────────────────────
 
 /** All pallet-shielded-pool calls as a discriminated union. */
@@ -337,13 +165,6 @@ export type ShieldedPoolCall =
     | { type: 'shieldBatch'; args: ShieldBatchArgs }
     | { type: 'privateTransfer'; args: PrivateTransferArgs }
     | { type: 'unshield'; args: UnshieldArgs }
-    | { type: 'setAuditPolicy'; args: SetAuditPolicyArgs }
-    | { type: 'requestDisclosure'; args: RequestDisclosureArgs }
-    | { type: 'disclose'; args: DiscloseArgs }
-    | { type: 'rejectDisclosure'; args: RejectDisclosureArgs }
-    | { type: 'batchSubmitDisclosureProofs'; args: BatchSubmitDisclosureProofsArgs }
     | { type: 'registerAsset'; args: RegisterAssetArgs }
     | { type: 'verifyAsset'; args: VerifyAssetArgs }
-    | { type: 'unverifyAsset'; args: UnverifyAssetArgs }
-    | { type: 'pruneExpiredRequest'; args: PruneExpiredRequestArgs }
-    | { type: 'revokeDisclosureRecord'; args: RevokeDisclosureRecordArgs };
+    | { type: 'unverifyAsset'; args: UnverifyAssetArgs };

@@ -165,7 +165,7 @@ export type ShieldBatchParams = {
  * Parameters for shieldedPool.claimShieldedFees —
  * claims accrued relay fees into the shielded pool.
  *
- * The relayer must supply a ZK disclosure proof that binds the commitment to the
+ * The relayer must supply a ZK value proof that binds the commitment to the
  * exact amount and asset_id, preventing fee inflation attacks.
  */
 export type ClaimShieldedFeesParams = {

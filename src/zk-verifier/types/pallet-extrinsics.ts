@@ -21,14 +21,14 @@ export type CircuitId = (typeof CircuitId)[keyof typeof CircuitId];
  * |--------------|-------|---------------------------------|
  * | Transfer     | 1     | 2-in-2-out private transfer     |
  * | Unshield     | 2     | Withdrawal from the pool        |
- * | Disclosure   | 3     | Selective disclosure            |
- * | PrivateLink  | 4     | Private chain-link proof        |
+ * | ValueProof   | 4     | Note value binding (fee-claim)  |
+ * | PrivateLink  | 5     | Private chain-link proof        |
  */
 export const CircuitId = {
     Transfer: 1,
     Unshield: 2,
-    Disclosure: 3,
-    PrivateLink: 4,
+    ValueProof: 4,
+    PrivateLink: 5,
 } as const;
 
 // ─── Supporting types ─────────────────────────────────────────────────────────
@@ -92,7 +92,7 @@ export type VerifyProofArgs = {
      * Number and meaning of inputs depends on the circuit:
      * - Transfer:    [merkle_root, nullifier_0, nullifier_1, commitment_0, commitment_1]
      * - Unshield:    [merkle_root, nullifier, amount_fe, recipient_hash, asset_id_fe]
-     * - Disclosure:  [commitment, revealed_value_fe, revealed_asset_id_fe, owner_hash]
+     * - ValueProof:  [commitment, value, asset_id, owner_hash]
      * - PrivateLink: [commitment, call_hash_fe]
      */
     publicInputs: number[][];

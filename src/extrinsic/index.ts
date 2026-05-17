@@ -208,39 +208,6 @@ export function mapExtrinsicArgs(
                 recipient: get(5, 'recipient'),
             };
         }
-        if (m_norm === 'setauditpolicy') {
-            return {
-                auditors: get(0, 'auditors'),
-                conditions: get(1, 'conditions'),
-                max_frequency: get(2, 'max_frequency'),
-                valid_until: get(3, 'valid_until'),
-            };
-        }
-        if (m_norm === 'requestdisclosure') {
-            return {
-                target: get(0, 'target'),
-                commitment: get(1, 'commitment'),
-                required_fields: get(2, 'required_fields'),
-                reason: get(3, 'reason'),
-                auditor_bjj_pk_x: get(4, 'auditor_bjj_pk_x'),
-                auditor_bjj_pk_y: get(5, 'auditor_bjj_pk_y'),
-            };
-        }
-        if (m_norm === 'disclose') {
-            return {
-                commitment: get(0, 'commitment'),
-                proof_bytes: get(1, 'proof_bytes'),
-                public_signals: get(2, 'public_signals'),
-                auditor: get(3, 'auditor'),
-            };
-        }
-        if (m_norm === 'rejectdisclosure') {
-            return {
-                auditor: get(0, 'auditor'),
-                commitment: get(1, 'commitment'),
-                reason: get(2, 'reason'),
-            };
-        }
         if (m_norm === 'registerasset') {
             return {
                 name: get(0, 'name'),
@@ -254,20 +221,6 @@ export function mapExtrinsicArgs(
         }
         if (m_norm === 'unverifyasset') {
             return { asset_id: get(0, 'asset_id') };
-        }
-        if (m_norm === 'batchsubmitdisclosureproofs') {
-            return { submissions: get(0, 'submissions') };
-        }
-        // NOTE: batch_submit_disclosure_proofs was removed from the pallet (v0.7+).
-        if (m_norm === 'pruneexpiredrequest') {
-            return {
-                target: get(0, 'target'),
-                auditor: get(1, 'auditor'),
-                commitment: get(2, 'commitment'),
-            };
-        }
-        if (m_norm === 'revokedisclosurerecord') {
-            return { commitment: get(0, 'commitment') };
         }
     }
 
@@ -518,57 +471,6 @@ export function mapZkEventData(
     // ── shielded-pool — remaining events ────────────────────────────────────
 
     const m_norm = m.replace(/_/g, '');
-
-    if (m_norm === 'auditpolicyset') {
-        return {
-            account: get(0, 'account'),
-            version: get(1, 'version'),
-        };
-    }
-
-    if (m_norm === 'disclosed') {
-        return {
-            target: get(0, 'target'),
-            auditor: get(1, 'auditor'),
-            commitment: get(2, 'commitment'),
-            signals: get(3, 'signals'),
-        };
-    }
-
-    if (m_norm === 'disclosurerequested') {
-        return {
-            target: get(0, 'target'),
-            auditor: get(1, 'auditor'),
-            commitment: get(2, 'commitment'),
-            required_fields: get(3, 'required_fields'),
-            auditor_bjj_pk_x: get(4, 'auditor_bjj_pk_x'),
-            auditor_bjj_pk_y: get(5, 'auditor_bjj_pk_y'),
-        };
-    }
-
-    if (m_norm === 'disclosurerejected') {
-        return {
-            target: get(0, 'target'),
-            auditor: get(1, 'auditor'),
-            commitment: get(2, 'commitment'),
-            reason: get(3, 'reason'),
-        };
-    }
-
-    if (m_norm === 'disclosurerequestexpired') {
-        return {
-            target: get(0, 'target'),
-            auditor: get(1, 'auditor'),
-            commitment: get(2, 'commitment'),
-        };
-    }
-
-    if (m_norm === 'disclosurerecordrevoked') {
-        return {
-            who: get(0, 'who'),
-            commitment: get(1, 'commitment'),
-        };
-    }
 
     if (m_norm === 'assetregistered') {
         return { asset_id: get(0, 'asset_id') };

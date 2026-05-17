@@ -3,14 +3,9 @@ import type {
     ShieldParams,
     UnshieldParams,
     PrivateTransferParams,
+    ClaimShieldedFeesParams,
 } from '../shielded-pool/protocol/types';
-import type {
-    EvmSigner,
-    RequestDisclosureParams,
-    DiscloseParams,
-    RejectDisclosureParams,
-    PruneExpiredRequestParams,
-} from './types';
+import type { EvmSigner } from './types';
 import { EncryptedMemo } from '../shielded-pool/protocol/EncryptedMemo';
 import { fromHex } from '../utils/hex';
 import { encodeHex } from './abi';
@@ -208,149 +203,85 @@ export class ShieldedPoolPrecompile {
         });
     }
 
-    // ─── requestDisclosure ─────────────────────────────────────────────────────
+    // ─── claimShieldedFees ───────────────────────────────────────────────────────────────────
 
     /**
      * Returns the ABI-encoded calldata for
-     * `requestDisclosure(bytes32,bytes32,bool,bool,bool,bytes,bytes32,bytes32)`.
+     * `claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes)`.
      *
-     * The **EVM caller** of the resulting transaction is treated as the **auditor**
-     * on-chain. No explicit auditor argument is needed.
+     * ABI layout (params after selector):
+     * - `commitment`    — bytes32 (fixed)
+     * - `amount`        — uint256 (fixed)
+     * - `asset_id`      — uint32  (fixed, right-aligned)
+     * - `memo`          — bytes   (dynamic)
+     * - `proof`         — bytes   (dynamic, 128 bytes Groth16)
+     * - `publicSignals` — bytes   (dynamic, 76 bytes)
+     *
+     * The validator identity is derived from `msg.sender` in the precompile —
+     * do NOT include it in the calldata.
      */
-    buildRequestDisclosureCalldata(params: RequestDisclosureParams): string {
-        if (params.auditorBjjPkX.length !== 32)
-            throw new RangeError('requestDisclosure: auditorBjjPkX must be 32 bytes');
-        if (params.auditorBjjPkY.length !== 32)
-            throw new RangeError('requestDisclosure: auditorBjjPkY must be 32 bytes');
-        const target = fromHex(params.target);
+    buildClaimShieldedFeesCalldata(params: ClaimShieldedFeesParams): string {
+        EncryptedMemo.validate(
+            params.encryptedMemo,
+            'buildClaimShieldedFeesCalldata.encryptedMemo'
+        );
+
+        if (params.proof.length === 0) {
+            throw new Error('claimShieldedFees: proof must not be empty');
+        }
+        if (params.publicSignals.length !== 76) {
+            throw new Error(
+                `claimShieldedFees: publicSignals must be 76 bytes, got ${params.publicSignals.length}`
+            );
+        }
+
         const commitment = fromHex(params.commitment);
-        const reasonBytes = new TextEncoder().encode(params.reason);
 
         return encodeHex(
-            SP_SEL.REQUEST_DISCLOSURE,
-            { type: 'bytes32', value: target },
+            SP_SEL.CLAIM_SHIELDED_FEES,
             { type: 'bytes32', value: commitment },
-            { type: 'bool', value: params.disclosedValue },
-            { type: 'bool', value: params.disclosedAssetId },
-            { type: 'bool', value: params.disclosedOwner },
-            { type: 'bytes', value: reasonBytes },
-            { type: 'bytes32', value: params.auditorBjjPkX },
-            { type: 'bytes32', value: params.auditorBjjPkY }
+            { type: 'uint', value: params.amount },
+            { type: 'uint', value: BigInt(params.assetId) },
+            { type: 'bytes', value: params.encryptedMemo },
+            { type: 'bytes', value: params.proof },
+            { type: 'bytes', value: params.publicSignals }
         );
     }
 
     /**
-     * Requests selective disclosure of a specific commitment.
+     * Claims accumulated relay fees as a private shielded note.
      *
-     * The EVM caller is recorded as the auditor on-chain. The note owner can
-     * respond with `disclose()` or reject with `rejectDisclosure()`.
+     * This extrinsic is for **validators/relayers** who have accrued fees in
+     * `pallet-relayer` and want to receive them privately inside the shielded pool
+     * instead of as a public balance credit.
      *
-     * Extrinsic: `shieldedPool.requestDisclosure(target, commitment, requiredFields, reason, bjjPkX, bjjPkY)`
+     * The ZK `value_proof` binds `commitment` to `(amount, assetId, ownerPk, blinding)`
+     * so the runtime can verify the note encodes exactly the claimed fee amount,
+     * preventing a malicious relayer from inflating the withdrawal.
+     *
+     * The `msg.sender` EVM address is used as the validator identity; it must match
+     * the address that has pending relay fees in `pallet-relayer`.
+     *
+     * Extrinsic: `shieldedPool.claim_shielded_fees(commitment, amount, assetId, memo, proof, publicSignals)`
      */
-    async requestDisclosure(params: RequestDisclosureParams, signer: EvmSigner): Promise<string> {
-        return signer({ to: this.addr, data: this.buildRequestDisclosureCalldata(params) });
-    }
-
-    // ─── disclose ──────────────────────────────────────────────────────────────
-
-    /**
-     * Returns the ABI-encoded calldata for `disclose(bytes32,bytes,bytes,bytes32)`.
-     *
-     * The **EVM caller** is treated as the **note owner** on-chain.
-     * `params.proofBytes` must be exactly 128 bytes; `params.publicSignals` exactly 256 bytes.
-     */
-    buildDiscloseCalldata(params: DiscloseParams): string {
-        if (params.proofBytes.length !== 128)
-            throw new RangeError('disclose: proofBytes must be exactly 128 bytes');
-        if (params.publicSignals.length !== 256)
-            throw new RangeError('disclose: publicSignals must be exactly 256 bytes');
-        const commitment = fromHex(params.commitment);
-        const auditor = fromHex(params.auditor);
-
-        return encodeHex(
-            SP_SEL.DISCLOSE,
-            { type: 'bytes32', value: commitment },
-            { type: 'bytes', value: params.proofBytes },
-            { type: 'bytes', value: params.publicSignals },
-            { type: 'bytes32', value: auditor }
-        );
+    async claimShieldedFees(params: ClaimShieldedFeesParams, signer: EvmSigner): Promise<string> {
+        return signer({
+            to: this.addr,
+            data: this.buildClaimShieldedFeesCalldata(params),
+        });
     }
 
     /**
-     * Submits a selective disclosure proof for a commitment.
-     *
-     * The EVM caller is treated as the note owner on-chain. The Groth16 proof is
-     * verified by the runtime; on success the encrypted signals are stored for
-     * the auditor to decrypt off-chain.
-     *
-     * Extrinsic: `shieldedPool.disclose(commitment, proofBytes, publicSignals, auditor)`
+     * Estimates the EVM gas for a `claimShieldedFees` call.
      */
-    async disclose(params: DiscloseParams, signer: EvmSigner): Promise<string> {
-        return signer({ to: this.addr, data: this.buildDiscloseCalldata(params) });
-    }
-
-    // ─── rejectDisclosure ──────────────────────────────────────────────────────
-
-    /**
-     * Returns the ABI-encoded calldata for `rejectDisclosure(bytes32,bytes32,bytes)`.
-     *
-     * The **EVM caller** is treated as the **target** (note owner) on-chain.
-     */
-    buildRejectDisclosureCalldata(params: RejectDisclosureParams): string {
-        const auditor = fromHex(params.auditor);
-        const commitment = fromHex(params.commitment);
-        const reasonBytes = new TextEncoder().encode(params.reason);
-
-        return encodeHex(
-            SP_SEL.REJECT_DISCLOSURE,
-            { type: 'bytes32', value: auditor },
-            { type: 'bytes32', value: commitment },
-            { type: 'bytes', value: reasonBytes }
-        );
-    }
-
-    /**
-     * Rejects a pending disclosure request.
-     *
-     * The EVM caller is treated as the note owner (target) on-chain.
-     *
-     * Extrinsic: `shieldedPool.rejectDisclosure(auditor, commitment, reason)`
-     */
-    async rejectDisclosure(params: RejectDisclosureParams, signer: EvmSigner): Promise<string> {
-        return signer({ to: this.addr, data: this.buildRejectDisclosureCalldata(params) });
-    }
-
-    // ─── pruneExpiredRequest ───────────────────────────────────────────────────
-
-    /**
-     * Returns the ABI-encoded calldata for `pruneExpiredRequest(bytes32,bytes32,bytes32)`.
-     *
-     * Permissionless: any EVM caller can prune an expired request.
-     */
-    buildPruneExpiredRequestCalldata(params: PruneExpiredRequestParams): string {
-        const target = fromHex(params.target);
-        const auditor = fromHex(params.auditor);
-        const commitment = fromHex(params.commitment);
-
-        return encodeHex(
-            SP_SEL.PRUNE_EXPIRED_REQUEST,
-            { type: 'bytes32', value: target },
-            { type: 'bytes32', value: auditor },
-            { type: 'bytes32', value: commitment }
-        );
-    }
-
-    /**
-     * Removes an expired disclosure request from storage.
-     *
-     * Permissionless: any EVM account can call this once `expires_at` has passed.
-     *
-     * Extrinsic: `shieldedPool.pruneExpiredRequest(target, auditor, commitment)`
-     */
-    async pruneExpiredRequest(
-        params: PruneExpiredRequestParams,
-        signer: EvmSigner
-    ): Promise<string> {
-        return signer({ to: this.addr, data: this.buildPruneExpiredRequestCalldata(params) });
+    async estimateClaimShieldedFeesGas(
+        params: ClaimShieldedFeesParams,
+        from: string
+    ): Promise<bigint> {
+        return this.evm.estimateGas({
+            from,
+            to: this.addr,
+            data: this.buildClaimShieldedFeesCalldata(params),
+        });
     }
 }

@@ -19,12 +19,3 @@ export type {
 } from './protocol/types';
 export { tryDecryptNote, tryDecryptNoteVerbose, computeNullifier } from './protocol/NoteDecryptor';
 export { selectNotes, buildDummyTransferInput } from './protocol/coinSelection';
-export {
-    generateDisclosureProof,
-    buildDisclosurePublicSignals,
-    deriveBabyJubjubKeypair,
-    decryptDisclosureSignals,
-    type DisclosureFlags,
-    type ArtifactProvider,
-    type DisclosureProofOutput,
-} from './protocol/disclosure';

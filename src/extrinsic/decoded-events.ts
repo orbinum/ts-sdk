@@ -41,49 +41,6 @@ export interface MerkleRootUpdatedData {
     size: number;
 }
 
-export interface AuditPolicySetData {
-    who: string;
-    auditors: string[];
-    version: number;
-}
-
-export interface DisclosureRequestedData {
-    target: string;
-    auditor: string;
-    commitment: string;
-    required_fields: { value: boolean; asset_id: boolean; owner: boolean };
-    auditor_bjj_pk_x: string;
-    auditor_bjj_pk_y: string;
-}
-
-export interface DisclosureRejectedData {
-    target: string;
-    auditor: string;
-    commitment: string;
-    reason: string;
-}
-
-export interface DisclosureSubmittedData {
-    who: string;
-    commitment: string;
-    proof_size: number;
-    auditor: string;
-}
-
-export interface DisclosureVerifiedData {
-    who: string;
-    commitment: string;
-    verified: boolean;
-}
-
-export interface AuditTrailRecordedData {
-    account: string;
-    auditor: string;
-    commitment: string;
-    trail_hash: string;
-    trail_id: string;
-}
-
 // ── pallet-balances ────────────────────────────────────────────────────────
 
 export interface TransferEventData {

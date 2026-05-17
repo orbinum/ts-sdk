@@ -67,12 +67,7 @@ export {
     computeNullifier,
     selectNotes,
     buildDummyTransferInput,
-    generateDisclosureProof,
-    buildDisclosurePublicSignals,
-    deriveBabyJubjubKeypair,
-    decryptDisclosureSignals,
-    type DisclosureFlags,
-    type DisclosureProofOutput,
+    decodeNoteDisclosureKey,
 } from './shielded-pool/index';
 export { BN254_R, BABYJUB_SUBORDER } from './utils/crypto-constants';
 export { randomBlinding } from './utils/blinding';
@@ -171,10 +166,6 @@ export type {
     ResolvedAlias,
     KnownPrecompileInfo,
     DecodedPrecompile,
-    RequestDisclosureParams,
-    DiscloseParams,
-    RejectDisclosureParams,
-    PruneExpiredRequestParams,
 } from './precompiles/index';
 
 // ─── Relayer ─────────────────────────────────────────────────────────────────
@@ -190,12 +181,6 @@ export type {
     CommitmentsInsertedEvent,
     UnshieldedEvent,
     MerkleRootUpdatedEvent,
-    AuditPolicySetEvent,
-    DisclosedEvent,
-    DisclosureRequestedEvent,
-    DisclosureRejectedEvent,
-    DisclosureRequestExpiredEvent,
-    DisclosureRecordRevokedEvent,
     AssetRegisteredEvent,
     AssetVerifiedEvent,
     AssetUnverifiedEvent,
@@ -241,11 +226,6 @@ export type {
 // pallet-shielded-pool
 export type {
     Bytes32,
-    DisclosurePublicSignals,
-    EncryptedDisclosureSignals,
-    DisclosureFieldMask,
-    Auditor,
-    DisclosureCondition,
     ShieldOperation,
     ShieldArgs,
     ShieldBatchArgs,
@@ -253,14 +233,9 @@ export type {
     RawTransferOutput,
     PrivateTransferArgs,
     UnshieldArgs,
-    RequestDisclosureArgs,
-    DiscloseArgs,
-    RejectDisclosureArgs,
     RegisterAssetArgs,
     VerifyAssetArgs,
     UnverifyAssetArgs,
-    PruneExpiredRequestArgs,
-    RevokeDisclosureRecordArgs,
     ShieldedPoolCall,
 } from './shielded-pool/pallet/extrinsics';
 
@@ -361,9 +336,6 @@ export type {
     DecodedShieldBatchArgs,
     DecodedPrivateTransferArgs,
     DecodedUnshieldArgs,
-    DecodedRequestDisclosureArgs,
-    DecodedRejectDisclosureArgs,
-    DecodedSubmitDisclosureArgs,
     DecodedTransferArgs,
     DecodedTransferKeepAliveArgs,
     DecodedTransferAllArgs,
@@ -386,10 +358,6 @@ export type {
     CommitmentsInsertedEventData,
     UnshieldedEventData,
     MerkleRootUpdatedData,
-    DisclosureRequestedData,
-    DisclosureRejectedData,
-    DisclosureSubmittedData,
-    DisclosureVerifiedData,
     TransferEventData,
     EndowedEventData,
     ReservedEventData,
