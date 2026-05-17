@@ -18,4 +18,6 @@ export type {
     ZkNote,
 } from './protocol/types';
 export { tryDecryptNote, tryDecryptNoteVerbose, computeNullifier } from './protocol/NoteDecryptor';
+export { createNoteDisclosureKey, decodeNoteDisclosureKey } from './protocol/NoteDisclosure';
+export type { NoteDisclosure } from './protocol/NoteDisclosure';
 export { selectNotes, buildDummyTransferInput } from './protocol/coinSelection';

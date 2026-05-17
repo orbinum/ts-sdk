@@ -67,8 +67,10 @@ export {
     computeNullifier,
     selectNotes,
     buildDummyTransferInput,
+    createNoteDisclosureKey,
     decodeNoteDisclosureKey,
 } from './shielded-pool/index';
+export type { NoteDisclosure } from './shielded-pool/protocol/NoteDisclosure';
 export { BN254_R, BABYJUB_SUBORDER } from './utils/crypto-constants';
 export { randomBlinding } from './utils/blinding';
 
