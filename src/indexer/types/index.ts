@@ -24,6 +24,8 @@ export interface ShieldedCommitment {
     leafIndex: number;
     /** Asset ID as decimal string (e.g. "0"). */
     assetId: string;
+    /** Origin of the commitment: direct shield, output of private transfer, or change from unshield. */
+    source: 'shield' | 'transfer' | 'unshield';
     /** SS58 or 0x-prefixed depositor address, null if not tracked. */
     sender: string | null;
     /** 0x-prefixed encrypted memo hex, null if not present. */
