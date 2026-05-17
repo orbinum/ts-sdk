@@ -152,10 +152,57 @@ export interface IndexerStats {
         merkleRoot: string | null;
         treeSize: number | null;
     };
+    relayers: { active: number };
     zkVerifier: {
         total: number;
         successful: number;
     };
+}
+
+/** A registered relayer stored by the indexer. */
+export interface Relayer {
+    evmAddress: string;
+    account: string;
+    active: boolean;
+    registeredAtBlock: number;
+    unregisteredAtBlock: number | null;
+    timestampMs: number | null;
+}
+
+/** A relay fee accumulation or consumption event stored by the indexer. */
+export interface RelayFeeEvent {
+    id: number;
+    relayer: string;
+    assetId: string;
+    /** Amount as decimal string (bigint-safe). */
+    amount: string;
+    eventType: 'accumulated' | 'consumed';
+    blockNumber: number;
+    timestampMs: number | null;
+}
+
+/** Aggregated relay fee balance per asset for a given relayer. */
+export interface RelayFeeSummaryEntry {
+    assetId: string;
+    /** Total accumulated (bigint string). */
+    accumulated: string;
+    /** Total consumed (bigint string). */
+    consumed: string;
+    /** pending = accumulated − consumed (bigint string). */
+    pending: string;
+}
+
+/** A registered asset stored by the indexer. */
+export interface RegisteredAsset {
+    assetId: string;
+    name: string | null;
+    symbol: string | null;
+    decimals: number | null;
+    contractAddress: string | null;
+    /** Whether the asset is verified by the protocol. */
+    verified: boolean;
+    registeredAtBlock: number;
+    timestampMs: number | null;
 }
 
 /**

@@ -14,4 +14,8 @@ export type {
     MerkleRoot,
     NullifierStatusResult,
     StealthScanHint,
+    Relayer,
+    RelayFeeEvent,
+    RelayFeeSummaryEntry,
+    RegisteredAsset,
 } from './types';

@@ -7,6 +7,10 @@ import type {
     IndexerStats,
     MerkleRoot,
     PaginatedResult,
+    RegisteredAsset,
+    RelayFeeEvent,
+    RelayFeeSummaryEntry,
+    Relayer,
     ShieldedAddressEvent,
     ShieldedCommitment,
     SpentNullifier,
@@ -23,7 +27,7 @@ function mockFetch(response: unknown, status = 200): void {
             ok: status >= 200 && status < 300,
             status,
             json: () => Promise.resolve(response),
-        }),
+        })
     );
 }
 
@@ -100,6 +104,7 @@ describe('IndexerClient', () => {
             extrinsicIndex: 0,
             leafIndex: 3,
             assetId: '0',
+            source: 'shield',
             sender: null,
             encryptedMemo: null,
             timestampMs: 1000,
@@ -124,6 +129,7 @@ describe('IndexerClient', () => {
             extrinsicIndex: 1,
             leafIndex: 5,
             assetId: '0',
+            source: 'shield',
             sender: '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
             encryptedMemo: '0x00',
             timestampMs: 2000,
@@ -420,8 +426,14 @@ describe('IndexerClient', () => {
 
     it('getBlock accepts string hash', async () => {
         mockFetch({
-            number: 5, hash: '0xfoo', parentHash: '0xbar',
-            extrinsicCount: 0, evmTxCount: 0, evmHash: null, author: null, timestampMs: null,
+            number: 5,
+            hash: '0xfoo',
+            parentHash: '0xbar',
+            extrinsicCount: 0,
+            evmTxCount: 0,
+            evmHash: null,
+            author: null,
+            timestampMs: null,
         });
         await client.getBlock('0xfoo');
         expect(lastUrl()).toBe(`${BASE}/blocks/0xfoo`);
@@ -455,13 +467,191 @@ describe('IndexerClient', () => {
             extrinsics: { total: 500 },
             evm: { transactions: 200 },
             shielded: { commitments: 50, spentNullifiers: 20, merkleRoot: '0xroot', treeSize: 64 },
+            relayers: { active: 3 },
             zkVerifier: { total: 30, successful: 28 },
         };
         mockFetch(stats);
         const result = await client.getStats();
         expect(result.blocks.indexed).toBe(100);
         expect(result.shielded.commitments).toBe(50);
+        expect(result.relayers.active).toBe(3);
         expect(lastUrl()).toBe(`${BASE}/stats`);
+    });
+
+    // ── getRelayers ─────────────────────────────────────────────────────────────
+
+    it('getRelayers calls correct URL with no params', async () => {
+        mockFetch({ data: [], pagination: { page: 1, limit: 20, total: 0 } });
+        await client.getRelayers();
+        expect(lastUrl()).toBe(`${BASE}/relayers`);
+    });
+
+    it('getRelayers passes pagination params', async () => {
+        mockFetch({ data: [], pagination: { page: 2, limit: 10, total: 0 } });
+        await client.getRelayers({ page: 2, limit: 10 });
+        expect(lastUrl()).toBe(`${BASE}/relayers?page=2&limit=10`);
+    });
+
+    it('getRelayers passes active=true filter', async () => {
+        mockFetch({ data: [], pagination: { page: 1, limit: 20, total: 0 } });
+        await client.getRelayers({ active: true });
+        expect(lastUrl()).toBe(`${BASE}/relayers?active=true`);
+    });
+
+    it('getRelayers passes active=false filter', async () => {
+        mockFetch({ data: [], pagination: { page: 1, limit: 20, total: 0 } });
+        await client.getRelayers({ active: false });
+        expect(lastUrl()).toBe(`${BASE}/relayers?active=false`);
+    });
+
+    it('getRelayers returns Relayer array', async () => {
+        const relayer: Relayer = {
+            evmAddress: '0xabc',
+            account: '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
+            active: true,
+            registeredAtBlock: 100,
+            unregisteredAtBlock: null,
+            timestampMs: 1000,
+        };
+        const payload: PaginatedResult<Relayer> = {
+            data: [relayer],
+            pagination: { page: 1, limit: 20, total: 1 },
+        };
+        mockFetch(payload);
+        const result = await client.getRelayers();
+        expect(result.data).toHaveLength(1);
+        expect(result.data[0]!.evmAddress).toBe('0xabc');
+        expect(result.data[0]!.active).toBe(true);
+    });
+
+    // ── getRelayer ──────────────────────────────────────────────────────────────
+
+    it('getRelayer lowercases address and calls correct URL', async () => {
+        const relayer: Relayer = {
+            evmAddress: '0xabc',
+            account: '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
+            active: true,
+            registeredAtBlock: 100,
+            unregisteredAtBlock: null,
+            timestampMs: 1000,
+        };
+        mockFetch(relayer);
+        const result = await client.getRelayer('0xABC');
+        expect(result).not.toBeNull();
+        expect(result!.evmAddress).toBe('0xabc');
+        expect(lastUrl()).toBe(`${BASE}/relayers/0xabc`);
+    });
+
+    it('getRelayer returns null on 404', async () => {
+        mockFetch(null, 404);
+        const result = await client.getRelayer('0xnotfound');
+        expect(result).toBeNull();
+    });
+
+    // ── getRelayFees ────────────────────────────────────────────────────────────
+
+    it('getRelayFees calls correct URL with no params', async () => {
+        mockFetch({ data: [], pagination: { page: 1, limit: 20, total: 0 } });
+        await client.getRelayFees();
+        expect(lastUrl()).toBe(`${BASE}/relayers/fees`);
+    });
+
+    it('getRelayFees passes relayer and type filters', async () => {
+        mockFetch({ data: [], pagination: { page: 1, limit: 20, total: 0 } });
+        await client.getRelayFees({ relayer: '5GrwvaEF', type: 'accumulated' });
+        expect(lastUrl()).toBe(`${BASE}/relayers/fees?relayer=5GrwvaEF&type=accumulated`);
+    });
+
+    it('getRelayFees returns RelayFeeEvent array', async () => {
+        const event: RelayFeeEvent = {
+            id: 1,
+            relayer: '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
+            assetId: '0',
+            amount: '1000000',
+            eventType: 'accumulated',
+            blockNumber: 50,
+            timestampMs: 2000,
+        };
+        mockFetch({ data: [event], pagination: { page: 1, limit: 20, total: 1 } });
+        const result = await client.getRelayFees();
+        expect(result.data[0]!.eventType).toBe('accumulated');
+        expect(result.data[0]!.amount).toBe('1000000');
+    });
+
+    // ── getRelayFeesSummary ─────────────────────────────────────────────────────
+
+    it('getRelayFeesSummary calls correct URL', async () => {
+        mockFetch([]);
+        await client.getRelayFeesSummary('5GrwvaEF');
+        expect(lastUrl()).toBe(`${BASE}/relayers/fees/summary/5GrwvaEF`);
+    });
+
+    it('getRelayFeesSummary returns RelayFeeSummaryEntry array', async () => {
+        const summary: RelayFeeSummaryEntry[] = [
+            { assetId: '0', accumulated: '5000000', consumed: '2000000', pending: '3000000' },
+        ];
+        mockFetch(summary);
+        const result = await client.getRelayFeesSummary('5GrwvaEF');
+        expect(result).toHaveLength(1);
+        expect(result[0]!.pending).toBe('3000000');
+        expect(result[0]!.assetId).toBe('0');
+    });
+
+    // ── getRegisteredAssets ─────────────────────────────────────────────────────
+
+    it('getRegisteredAssets calls correct URL with no params', async () => {
+        mockFetch({ data: [], pagination: { page: 1, limit: 20, total: 0 } });
+        await client.getRegisteredAssets();
+        expect(lastUrl()).toBe(`${BASE}/shielded/assets`);
+    });
+
+    it('getRegisteredAssets passes pagination params', async () => {
+        mockFetch({ data: [], pagination: { page: 2, limit: 5, total: 0 } });
+        await client.getRegisteredAssets({ page: 2, limit: 5 });
+        expect(lastUrl()).toBe(`${BASE}/shielded/assets?page=2&limit=5`);
+    });
+
+    it('getRegisteredAssets returns RegisteredAsset array', async () => {
+        const asset: RegisteredAsset = {
+            assetId: '1',
+            name: 'Test Token',
+            symbol: 'TST',
+            decimals: 18,
+            contractAddress: '0xcontract',
+            verified: true,
+            registeredAtBlock: 200,
+            timestampMs: 3000,
+        };
+        mockFetch({ data: [asset], pagination: { page: 1, limit: 20, total: 1 } });
+        const result = await client.getRegisteredAssets();
+        expect(result.data[0]!.symbol).toBe('TST');
+        expect(result.data[0]!.verified).toBe(true);
+    });
+
+    // ── getRegisteredAsset ───────────────────────────────────────────────────────
+
+    it('getRegisteredAsset calls correct URL', async () => {
+        const asset: RegisteredAsset = {
+            assetId: '42',
+            name: 'Orbinum',
+            symbol: 'ORB',
+            decimals: 12,
+            contractAddress: null,
+            verified: true,
+            registeredAtBlock: 1,
+            timestampMs: null,
+        };
+        mockFetch(asset);
+        const result = await client.getRegisteredAsset('42');
+        expect(result).not.toBeNull();
+        expect(result!.symbol).toBe('ORB');
+        expect(lastUrl()).toBe(`${BASE}/shielded/assets/42`);
+    });
+
+    it('getRegisteredAsset returns null on 404', async () => {
+        mockFetch(null, 404);
+        const result = await client.getRegisteredAsset('999');
+        expect(result).toBeNull();
     });
 
     // ── isHealthy ────────────────────────────────────────────────────────────
@@ -518,6 +708,7 @@ describe('IndexerClient', () => {
             extrinsicIndex: 1,
             leafIndex: 5,
             assetId: '0',
+            source: 'shield',
             sender: '0xabc',
             encryptedMemo: null,
             timestampMs: 1_000_000,
@@ -564,7 +755,7 @@ describe('IndexerClient', () => {
     it('getAddressShieldedActivity throws on non-2xx response', async () => {
         mockFetch({}, 500);
         await expect(client.getAddressShieldedActivity('0xabc')).rejects.toThrow(
-            'IndexerClient: HTTP 500',
+            'IndexerClient: HTTP 500'
         );
     });
 
