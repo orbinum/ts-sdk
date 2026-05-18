@@ -5,6 +5,37 @@ All notable changes to the Orbinum TypeScript SDK will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-05-17
+
+### Added
+
+- **`rpc-v2/ChainModule`** — new module for general chain state queries under the `chain_*` RPC namespace:
+  - `isValidator(ss58Address)`: returns `true` if the given SS58 account is an active Aura block author. Calls the new `chain_isValidator` node endpoint which reads `pallet_aura::Authorities` directly from storage.
+  - Exported from `rpc-v2` and accessible as `client.chain` on `OrbinumClient`.
+
+### Changed
+
+- **`OrbinumClient`** — exposes a new `readonly chain: ChainModule` property.
+- **`rpc-v2/RpcV2Module`** — aggregates `chain: ChainModule` alongside the existing `privacy: PrivacyModule`.
+- **Dependencies** — major version bumps across all runtime and dev dependencies:
+  - `polkadot-api` `1.23.x` → `2.1.3` (breaking — see migration notes below).
+  - `@polkadot-api/metadata-builders`, `@polkadot-api/substrate-bindings`, `@polkadot-api/utils` updated to match papi 2.x.
+  - `typescript` `5.9.x` → `6.0.3`.
+  - `vitest` `3.x` → `4.1.6`.
+  - `@noble/curves`, `@noble/hashes`, `@scure/base` updated to latest stable.
+
+#### polkadot-api 2.x migration notes
+
+- Import path changed: `polkadot-api/ws-provider` → `polkadot-api/ws`.
+- `Binary` is no longer a class — it is a plain utility object. The `Binary.fromBytes(u8)` method has been removed. Pass `Uint8Array` values directly to extrinsic fields; use `Binary.fromHex(hex)` to convert hex strings to `Uint8Array`.
+- `PolkadotClient.submit` and `PolkadotClient.submitAndWatch` now accept `Uint8Array` instead of a hex string. Callers must wrap the signed hex with `Binary.fromHex(hex)` before passing it.
+
+### Removed
+
+- **`RelayerStatusModule.isValidator`** — moved to `ChainModule.isValidator`. The method was calling `relayer_isValidator`, a mis-namespaced endpoint; validator status is a general chain concern, not relayer-specific. Update call sites: `client.relayerStatus.isValidator(addr)` → `client.chain.isValidator(addr)`.
+
+---
+
 ## [0.6.0] - 2026-05-17
 
 ### Added
