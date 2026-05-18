@@ -360,7 +360,7 @@ describe('SubstrateClient.submit', () => {
       submit: vi.fn().mockResolvedValue(FINALIZED),
     });
     await client.submit('0xsignedtx');
-    expect(papi.submit).toHaveBeenCalledWith('0xsignedtx');
+    expect(papi.submit).toHaveBeenCalledWith(expect.objectContaining({ _tag: 'Binary', hex: '0xsignedtx' }));
   });
 
   it('returns the TxFinalizedPayload from _papi.submit', async () => {
@@ -388,7 +388,7 @@ describe('SubstrateClient.submitAndWatch', () => {
       submitAndWatch: vi.fn().mockReturnValue(obs),
     });
     client.submitAndWatch('0xsignedtx');
-    expect(papi.submitAndWatch).toHaveBeenCalledWith('0xsignedtx');
+    expect(papi.submitAndWatch).toHaveBeenCalledWith(expect.objectContaining({ _tag: 'Binary', hex: '0xsignedtx' }));
   });
 
   it('returns the Observable from _papi.submitAndWatch', async () => {
