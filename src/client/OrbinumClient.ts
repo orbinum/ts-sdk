@@ -4,6 +4,7 @@ import { EvmExplorer } from '../evm-explorer/EvmExplorer';
 import { IndexerClient } from '../indexer/IndexerClient';
 import { ShieldedPoolModule } from '../shielded-pool/pallet/ShieldedPoolModule';
 import { AccountMappingModule } from '../account-mapping/AccountMappingModule';
+import { ChainModule } from '../rpc-v2/ChainModule';
 import { PrivacyModule } from '../rpc-v2/PrivacyModule';
 import { ZkVerifierModule } from '../zk-verifier/ZkVerifierModule';
 import { RelayerStatusModule } from '../relayer/RelayerStatusModule';
@@ -65,6 +66,8 @@ export class OrbinumClient {
     readonly accountMapping: AccountMappingModule;
     /** Typed access to `privacy_*` custom RPC endpoints. */
     readonly privacy: PrivacyModule;
+    /** Typed access to general chain state via `chain_*` custom RPC endpoints. */
+    readonly chain: ChainModule;
     /** Typed access to `zkVerifier_*` custom RPC endpoints. */
     readonly zkVerifier: ZkVerifierModule;
     /** Typed access to `relayer_*` RPC endpoints (registry lookup and pending fee queries). */
@@ -95,6 +98,7 @@ export class OrbinumClient {
         this.shieldedPool = new ShieldedPoolModule(substrate);
         this.accountMapping = new AccountMappingModule(substrate);
         this.privacy = new PrivacyModule(substrate);
+        this.chain = new ChainModule(substrate);
         this.zkVerifier = new ZkVerifierModule(substrate);
         this.relayerStatus = new RelayerStatusModule(substrate);
         this.precompiles = evm
