@@ -356,12 +356,7 @@ export class AccountMappingModule {
      */
     async addChainLink(params: AddChainLinkParams, signer: PolkadotSigner): Promise<TxResult> {
         const entry = resolveTx(this.substrate.unsafe, 'accountMapping', 'addChainLink');
-        const tx = callUnsafeTx(
-            entry,
-            params.chainId,
-            Binary.fromBytes(params.address),
-            Binary.fromBytes(params.signature)
-        );
+        const tx = callUnsafeTx(entry, params.chainId, params.address, params.signature);
         return toTxResult(await tx.signAndSubmit(signer));
     }
 
@@ -442,9 +437,9 @@ export class AccountMappingModule {
             entry,
             params.owner,
             params.chainId,
-            Binary.fromBytes(params.address),
-            Binary.fromBytes(params.signature),
-            Binary.fromBytes(params.callData)
+            params.address,
+            params.signature,
+            params.callData
         );
         return toTxResult(await tx.signAndSubmit(signer));
     }

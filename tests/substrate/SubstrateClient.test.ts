@@ -3,14 +3,14 @@ import { SubstrateClient } from '../../src/substrate/SubstrateClient';
 
 // ─── Module mocks ─────────────────────────────────────────────────────────────
 
-vi.mock('polkadot-api/ws-provider', () => ({
+vi.mock('polkadot-api/ws', () => ({
   getWsProvider: vi.fn().mockReturnValue('mock-provider'),
 }));
 
 vi.mock('polkadot-api', () => ({
   createClient: vi.fn(),
   Binary: {
-    fromBytes: vi.fn((b: Uint8Array) => ({ _tag: 'Binary', bytes: b })),
+    fromHex: vi.fn((h: string) => ({ _tag: 'Binary', hex: h })),
   },
 }));
 
@@ -25,8 +25,8 @@ vi.mock('@polkadot-api/substrate-bindings', () => ({
   AccountId: vi.fn().mockReturnValue({ dec: vi.fn().mockReturnValue('5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY') }),
 }));
 
-import { createClient, Binary } from 'polkadot-api';
-import { getWsProvider } from 'polkadot-api/ws-provider';
+import { createClient } from 'polkadot-api';
+import { getWsProvider } from 'polkadot-api/ws';
 import { getDynamicBuilder, getLookupFn } from '@polkadot-api/metadata-builders';
 import { decAnyMetadata, unifyMetadata, AccountId } from '@polkadot-api/substrate-bindings';
 import type { EventRecord } from '../../src/substrate/types';
@@ -314,7 +314,7 @@ describe('SubstrateClient.unsafe', () => {
 // ─── SubstrateClient.txFromCallData ───────────────────────────────────────────
 
 describe('SubstrateClient.txFromCallData', () => {
-  it('calls Binary.fromBytes with the callData', async () => {
+  it('calls unsafeApi.txFromCallData with the callData directly', async () => {
     const mockTx = { signAndSubmit: vi.fn() };
     const unsafeApi = { txFromCallData: vi.fn().mockResolvedValue(mockTx) };
     const { client } = await makeClient({
@@ -324,7 +324,7 @@ describe('SubstrateClient.txFromCallData', () => {
     const callData = new Uint8Array([0x01, 0x02, 0x03]);
     await client.txFromCallData(callData);
 
-    expect(vi.mocked(Binary.fromBytes)).toHaveBeenCalledWith(callData);
+    expect(unsafeApi.txFromCallData).toHaveBeenCalledWith(callData);
   });
 
   it('calls unsafeApi.txFromCallData with the Binary result', async () => {
@@ -360,7 +360,7 @@ describe('SubstrateClient.submit', () => {
       submit: vi.fn().mockResolvedValue(FINALIZED),
     });
     await client.submit('0xsignedtx');
-    expect(papi.submit).toHaveBeenCalledWith('0xsignedtx');
+    expect(papi.submit).toHaveBeenCalledWith(expect.objectContaining({ _tag: 'Binary', hex: '0xsignedtx' }));
   });
 
   it('returns the TxFinalizedPayload from _papi.submit', async () => {
@@ -388,7 +388,7 @@ describe('SubstrateClient.submitAndWatch', () => {
       submitAndWatch: vi.fn().mockReturnValue(obs),
     });
     client.submitAndWatch('0xsignedtx');
-    expect(papi.submitAndWatch).toHaveBeenCalledWith('0xsignedtx');
+    expect(papi.submitAndWatch).toHaveBeenCalledWith(expect.objectContaining({ _tag: 'Binary', hex: '0xsignedtx' }));
   });
 
   it('returns the Observable from _papi.submitAndWatch', async () => {
