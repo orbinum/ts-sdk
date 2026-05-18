@@ -5,7 +5,7 @@ import {
     type TxFinalizedPayload,
     type PolkadotSigner,
 } from 'polkadot-api';
-import { getWsProvider } from 'polkadot-api/ws-provider';
+import { getWsProvider } from 'polkadot-api/ws';
 import { getDynamicBuilder, getLookupFn } from '@polkadot-api/metadata-builders';
 import { decAnyMetadata, unifyMetadata } from '@polkadot-api/substrate-bindings';
 import { AccountId } from '@polkadot-api/substrate-bindings';
@@ -249,14 +249,14 @@ export class SubstrateClient {
      * into a PAPI UnsafeTransaction that can be signed and submitted.
      */
     async txFromCallData(callData: Uint8Array) {
-        return this._papi.getUnsafeApi().txFromCallData(Binary.fromBytes(callData));
+        return this._papi.getUnsafeApi().txFromCallData(callData);
     }
 
     /**
      * Submits a pre-signed extrinsic (hex string) and waits for finalization.
      */
     async submit(signedHex: string): Promise<TxFinalizedPayload> {
-        return this._papi.submit(signedHex);
+        return this._papi.submit(Binary.fromHex(signedHex));
     }
 
     /**
@@ -264,7 +264,7 @@ export class SubstrateClient {
      * Events: TxSigned → TxBroadcasted → TxBestBlocksState → TxFinalized
      */
     submitAndWatch(signedHex: string): ReturnType<PolkadotClient['submitAndWatch']> {
-        return this._papi.submitAndWatch(signedHex);
+        return this._papi.submitAndWatch(Binary.fromHex(signedHex));
     }
 
     /**
@@ -273,7 +273,7 @@ export class SubstrateClient {
      * The bare tx hex is produced by `tx.getBareTx()` from polkadot-api.
      */
     async submitUnsignedAndWatch(bareTxHex: string): Promise<TxFinalizedPayload> {
-        return this._papi.submit(bareTxHex);
+        return this._papi.submit(Binary.fromHex(bareTxHex));
     }
 
     /**
