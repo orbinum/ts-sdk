@@ -52,7 +52,7 @@ export class ShieldedPoolModule {
             asset_id: params.assetId,
             amount: params.amount,
             commitment: Binary.fromHex(params.commitment),
-            encrypted_memo: Binary.fromBytes(params.encryptedMemo),
+            encrypted_memo: params.encryptedMemo,
         });
         return toTxResult(
             await (txOptions !== undefined
@@ -79,17 +79,17 @@ export class ShieldedPoolModule {
         const changeCommitment = params.changeCommitment ?? '0x' + '00'.repeat(32);
 
         // Validate and encode change_encrypted_memo (if provided)
-        let changeEncryptedMemo: Binary;
+        let changeEncryptedMemo: Uint8Array;
         if (params.changeEncryptedMemo && params.changeEncryptedMemo.length > 0) {
             EncryptedMemo.validate(params.changeEncryptedMemo, 'changeEncryptedMemo');
-            changeEncryptedMemo = Binary.fromBytes(params.changeEncryptedMemo);
+            changeEncryptedMemo = params.changeEncryptedMemo;
         } else {
             // Empty memo for total unshield
-            changeEncryptedMemo = Binary.fromBytes(new Uint8Array(0));
+            changeEncryptedMemo = new Uint8Array(0);
         }
 
         const tx = callUnsafeTx(entry, {
-            proof: Binary.fromBytes(params.proof),
+            proof: params.proof,
             merkle_root: Binary.fromHex(params.merkleRoot),
             nullifier: Binary.fromHex(params.nullifier),
             asset_id: params.assetId,
@@ -128,12 +128,12 @@ export class ShieldedPoolModule {
                 out.encryptedMemo,
                 `privateTransfer.outputs[${i}].encryptedMemo`
             );
-            return Binary.fromBytes(out.encryptedMemo);
+            return out.encryptedMemo;
         });
 
         const entry = resolveTx(this.substrate.unsafe, 'ShieldedPool', 'private_transfer');
         const tx = callUnsafeTx(entry, {
-            proof: Binary.fromBytes(params.proof),
+            proof: params.proof,
             merkle_root: Binary.fromHex(params.merkleRoot),
             nullifiers,
             commitments,
@@ -167,7 +167,7 @@ export class ShieldedPoolModule {
                 assetId: item.assetId,
                 amount: item.amount.toString(),
                 commitment: Binary.fromHex(item.commitment),
-                encryptedMemo: Binary.fromBytes(item.encryptedMemo),
+                encryptedMemo: item.encryptedMemo,
             };
         });
         const entry = resolveTx(this.substrate.unsafe, 'ShieldedPool', 'shield_batch');
@@ -197,9 +197,9 @@ export class ShieldedPoolModule {
             commitment: Binary.fromHex(params.commitment),
             amount: params.amount,
             asset_id: params.assetId,
-            encrypted_memo: Binary.fromBytes(params.encryptedMemo),
-            proof: Binary.fromBytes(params.proof),
-            public_signals: Binary.fromBytes(params.publicSignals),
+            encrypted_memo: params.encryptedMemo,
+            proof: params.proof,
+            public_signals: params.publicSignals,
         });
         return toTxResult(
             await (txOptions !== undefined
