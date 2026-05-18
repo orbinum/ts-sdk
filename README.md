@@ -28,6 +28,7 @@ const client = await OrbinumClient.connect({
 const info  = await client.substrate.getChainInfo();
 const root  = await client.rpcV2.privacy.getMerkleRoot();
 const block = await client.substrate.getBlock('best');
+const isValidator = await client.rpcV2.chain.isValidator('5GrwvaEF...');
 ```
 
 `OrbinumClient` exposes the following modules:
@@ -36,7 +37,8 @@ const block = await client.substrate.getBlock('best');
 |---|---|
 | `client.substrate` | Substrate RPC — blocks, events, transactions |
 | `client.evm` | EVM JSON-RPC client (`null` if `evmRpc` not set) |
-| `client.rpcV2` | Orbinum `rpc-v2` namespaces (`privacy_*`, etc.) |
+| `client.rpcV2` | Orbinum `rpc-v2` namespaces (`chain_*`, `privacy_*`) |
+| `client.rpcV2.chain` | Chain-level queries (`chain_isValidator`, etc.) |
 | `client.shieldedPool` | Shielded pool extrinsics |
 | `client.accountMapping` | Alias, chain-link, and identity operations |
 | `client.precompiles` | EVM precompile wrappers (`null` if `evmRpc` not set) |
