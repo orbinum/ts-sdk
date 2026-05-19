@@ -195,6 +195,38 @@ describe('IndexerClient', () => {
         expect(status.txType).toBeUndefined();
     });
 
+    // ── getAllSpentNullifiers ─────────────────────────────────────────────────
+
+    it('getAllSpentNullifiers returns empty Set when no nullifiers spent', async () => {
+        mockFetch({ data: [] });
+        const result = await client.getAllSpentNullifiers();
+        expect(result).toBeInstanceOf(Set);
+        expect(result.size).toBe(0);
+        expect(lastUrl()).toBe(`${BASE}/shielded/nullifiers/all`);
+    });
+
+    it('getAllSpentNullifiers returns Set of hex strings', async () => {
+        mockFetch({ data: ['0xaaa', '0xbbb', '0xccc'] });
+        const result = await client.getAllSpentNullifiers();
+        expect(result.size).toBe(3);
+        expect(result.has('0xaaa')).toBe(true);
+        expect(result.has('0xbbb')).toBe(true);
+    });
+
+    it('getAllSpentNullifiers normalizes to lowercase', async () => {
+        mockFetch({ data: ['0xAAA', '0xBBB'] });
+        const result = await client.getAllSpentNullifiers();
+        expect(result.has('0xaaa')).toBe(true);
+        expect(result.has('0xbbb')).toBe(true);
+        expect(result.has('0xAAA')).toBe(false);
+    });
+
+    it('getAllSpentNullifiers calls GET /shielded/nullifiers/all', async () => {
+        mockFetch({ data: [] });
+        await client.getAllSpentNullifiers();
+        expect(lastUrl()).toBe(`${BASE}/shielded/nullifiers/all`);
+    });
+
     // ── getTransfersByNullifiers ──────────────────────────────────────────────
 
     it('getTransfersByNullifiers returns empty array for empty input', async () => {

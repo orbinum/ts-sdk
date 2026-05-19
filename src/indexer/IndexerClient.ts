@@ -54,25 +54,6 @@ export class IndexerClient {
         return res.json() as Promise<T>;
     }
 
-    private async post<T>(path: string, body: unknown): Promise<T> {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-        try {
-            const res = await fetch(`${this.baseUrl}${path}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(body),
-                signal: controller.signal,
-            });
-            if (!res.ok) {
-                throw new Error(`IndexerClient: HTTP ${res.status} for POST ${path}`);
-            }
-            return res.json() as Promise<T>;
-        } finally {
-            clearTimeout(timer);
-        }
-    }
-
     private async getOrNull<T>(path: string): Promise<T | null> {
         const res = await this._fetchResponse(path);
         if (res.status === 404) return null;
@@ -159,16 +140,17 @@ export class IndexerClient {
     }
 
     /**
-     * Batch-checks which of the given nullifiers are spent.
-     * Returns only the nullifiers that exist in the spent set.
-     * Accepts up to 100 nullifiers (0x-prefixed hex).
+     * Downloads the full spent nullifier set and returns it as a Set of lowercase hex strings.
+     *
+     * The server sees an identical GET request regardless of which notes the wallet holds —
+     * the intersection is computed locally (PIR-A privacy model).
+     *
+     * Suitable for wallets with up to ~1M spent nullifiers (~70 MB raw, <20 MB gzip).
+     * For the current Orbinum testnet/mainnet scale this is the recommended approach.
      */
-    async getNullifiersBatch(nullifiers: string[]): Promise<SpentNullifier[]> {
-        if (nullifiers.length === 0) return [];
-        const res = await this.post<{ data: SpentNullifier[] }>('/shielded/nullifiers/batch', {
-            nullifiers: nullifiers.map((n) => n.toLowerCase()),
-        });
-        return res.data;
+    async getAllSpentNullifiers(): Promise<Set<string>> {
+        const res = await this.get<{ data: string[] }>('/shielded/nullifiers/all');
+        return new Set(res.data.map((h) => h.toLowerCase()));
     }
 
     // ─── Private transfers ─────────────────────────────────────────────────────

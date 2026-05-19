@@ -5,6 +5,14 @@ All notable changes to the Orbinum TypeScript SDK will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-05-18
+
+### Added
+
+- **`IndexerClient.getAllSpentNullifiers()`** — downloads the full global spent-nullifier set from `GET /shielded/nullifiers/all` and returns it as `Promise<Set<string>>` (lowercase hex). Implements the PIR-A privacy model: the server receives an identical GET request regardless of which notes the wallet holds; the spent/unspent intersection is computed locally by the caller.
+
+---
+
 ## [0.7.0] - 2026-05-17
 
 ### Added
