@@ -15,6 +15,12 @@ import type {
 // Raw RPC response shapes
 // ---------------------------------------------------------------------------
 
+/**
+ * Maximum block range for eth_getLogs queries.
+ * Must not exceed the node's --max-block-range setting (default: 1024 in Frontier stable2512+).
+ */
+const MAX_LOG_BLOCK_RANGE = 1000;
+
 /** Raw JSON-RPC shape of an EVM block (hex-encoded numeric fields). */
 interface RawEvmBlock {
     hash: string;
@@ -201,11 +207,11 @@ export class EvmExplorer {
 
     /**
      * Returns aggregated on-chain data for an EVM address: balance, nonce,
-     * bytecode (truncated), and up to 50 recent logs from the last 5 000 blocks.
+     * bytecode (truncated), and up to 50 recent logs from the last 1 000 blocks.
      */
     async getAddressInfo(address: string): Promise<EvmAddressInfo> {
         const latest = await this.evm.getBlockNumber().catch(() => 0);
-        const fromBlock = `0x${Math.max(0, latest - 5000).toString(16)}`;
+        const fromBlock = `0x${Math.max(0, latest - MAX_LOG_BLOCK_RANGE).toString(16)}`;
         const [balance, nonce, code, logs] = await Promise.all([
             this.evm
                 .request<string | null>('eth_getBalance', [address, 'latest'])
@@ -309,13 +315,13 @@ export class EvmExplorer {
     }
 
     /**
-     * Returns ERC-20 `Transfer` events for `address` from the last 5 000 blocks.
+     * Returns ERC-20 `Transfer` events for `address` from the last 1 000 blocks.
      * When `holderAddress` is provided, restricts results to transfers sent or received by that address.
      */
     async getTokenTransfers(address: string, holderAddress?: string): Promise<TokenTransfer[]> {
         const TRANSFER = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef';
         const latest = await this.evm.getBlockNumber().catch(() => 0);
-        const fromBlock = `0x${Math.max(0, latest - 5000).toString(16)}`;
+        const fromBlock = `0x${Math.max(0, latest - MAX_LOG_BLOCK_RANGE).toString(16)}`;
 
         let logs: RawEvmLog[];
         if (holderAddress) {

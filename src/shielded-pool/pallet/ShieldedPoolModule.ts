@@ -1,4 +1,4 @@
-import { Binary, type PolkadotSigner } from 'polkadot-api';
+import { type PolkadotSigner } from 'polkadot-api';
 import type { SubstrateClient } from '../../substrate/SubstrateClient';
 import type { TxResult } from '../../client/types';
 import {
@@ -51,7 +51,7 @@ export class ShieldedPoolModule {
         const tx = callUnsafeTx(entry, {
             asset_id: params.assetId,
             amount: params.amount,
-            commitment: Binary.fromHex(params.commitment),
+            commitment: params.commitment,
             encrypted_memo: params.encryptedMemo,
         });
         return toTxResult(
@@ -90,13 +90,13 @@ export class ShieldedPoolModule {
 
         const tx = callUnsafeTx(entry, {
             proof: params.proof,
-            merkle_root: Binary.fromHex(params.merkleRoot),
-            nullifier: Binary.fromHex(params.nullifier),
+            merkle_root: params.merkleRoot,
+            nullifier: params.nullifier,
             asset_id: params.assetId,
             amount: params.amount,
             recipient: recipientSs58,
             fee: params.fee ?? 0n,
-            change_commitment: Binary.fromHex(changeCommitment),
+            change_commitment: changeCommitment,
             change_encrypted_memo: changeEncryptedMemo,
             relayer: undefined, // Option<H160> — None for direct Substrate submissions
         });
@@ -121,8 +121,8 @@ export class ShieldedPoolModule {
         signer?: PolkadotSigner,
         txOptions?: UnsafeTxOptions
     ): Promise<TxResult> {
-        const nullifiers = params.inputs.map((inp) => Binary.fromHex(inp.nullifier));
-        const commitments = params.outputs.map((out) => Binary.fromHex(out.commitment));
+        const nullifiers = params.inputs.map((inp) => inp.nullifier);
+        const commitments = params.outputs.map((out) => out.commitment);
         const memos = params.outputs.map((out, i) => {
             EncryptedMemo.validate(
                 out.encryptedMemo,
@@ -134,7 +134,7 @@ export class ShieldedPoolModule {
         const entry = resolveTx(this.substrate.unsafe, 'ShieldedPool', 'private_transfer');
         const tx = callUnsafeTx(entry, {
             proof: params.proof,
-            merkle_root: Binary.fromHex(params.merkleRoot),
+            merkle_root: params.merkleRoot,
             nullifiers,
             commitments,
             encrypted_memos: memos,
@@ -166,7 +166,7 @@ export class ShieldedPoolModule {
             return {
                 assetId: item.assetId,
                 amount: item.amount.toString(),
-                commitment: Binary.fromHex(item.commitment),
+                commitment: item.commitment,
                 encryptedMemo: item.encryptedMemo,
             };
         });
@@ -194,7 +194,7 @@ export class ShieldedPoolModule {
         EncryptedMemo.validate(params.encryptedMemo, 'claimShieldedFees.encryptedMemo');
         const entry = resolveTx(this.substrate.unsafe, 'ShieldedPool', 'claim_shielded_fees');
         const tx = callUnsafeTx(entry, {
-            commitment: Binary.fromHex(params.commitment),
+            commitment: params.commitment,
             amount: params.amount,
             asset_id: params.assetId,
             encrypted_memo: params.encryptedMemo,

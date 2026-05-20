@@ -46,12 +46,12 @@ export function callUnsafeTx(
     ...args: unknown[]
 ): {
     signAndSubmit(signer: PolkadotSigner, options?: UnsafeTxOptions): Promise<TxFinalizedPayload>;
-    getBareTx(): Promise<string>;
+    getBareTx(): Promise<Uint8Array>;
 } {
     return (
         txEntry as (...a: unknown[]) => {
             signAndSubmit(s: PolkadotSigner, o?: UnsafeTxOptions): Promise<TxFinalizedPayload>;
-            getBareTx(): Promise<string>;
+            getBareTx(): Promise<Uint8Array>;
         }
     )(...args);
 }
@@ -61,11 +61,11 @@ export function callUnsafeTx(
  * Used for gasless private_transfer and unshield where no signer is available.
  */
 export async function submitBareTx(
-    tx: { getBareTx(): Promise<string> },
+    tx: { getBareTx(): Promise<Uint8Array> },
     client: SubstrateClient
 ): Promise<TxResult> {
-    const bareTxHex = await tx.getBareTx();
-    const payload = await client.submitUnsignedAndWatch(bareTxHex);
+    const bareTx = await tx.getBareTx();
+    const payload = await client.submitUnsignedAndWatch(bareTx);
     return toTxResult(payload);
 }
 

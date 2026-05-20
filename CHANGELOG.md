@@ -5,6 +5,17 @@ All notable changes to the Orbinum TypeScript SDK will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - 2026-05-20
+
+### Fixed
+
+- **`ShieldedPoolModule`** — eliminado `Binary.fromHex()` en campos de tamaño fijo `[u8;32]` (`merkle_root`, `nullifier`, `change_commitment`, `commitments`, `nullifiers`). El codec `SizedBytes(N)` de PAPI espera una cadena hex directamente; envolver con `Binary.fromHex()` devuelve un `Uint8Array` que falla el check de compatibilidad de tipo, generando el error *"Incompatible runtime entry Tx(ShieldedPool.unshield)"*.
+- **`SubstrateClient.submitUnsignedAndWatch`** — cambiada la firma de `(bareTxHex: string)` a `(bareTx: Uint8Array)` y eliminada la llamada `Binary.fromHex()`. `getBareTx()` de PAPI devuelve `Promise<Uint8Array>`, no un hex string; la conversión corrupta los bytes y el nodo rechazaba la tx con *"ExtrinsicFormat 0 not valid"*.
+- **`submitBareTx` / `callUnsafeTx`** — tipos de retorno de `getBareTx()` actualizados a `Promise<Uint8Array>` para alinearlos con los tipos reales de PAPI 2.x.
+- **`EvmExplorer.getAddressInfo`** — rango de bloques para `eth_getLogs` reducido de 5 000 a 1 000 para respetar el límite `--max-block-range` por defecto del nodo stable2512.
+
+---
+
 ## [0.7.1] - 2026-05-18
 
 ### Added
