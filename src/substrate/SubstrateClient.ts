@@ -268,12 +268,12 @@ export class SubstrateClient {
     }
 
     /**
-     * Submits a bare (unsigned) extrinsic hex and waits for finalization.
+     * Submits a bare (unsigned) extrinsic and waits for finalization.
      * Used for gasless private_transfer and unshield transactions.
-     * The bare tx hex is produced by `tx.getBareTx()` from polkadot-api.
+     * The bare tx bytes are produced by `tx.getBareTx()` from polkadot-api.
      */
-    async submitUnsignedAndWatch(bareTxHex: string): Promise<TxFinalizedPayload> {
-        return this._papi.submit(Binary.fromHex(bareTxHex));
+    async submitUnsignedAndWatch(bareTx: Uint8Array): Promise<TxFinalizedPayload> {
+        return this._papi.submit(bareTx);
     }
 
     /**
