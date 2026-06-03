@@ -245,9 +245,81 @@ describe('IndexerClient', () => {
         const result = await client.getTransfersByNullifiers(['0xnull1']);
         expect(result).toHaveLength(1);
         expect(result[0]!.blockNumber).toBe(100);
+        expect(lastUrl()).toContain('/shielded/transfers/by-nullifiers');
+    });
+
+    it('getTransfersByNullifiers passes all nullifiers as comma-separated query param', async () => {
+        mockFetch({ data: [], total: 0 });
+        await client.getTransfersByNullifiers(['0xaaa', '0xbbb', '0xccc']);
+        const url = lastUrl();
+        expect(url).toContain('nullifiers=');
+        expect(url).toContain('0xaaa');
+        expect(url).toContain('0xbbb');
+        expect(url).toContain('0xccc');
+    });
+
+    it('getTransfersByNullifiers forwards matchedNullifiers from response', async () => {
+        const ts: PrivateTransferTimestamp = {
+            blockNumber: 500,
+            extrinsicIndex: 3,
+            hash: '0x' + 'ef'.repeat(32),
+            timestampMs: 1_700_000_000_000,
+            matchedNullifiers: ['0x' + 'aa'.repeat(32), '0x' + 'bb'.repeat(32)],
+        };
+        mockFetch({ data: [ts], total: 1 });
+        const result = await client.getTransfersByNullifiers([
+            '0x' + 'aa'.repeat(32),
+            '0x' + 'bb'.repeat(32),
+        ]);
+        expect(result).toHaveLength(1);
+        expect(result[0]!.matchedNullifiers).toHaveLength(2);
+        expect(result[0]!.matchedNullifiers).toContain('0x' + 'aa'.repeat(32));
+        expect(result[0]!.matchedNullifiers).toContain('0x' + 'bb'.repeat(32));
+    });
+
+    it('getTransfersByNullifiers returns matchedNullifiers as undefined when absent in response', async () => {
+        const ts: PrivateTransferTimestamp = {
+            blockNumber: 100,
+            extrinsicIndex: 0,
+            hash: null,
+            timestampMs: null,
+            // matchedNullifiers intentionally omitted — server may not include it
+        };
+        mockFetch({ data: [ts], total: 1 });
+        const result = await client.getTransfersByNullifiers(['0xnull1']);
+        expect(result[0]!.matchedNullifiers).toBeUndefined();
+    });
+
+    it('getTransfersByNullifiers groups multiple nullifiers from the same extrinsic into one entry', async () => {
+        const NULL_A = '0x' + 'aa'.repeat(32);
+        const NULL_B = '0x' + 'bb'.repeat(32);
+        const ts: PrivateTransferTimestamp = {
+            blockNumber: 300,
+            extrinsicIndex: 2,
+            hash: '0x' + 'cd'.repeat(32),
+            timestampMs: 9999,
+            matchedNullifiers: [NULL_A, NULL_B],
+        };
+        mockFetch({ data: [ts], total: 1 });
+        const result = await client.getTransfersByNullifiers([NULL_A, NULL_B]);
+        // One extrinsic entry for both nullifiers
+        expect(result).toHaveLength(1);
+        expect(result[0]!.matchedNullifiers).toContain(NULL_A);
+        expect(result[0]!.matchedNullifiers).toContain(NULL_B);
+    });
+
+    it('getTransfersByNullifiers does not expose inputNullifiersJson or outputCommitmentsJson', async () => {
+        const ts: PrivateTransferTimestamp = {
+            blockNumber: 100,
+            extrinsicIndex: 0,
+            hash: null,
+            timestampMs: null,
+            matchedNullifiers: ['0xnull'],
+        };
+        mockFetch({ data: [ts], total: 1 });
+        const result = await client.getTransfersByNullifiers(['0xnull']);
         expect(result[0]).not.toHaveProperty('inputNullifiersJson');
         expect(result[0]).not.toHaveProperty('outputCommitmentsJson');
-        expect(lastUrl()).toContain('/shielded/transfers/by-nullifiers');
     });
 
     // ── getTransfersByCommitments ─────────────────────────────────────────────
@@ -268,9 +340,94 @@ describe('IndexerClient', () => {
         const result = await client.getTransfersByCommitments(['0xcomm1']);
         expect(result).toHaveLength(1);
         expect(result[0]!.blockNumber).toBe(200);
+        expect(lastUrl()).toContain('/shielded/transfers/by-commitments');
+    });
+
+    it('getTransfersByCommitments passes all commitments as comma-separated query param', async () => {
+        mockFetch({ data: [], total: 0 });
+        await client.getTransfersByCommitments(['0xaaa', '0xbbb', '0xccc']);
+        const url = lastUrl();
+        expect(url).toContain('commitments=');
+        expect(url).toContain('0xaaa');
+        expect(url).toContain('0xbbb');
+        expect(url).toContain('0xccc');
+    });
+
+    it('getTransfersByCommitments forwards matchedCommitments from response', async () => {
+        const COMM_A = '0x' + 'aa'.repeat(32);
+        const COMM_B = '0x' + 'bb'.repeat(32);
+        const ts: PrivateTransferTimestamp = {
+            blockNumber: 600,
+            extrinsicIndex: 4,
+            hash: '0x' + 'de'.repeat(32),
+            timestampMs: 1_600_000_000_000,
+            matchedCommitments: [COMM_A, COMM_B],
+        };
+        mockFetch({ data: [ts], total: 1 });
+        const result = await client.getTransfersByCommitments([COMM_A, COMM_B]);
+        expect(result).toHaveLength(1);
+        expect(result[0]!.matchedCommitments).toHaveLength(2);
+        expect(result[0]!.matchedCommitments).toContain(COMM_A);
+        expect(result[0]!.matchedCommitments).toContain(COMM_B);
+    });
+
+    it('getTransfersByCommitments returns matchedCommitments as undefined when absent in response', async () => {
+        const ts: PrivateTransferTimestamp = {
+            blockNumber: 200,
+            extrinsicIndex: 1,
+            hash: null,
+            timestampMs: null,
+        };
+        mockFetch({ data: [ts], total: 1 });
+        const result = await client.getTransfersByCommitments(['0xcomm1']);
+        expect(result[0]!.matchedCommitments).toBeUndefined();
+    });
+
+    it('getTransfersByCommitments groups multiple commitments from the same extrinsic into one entry', async () => {
+        const COMM_A = '0x' + 'cc'.repeat(32);
+        const COMM_B = '0x' + 'dd'.repeat(32);
+        const ts: PrivateTransferTimestamp = {
+            blockNumber: 700,
+            extrinsicIndex: 2,
+            hash: '0x' + 'ef'.repeat(32),
+            timestampMs: 8888,
+            matchedCommitments: [COMM_A, COMM_B],
+        };
+        mockFetch({ data: [ts], total: 1 });
+        const result = await client.getTransfersByCommitments([COMM_A, COMM_B]);
+        expect(result).toHaveLength(1);
+        expect(result[0]!.matchedCommitments).toContain(COMM_A);
+        expect(result[0]!.matchedCommitments).toContain(COMM_B);
+    });
+
+    it('getTransfersByCommitments does not expose inputNullifiersJson or outputCommitmentsJson', async () => {
+        const ts: PrivateTransferTimestamp = {
+            blockNumber: 200,
+            extrinsicIndex: 1,
+            hash: null,
+            timestampMs: null,
+            matchedCommitments: ['0xcomm'],
+        };
+        mockFetch({ data: [ts], total: 1 });
+        const result = await client.getTransfersByCommitments(['0xcomm']);
         expect(result[0]).not.toHaveProperty('inputNullifiersJson');
         expect(result[0]).not.toHaveProperty('outputCommitmentsJson');
-        expect(lastUrl()).toContain('/shielded/transfers/by-commitments');
+    });
+
+    it('both methods can return entries with both matchedNullifiers and matchedCommitments undefined (backward compat)', async () => {
+        const ts: PrivateTransferTimestamp = {
+            blockNumber: 50,
+            extrinsicIndex: null,
+            hash: null,
+            timestampMs: null,
+        };
+        mockFetch({ data: [ts], total: 1 });
+        const [rN, rC] = await Promise.all([
+            client.getTransfersByNullifiers(['0xn']),
+            client.getTransfersByCommitments(['0xc']),
+        ]);
+        expect(rN[0]!.matchedNullifiers).toBeUndefined();
+        expect(rC[0]!.matchedCommitments).toBeUndefined();
     });
 
     // ── getUnshields ─────────────────────────────────────────────────────────
