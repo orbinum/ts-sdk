@@ -233,6 +233,26 @@ export type ShieldedAddressEvent =
     | ({ kind: 'unshield' } & Unshield)
     | ({ kind: 'transfer' } & PrivateTransferTimestamp);
 
+/** A validator node indexed from pallet-validator-set events. */
+export interface IndexedValidator {
+    account: string;
+    /** Current lifecycle status of the validator. */
+    status: 'pending' | 'approved' | 'rejected' | 'removed';
+    /** Reserved bond amount as decimal string (bigint-safe). Null if no bond was reserved. */
+    bondAmount: string | null;
+    requestedAtBlock: number | null;
+    approvedAtBlock: number | null;
+    removedAtBlock: number | null;
+    timestampMs: number | null;
+}
+
+/** A session rotation event indexed from pallet-session NewSession events. */
+export interface IndexedSession {
+    sessionIndex: number;
+    blockNumber: number;
+    timestampMs: number | null;
+}
+
 /**
  * Lightweight hint returned by the stealth scan endpoint.
  * Contains only the fields required for a wallet to:

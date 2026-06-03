@@ -3,6 +3,8 @@ import type {
     IndexedBlock,
     IndexedEvmTx,
     IndexedExtrinsic,
+    IndexedSession,
+    IndexedValidator,
     IndexerStats,
     MerkleRoot,
     NullifierStatusResult,
@@ -368,6 +370,38 @@ export class IndexerClient {
     /** Returns a single registered asset by its ID, or null if not found. */
     async getRegisteredAsset(assetId: string): Promise<RegisteredAsset | null> {
         return this.getOrNull<RegisteredAsset>(`/shielded/assets/${encodeURIComponent(assetId)}`);
+    }
+
+    // ─── Validators ────────────────────────────────────────────────────────────
+
+    /** Returns a paginated list of validators. Filter by lifecycle status with `status`. */
+    async getValidators(params?: {
+        page?: number;
+        limit?: number;
+        status?: 'pending' | 'approved' | 'rejected' | 'removed';
+    }): Promise<PaginatedResult<IndexedValidator>> {
+        const qs = this.buildQuery({
+            page: params?.page,
+            limit: params?.limit,
+            status: params?.status,
+        });
+        return this.get<PaginatedResult<IndexedValidator>>(`/validators${qs}`);
+    }
+
+    /** Returns a single validator by account address, or null if not found. */
+    async getValidator(account: string): Promise<IndexedValidator | null> {
+        return this.getOrNull<IndexedValidator>(`/validators/${encodeURIComponent(account)}`);
+    }
+
+    // ─── Sessions ──────────────────────────────────────────────────────────────
+
+    /** Returns a paginated list of session rotations, ordered by most recent first. */
+    async getSessions(params?: {
+        page?: number;
+        limit?: number;
+    }): Promise<PaginatedResult<IndexedSession>> {
+        const qs = this.buildQuery({ page: params?.page, limit: params?.limit });
+        return this.get<PaginatedResult<IndexedSession>>(`/sessions${qs}`);
     }
 
     // ─── Stats & Health ────────────────────────────────────────────────────────
