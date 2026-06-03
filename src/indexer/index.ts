@@ -5,6 +5,8 @@ export type {
     IndexedBlock,
     IndexedExtrinsic,
     IndexedEvmTx,
+    IndexedSession,
+    IndexedValidator,
     IndexerStats,
     ShieldedAddressEvent,
     ShieldedCommitment,

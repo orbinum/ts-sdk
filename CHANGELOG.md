@@ -5,6 +5,27 @@ All notable changes to the Orbinum TypeScript SDK will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.4] - 2026-06-03
+
+### Added
+
+- **`IndexedValidator`** — new type representing a validator node indexed from `pallet-validator-set` events:
+  - `account: string` — SS58 validator address.
+  - `status: 'pending' | 'approved' | 'rejected' | 'removed'` — lifecycle status.
+  - `bondAmount: string | null` — reserved bond amount as decimal string.
+  - `requestedAtBlock`, `approvedAtBlock`, `removedAtBlock: number | null` — block numbers for each lifecycle transition.
+  - `timestampMs: number | null`.
+- **`IndexedSession`** — new type representing a session rotation indexed from `pallet-session NewSession` events:
+  - `sessionIndex: number` — monotonically increasing session counter.
+  - `blockNumber: number` — block at which the session started.
+  - `timestampMs: number | null`.
+- **`IndexerClient.getValidators(params?)`** — paginated list of validators. Optional `status` filter (`'pending' | 'approved' | 'rejected' | 'removed'`). Calls `GET /validators`.
+- **`IndexerClient.getValidator(account)`** — single validator by account address. Returns `null` on 404. Calls `GET /validators/:account`.
+- **`IndexerClient.getSessions(params?)`** — paginated list of session rotations ordered most-recent first. Calls `GET /sessions`.
+- Both new types and all three new client methods are exported from the package root (`@orbinum/sdk`).
+
+---
+
 ## [0.7.3] - 2026-06-02
 
 ### Added

@@ -4,6 +4,8 @@ import type {
     IndexedBlock,
     IndexedEvmTx,
     IndexedExtrinsic,
+    IndexedSession,
+    IndexedValidator,
     IndexerStats,
     MerkleRoot,
     PaginatedResult,
@@ -953,5 +955,140 @@ describe('IndexerClient', () => {
         const result = await client.getAddressShieldedActivity('0xunknown');
         expect(result.data).toEqual([]);
         expect(result.pagination.total).toBe(0);
+    });
+
+    // ── getValidators ─────────────────────────────────────────────────────────
+
+    it('getValidators calls correct URL with no params', async () => {
+        mockFetch({ data: [], pagination: { page: 1, limit: 20, total: 0 } });
+        await client.getValidators();
+        expect(lastUrl()).toBe(`${BASE}/validators`);
+    });
+
+    it('getValidators passes pagination params', async () => {
+        mockFetch({ data: [], pagination: { page: 2, limit: 10, total: 0 } });
+        await client.getValidators({ page: 2, limit: 10 });
+        expect(lastUrl()).toBe(`${BASE}/validators?page=2&limit=10`);
+    });
+
+    it('getValidators passes status filter', async () => {
+        mockFetch({ data: [], pagination: { page: 1, limit: 20, total: 0 } });
+        await client.getValidators({ status: 'approved' });
+        expect(lastUrl()).toBe(`${BASE}/validators?status=approved`);
+    });
+
+    it('getValidators passes status and pagination together', async () => {
+        mockFetch({ data: [], pagination: { page: 1, limit: 5, total: 0 } });
+        await client.getValidators({ page: 1, limit: 5, status: 'pending' });
+        expect(lastUrl()).toBe(`${BASE}/validators?page=1&limit=5&status=pending`);
+    });
+
+    it('getValidators returns IndexedValidator array', async () => {
+        const validator: IndexedValidator = {
+            account: '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
+            status: 'approved',
+            bondAmount: '1000000000000',
+            requestedAtBlock: 100,
+            approvedAtBlock: 200,
+            removedAtBlock: null,
+            timestampMs: 3000,
+        };
+        const payload: PaginatedResult<IndexedValidator> = {
+            data: [validator],
+            pagination: { page: 1, limit: 20, total: 1 },
+        };
+        mockFetch(payload);
+        const result = await client.getValidators();
+        expect(result.data).toHaveLength(1);
+        expect(result.data[0]!.status).toBe('approved');
+        expect(result.data[0]!.bondAmount).toBe('1000000000000');
+        expect(result.pagination.total).toBe(1);
+    });
+
+    it('getValidators handles null optional fields', async () => {
+        const validator: IndexedValidator = {
+            account: '5FHneW46xGXgs5mUiveU4sbTyGBzmstUspZC92UhjJM694ty',
+            status: 'pending',
+            bondAmount: null,
+            requestedAtBlock: 50,
+            approvedAtBlock: null,
+            removedAtBlock: null,
+            timestampMs: null,
+        };
+        mockFetch({ data: [validator], pagination: { page: 1, limit: 20, total: 1 } });
+        const result = await client.getValidators({ status: 'pending' });
+        expect(result.data[0]!.bondAmount).toBeNull();
+        expect(result.data[0]!.approvedAtBlock).toBeNull();
+        expect(result.data[0]!.timestampMs).toBeNull();
+    });
+
+    // ── getValidator ──────────────────────────────────────────────────────────
+
+    it('getValidator calls correct URL', async () => {
+        const validator: IndexedValidator = {
+            account: '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
+            status: 'approved',
+            bondAmount: '5000000000000',
+            requestedAtBlock: 100,
+            approvedAtBlock: 150,
+            removedAtBlock: null,
+            timestampMs: 1000,
+        };
+        mockFetch(validator);
+        const result = await client.getValidator('5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY');
+        expect(result).not.toBeNull();
+        expect(result!.status).toBe('approved');
+        expect(lastUrl()).toBe(
+            `${BASE}/validators/5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY`
+        );
+    });
+
+    it('getValidator returns null on 404', async () => {
+        mockFetch(null, 404);
+        const result = await client.getValidator('5unknown');
+        expect(result).toBeNull();
+    });
+
+    it('getValidator throws on non-2xx non-404 response', async () => {
+        mockFetch({}, 500);
+        await expect(client.getValidator('5GrwvaEF')).rejects.toThrow('HTTP 500');
+    });
+
+    // ── getSessions ───────────────────────────────────────────────────────────
+
+    it('getSessions calls correct URL with no params', async () => {
+        mockFetch({ data: [], pagination: { page: 1, limit: 20, total: 0 } });
+        await client.getSessions();
+        expect(lastUrl()).toBe(`${BASE}/sessions`);
+    });
+
+    it('getSessions passes pagination params', async () => {
+        mockFetch({ data: [], pagination: { page: 2, limit: 5, total: 0 } });
+        await client.getSessions({ page: 2, limit: 5 });
+        expect(lastUrl()).toBe(`${BASE}/sessions?page=2&limit=5`);
+    });
+
+    it('getSessions returns IndexedSession array ordered by most recent first', async () => {
+        const sessions: IndexedSession[] = [
+            { sessionIndex: 10, blockNumber: 6000, timestampMs: 9000 },
+            { sessionIndex: 9, blockNumber: 5400, timestampMs: 8400 },
+        ];
+        mockFetch({ data: sessions, pagination: { page: 1, limit: 20, total: 10 } });
+        const result = await client.getSessions();
+        expect(result.data).toHaveLength(2);
+        expect(result.data[0]!.sessionIndex).toBe(10);
+        expect(result.data[1]!.sessionIndex).toBe(9);
+        expect(result.pagination.total).toBe(10);
+    });
+
+    it('getSessions handles null timestampMs', async () => {
+        const session: IndexedSession = {
+            sessionIndex: 0,
+            blockNumber: 1,
+            timestampMs: null,
+        };
+        mockFetch({ data: [session], pagination: { page: 1, limit: 20, total: 1 } });
+        const result = await client.getSessions();
+        expect(result.data[0]!.timestampMs).toBeNull();
     });
 });
