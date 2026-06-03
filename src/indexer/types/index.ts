@@ -22,7 +22,13 @@ export interface ShieldedCommitment {
     blockNumber: number;
     extrinsicIndex: number | null;
     leafIndex: number;
-    /** Asset ID as decimal string (e.g. "0"). */
+    /**
+     * Asset ID as decimal string.
+     * For `source: 'shield'` and `source: 'unshield'` this reflects the real asset.
+     * For `source: 'transfer'` it is always `"0"` — the chain intentionally omits the asset ID
+     * from `CommitmentsInserted` events to prevent graph correlation across assets.
+     * The true asset is recoverable only by decrypting `encryptedMemo`.
+     */
     assetId: string;
     /** Origin of the commitment: direct shield, output of private transfer, or change from unshield. */
     source: 'shield' | 'transfer' | 'unshield';
@@ -49,6 +55,18 @@ export interface PrivateTransferTimestamp {
     /** Blake2-256 hash of the raw extrinsic, 0x-prefixed. Null if the extrinsic was not decoded. */
     hash: string | null;
     timestampMs: number | null;
+    /**
+     * Subset of the queried nullifiers that were spent in this specific extrinsic.
+     * Returned by `getTransfersByNullifiers`. Use to identify which input vault notes
+     * belong to this transfer for local reconstruction.
+     */
+    matchedNullifiers?: string[];
+    /**
+     * Subset of the queried commitments that were inserted in this specific extrinsic.
+     * Returned by `getTransfersByCommitments`. Use to identify which output vault notes
+     * (change notes or received notes) belong to this transfer.
+     */
+    matchedCommitments?: string[];
 }
 
 /** An unshield event stored by the indexer. */
@@ -225,7 +243,13 @@ export type ShieldedAddressEvent =
 export interface StealthScanHint {
     leafIndex: number;
     commitmentHex: string;
-    /** Asset ID as decimal string (e.g. "0"). */
+    /**
+     * Asset ID as decimal string.
+     * For shield-origin commitments this is the real asset ID.
+     * For transfer-origin commitments this is always `"0"` — the chain does not emit the asset ID
+     * in `CommitmentsInserted` events by design (privacy: prevents cross-asset graph correlation).
+     * Recover the true asset by decrypting `encryptedMemo`.
+     */
     assetId: string;
     /** Ephemeral public key (last 32 bytes of encrypted_memo), 0x-prefixed. null if memo absent. */
     ephPkHex: string | null;
