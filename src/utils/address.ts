@@ -26,10 +26,7 @@ export function isEvmAddress(addr: string): boolean {
  * by prepending 12 zero bytes (Ethereum-compatible mapping).
  */
 export function evmAddressToAccountId(evmAddr: string): Uint8Array {
-    const clean = evmAddr.startsWith('0x') ? evmAddr.slice(2) : evmAddr;
-    if (clean.length !== 40) {
-        throw new Error(`Expected 20-byte EVM address, got: ${evmAddr}`);
-    }
+    const clean = cleanEvmAddress(evmAddr);
     const bytes = new Uint8Array(32);
     for (let i = 0; i < 20; i++) {
         bytes[i + 12] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
@@ -47,10 +44,7 @@ export function evmAddressToAccountId(evmAddr: string): Uint8Array {
  * @param evmAddr  0x-prefixed 20-byte EVM address.
  */
 export function evmToImplicitSubstrate(evmAddr: string): string {
-    const clean = evmAddr.startsWith('0x') ? evmAddr.slice(2) : evmAddr;
-    if (clean.length !== 40) {
-        throw new Error(`Expected 20-byte EVM address, got: ${evmAddr}`);
-    }
+    const clean = cleanEvmAddress(evmAddr);
     return '0x' + clean.toLowerCase() + '0'.repeat(24);
 }
 
@@ -98,6 +92,15 @@ import { decodeAddress, encodeAddress } from '@polkadot/util-crypto';
 
 const ACCOUNT_ID_BYTES = 32;
 const EVM_BYTES = 20;
+const EVM_HEX_RE = /^[0-9a-fA-F]{40}$/;
+
+function cleanEvmAddress(addr: string): string {
+    const clean = addr.startsWith('0x') ? addr.slice(2) : addr;
+    if (!EVM_HEX_RE.test(clean)) {
+        throw new Error(`Expected 20-byte EVM address, got: ${addr}`);
+    }
+    return clean;
+}
 
 /**
  * Returns true if `addr` is a valid SS58 substrate address (not EVM).
@@ -157,10 +160,8 @@ export function substrateToEvm(addr: string): string | null {
  * Returns null on invalid input.
  */
 export function evmToSubstrate(addr: string): string | null {
-    const normalized = normalizeEvmAddress(addr);
-    if (!normalized) return null;
-    const hex = normalized.slice(2);
-    if (hex.length !== 40) return null;
+    const hex = addr.startsWith('0x') ? addr.slice(2) : addr;
+    if (!EVM_HEX_RE.test(hex)) return null;
     const mapped = new Uint8Array(ACCOUNT_ID_BYTES);
     for (let i = 0; i < EVM_BYTES; i++) {
         mapped[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
@@ -221,7 +222,7 @@ export function addressToAccountIdHex(addr: string): string | null {
     if (!addr) return null;
     // EVM H160 → mapped AccountId32
     if (isEvmAddress(addr)) {
-        const hex = addr.startsWith('0x') ? addr.slice(2) : addr;
+        const hex = cleanEvmAddress(addr);
         const mapped = new Uint8Array(ACCOUNT_ID_BYTES);
         for (let i = 0; i < EVM_BYTES; i++) {
             mapped[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
