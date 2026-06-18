@@ -116,6 +116,10 @@ describe('evmAddressToAccountId', () => {
     expect(() => evmAddressToAccountId('0xabc')).toThrow(/Expected 20-byte/);
   });
 
+  it('throws for non-hex characters', () => {
+    expect(() => evmAddressToAccountId('0x' + 'zz'.repeat(20))).toThrow(/Expected 20-byte/);
+  });
+
   it('accepts address without 0x prefix', () => {
     const result = evmAddressToAccountId('ff' + '00'.repeat(19));
     expect(result[12]).toBe(0xff);
@@ -147,6 +151,10 @@ describe('evmToImplicitSubstrate', () => {
 
   it('throws for wrong-length input', () => {
     expect(() => evmToImplicitSubstrate('0x1234')).toThrow(/Expected 20-byte/);
+  });
+
+  it('throws for non-hex characters', () => {
+    expect(() => evmToImplicitSubstrate('0x' + 'zz'.repeat(20))).toThrow(/Expected 20-byte/);
   });
 });
 
@@ -276,6 +284,7 @@ describe('evmToSubstrate', () => {
   it('returns null for invalid input', () => {
     expect(evmToSubstrate('not-an-address')).toBeNull();
     expect(evmToSubstrate('')).toBeNull();
+    expect(evmToSubstrate('0x' + 'zz'.repeat(20))).toBeNull();
   });
 
   it('roundtrips with substrateToEvm', () => {
