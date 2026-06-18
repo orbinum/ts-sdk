@@ -5,6 +5,14 @@ All notable changes to the Orbinum TypeScript SDK will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.5] - 2026-06-18
+
+### Fixed
+
+- **EVM address hex validation** — `evmAddressToAccountId`, `evmToImplicitSubstrate`, `evmToSubstrate`, and `addressToAccountIdHex` now validate that the input contains only valid hex characters, not just the correct length. Previously, non-hex input (e.g. `0xzz...`) passed the length check and produced silently corrupted `NaN` bytes; the throwing functions now throw `Expected 20-byte EVM address` and `evmToSubstrate` returns `null`. Centralized into a shared `cleanEvmAddress` helper. (#7)
+
+---
+
 ## [0.7.4] - 2026-06-03
 
 ### Added
