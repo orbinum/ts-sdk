@@ -45,9 +45,8 @@ describe('EvmExplorer.getLatestBlocks — batches block fetches', () => {
     const blocks = await explorer.getLatestBlocks(10);
 
     expect(blocks).toHaveLength(10);
-    // The regression we fixed: must NOT do a per-block eth_getBlockByNumber.
     expect(batchRequest).toHaveBeenCalledTimes(1);
-    expect(batchRequest.mock.calls[0][0]).toHaveLength(10);
+    expect(batchRequest.mock.calls[0]![0]).toHaveLength(10);
     const perBlockSingles = request.mock.calls.filter((c) => c[0] === 'eth_getBlockByNumber');
     expect(perBlockSingles).toHaveLength(0);
   });
