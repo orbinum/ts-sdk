@@ -5,6 +5,14 @@ All notable changes to the Orbinum TypeScript SDK will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.6] - 2026-06-21
+
+### Changed
+
+- **`EvmExplorer` batches block fetches** — `getLatestBlocks` and `getTransactionsByAddress` previously issued one `eth_getBlockByNumber` HTTP request per block (up to `maxBlocks`, default 300), flooding the RPC on explorer page loads. Both now use `EvmClient.batchRequest`: `getLatestBlocks` sends a single batch for all blocks, and `getTransactionsByAddress` fetches blocks in chunks of 50 per batch. A typical explorer load drops from ~169 requests to ~13. No API changes.
+
+---
+
 ## [0.7.5] - 2026-06-18
 
 ### Fixed

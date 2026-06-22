@@ -1,6 +1,6 @@
 {
   "name": "@orbinum/sdk",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "description": "Official TypeScript SDK for Orbinum.",
   "author": "Orbinum",
   "license": "MIT",
