@@ -82,16 +82,11 @@ export class EvmExplorer {
     async getLatestBlocks(count = 10): Promise<EvmBlock[]> {
         const latest = await this.evm.getBlockNumber();
         const nums = Array.from({ length: Math.min(count, latest + 1) }, (_, i) => latest - i);
-        const results = await Promise.all(
-            nums.map((n) =>
-                this.evm
-                    .request<RawEvmBlock | null>('eth_getBlockByNumber', [
-                        `0x${n.toString(16)}`,
-                        false,
-                    ])
-                    .catch(() => null)
-            )
-        );
+        const results = await this.evm
+            .batchRequest<
+                (RawEvmBlock | null)[]
+            >(nums.map((n) => ({ method: 'eth_getBlockByNumber', params: [`0x${n.toString(16)}`, false] })))
+            .catch(() => nums.map(() => null) as (RawEvmBlock | null)[]);
         return results
             .filter((b): b is RawEvmBlock => b !== null && !!b.hash)
             .map((b) => this.parseBlock(b));
@@ -147,17 +142,20 @@ export class EvmExplorer {
         const latest = await this.evm.getBlockNumber();
         const from = Math.max(0, latest - maxBlocks + 1);
         const blockNums = Array.from({ length: latest - from + 1 }, (_, i) => latest - i);
-
-        const blocks = await Promise.all(
-            blockNums.map((n) =>
-                this.evm
-                    .request<RawEvmBlock | null>('eth_getBlockByNumber', [
-                        `0x${n.toString(16)}`,
-                        true,
-                    ])
-                    .catch(() => null)
-            )
-        );
+        const CHUNK = 50;
+        const blocks: (RawEvmBlock | null)[] = [];
+        for (let i = 0; i < blockNums.length; i += CHUNK) {
+            const slice = blockNums.slice(i, i + CHUNK);
+            const part = await this.evm
+                .batchRequest<(RawEvmBlock | null)[]>(
+                    slice.map((n) => ({
+                        method: 'eth_getBlockByNumber',
+                        params: [`0x${n.toString(16)}`, true],
+                    }))
+                )
+                .catch(() => slice.map(() => null) as (RawEvmBlock | null)[]);
+            blocks.push(...part);
+        }
 
         const matchingTxs: Array<{ tx: RawEvmTx; timestamp: number | null }> = [];
         for (const block of blocks) {
