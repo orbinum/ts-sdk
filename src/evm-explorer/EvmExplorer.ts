@@ -142,10 +142,6 @@ export class EvmExplorer {
         const latest = await this.evm.getBlockNumber();
         const from = Math.max(0, latest - maxBlocks + 1);
         const blockNums = Array.from({ length: latest - from + 1 }, (_, i) => latest - i);
-
-        // ponytail: batch block fetches in chunks of 50 instead of one POST per
-        // block (was up to `maxBlocks` separate HTTP reqs). Chunked so a single
-        // batch body stays reasonable. Bump CHUNK only if the RPC accepts bigger batches.
         const CHUNK = 50;
         const blocks: (RawEvmBlock | null)[] = [];
         for (let i = 0; i < blockNums.length; i += CHUNK) {
