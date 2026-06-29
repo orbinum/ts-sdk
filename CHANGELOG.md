@@ -5,6 +5,19 @@ All notable changes to the Orbinum TypeScript SDK will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.7] - 2026-06-29
+
+### Added
+
+- **`SubstrateClient.batchRequest(calls)`** — sends multiple Substrate JSON-RPC calls in a single HTTP request (batch), returning results in call order. PAPI's WebSocket transport does not expose batching, so this uses the node's HTTP RPC endpoint (derived from the WS URL: `ws://`→`http://`, `wss://`→`https://`). Cuts high-throughput backfill from N round-trips to 1 per window (e.g. block hashes, blocks, and `System.Events` reads for a whole window of blocks). Also exposed on the provider as `OrbinumClientProvider.rpcBatch(calls)`.
+- **`jsonRpcBatch(httpUrl, calls, options?)`** (`utils/jsonRpcHttp`) — shared JSON-RPC 2.0 HTTP batch transport backing `batchRequest`. Retries on `429`/`503` with exponential backoff (honoring the `Retry-After` header), reorders responses by id, and maps any null / missing / per-call-error result to `null` in its slot. Public RPC nodes rate-limit bursty batches, so the client backs off rather than dropping work.
+
+### Changed
+
+- No breaking changes. `SubstrateClient` remains a thin wrapper over the PAPI WebSocket transport; the new HTTP batch path is isolated in `utils/jsonRpcHttp`, with `SubstrateClient.batchRequest` delegating to it.
+
+---
+
 ## [0.7.6] - 2026-06-21
 
 ### Changed

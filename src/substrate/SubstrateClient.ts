@@ -11,6 +11,7 @@ import { decAnyMetadata, unifyMetadata } from '@polkadot-api/substrate-bindings'
 import { AccountId } from '@polkadot-api/substrate-bindings';
 import { getExtrinsicDecoder } from '@polkadot-api/tx-utils';
 import { fromHex, toHex } from '../utils/hex';
+import { jsonRpcBatch, wsUrlToHttp, type JsonRpcCall } from '../utils/jsonRpcHttp';
 import type { ChainInfo, SystemHealth, EventRecord, RawBlockHeader, BlockInfo } from './types';
 import type { RawRuntimeVersion } from './types/raw';
 
@@ -24,7 +25,10 @@ export type ExtrinsicDecoder = ReturnType<typeof getExtrinsicDecoder>;
  * - Transaction submission with or without watching
  */
 export class SubstrateClient {
-    private constructor(private readonly _papi: PolkadotClient) {}
+    private constructor(
+        private readonly _papi: PolkadotClient,
+        private readonly _httpUrl: string
+    ) {}
 
     private _dynamicBuilder: ReturnType<typeof getDynamicBuilder> | null = null;
     private _extDecoder: ExtrinsicDecoder | null = null;
@@ -47,7 +51,7 @@ export class SubstrateClient {
             ),
         ]);
 
-        return new SubstrateClient(papi);
+        return new SubstrateClient(papi, wsUrlToHttp(wsUrl));
     }
 
     /**
@@ -56,6 +60,20 @@ export class SubstrateClient {
      */
     async request<T>(method: string, params: unknown[] = []): Promise<T> {
         return this._papi._request<T, unknown[]>(method, params);
+    }
+
+    /**
+     * Performs multiple JSON-RPC calls in a single HTTP request (batch). Results
+     * are returned in the same order as `calls`, as a typed tuple. A `null`
+     * result (or per-call error) maps to `null` in that slot — the call itself
+     * only rejects on HTTP/transport failure.
+     *
+     * Uses the HTTP RPC endpoint (derived from the WS URL); PAPI's WS transport
+     * does not expose batching. Ideal for high-throughput backfill: fetch many
+     * block hashes / blocks / storage reads in one round-trip instead of N.
+     */
+    async batchRequest<T extends unknown[]>(calls: JsonRpcCall[]): Promise<T> {
+        return jsonRpcBatch<T>(this._httpUrl, calls);
     }
 
     /**
