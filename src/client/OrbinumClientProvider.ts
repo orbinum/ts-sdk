@@ -344,6 +344,17 @@ export class OrbinumClientProvider {
     }
 
     /**
+     * Sends multiple Substrate JSON-RPC calls as a single HTTP batch request.
+     * Returns a tuple of typed results in the same order as `calls`.
+     */
+    async rpcBatch<T extends unknown[]>(
+        calls: Array<{ method: string; params?: unknown[] }>
+    ): Promise<T> {
+        const client = await this.getOrbinumClient();
+        return client.substrate.batchRequest<T>(calls);
+    }
+
+    /**
      * Sends a single EVM JSON-RPC request and returns the typed result.
      * Throws if `evmRpc` was not configured.
      */
