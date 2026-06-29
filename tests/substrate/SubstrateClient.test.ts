@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { SubstrateClient } from '../../src/substrate/SubstrateClient';
 
 // ─── Module mocks ─────────────────────────────────────────────────────────────
@@ -163,6 +163,41 @@ describe('SubstrateClient.request', () => {
     papi._request.mockResolvedValueOnce(expected);
     const result = await client.request<number[]>('list_method');
     expect(result).toBe(expected);
+  });
+});
+
+// ─── SubstrateClient.batchRequest ─────────────────────────────────────────────
+
+describe('SubstrateClient.batchRequest', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('POSTs the batch to the HTTP URL derived from the WS URL', async () => {
+    const { client } = await makeClient(); // connected via ws://localhost:9944
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => [
+        { jsonrpc: '2.0', id: 0, result: '0xh1' },
+        { jsonrpc: '2.0', id: 1, result: '0xh2' },
+      ],
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const out = await client.batchRequest<string[]>([
+      { method: 'chain_getBlockHash', params: [1] },
+      { method: 'chain_getBlockHash', params: [2] },
+    ]);
+
+    expect(out).toEqual(['0xh1', '0xh2']);
+    // ws://localhost:9944 → http://localhost:9944 (not the WS transport)
+    expect(fetchMock.mock.calls[0]![0]).toBe('http://localhost:9944');
+  });
+
+  it('returns [] for an empty batch without calling fetch', async () => {
+    const { client } = await makeClient();
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await client.batchRequest([])).toEqual([]);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 
