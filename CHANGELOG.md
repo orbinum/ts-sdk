@@ -5,6 +5,18 @@ All notable changes to the Orbinum TypeScript SDK will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.8] - 2026-06-29
+
+### Added
+
+- **`IndexerClient.getActivity(hours = 24)`** — returns transaction activity (signed extrinsics + EVM) bucketed per hour over the last N hours of chain time, from the indexer's `/stats/activity` endpoint. For sparklines / activity charts. New types `IndexerActivity` and `ActivityBucket`.
+
+### Changed
+
+- **`IndexerStats.extrinsics`** now includes `signed` alongside `total` (`{ total, signed }`). `total` counts all extrinsics including per-block inherents; `signed` counts user transactions only. Matches the indexer `/stats` response.
+
+---
+
 ## [0.7.7] - 2026-06-29
 
 ### Added

@@ -162,7 +162,7 @@ export interface IndexerStats {
         latestHash: string | null;
         latestTimestampMs: number | null;
     };
-    extrinsics: { total: number };
+    extrinsics: { total: number; signed: number };
     evm: { transactions: number };
     shielded: {
         commitments: number;
@@ -175,6 +175,21 @@ export interface IndexerStats {
         total: number;
         successful: number;
     };
+}
+
+/** One hour-bucket of transaction activity from `/stats/activity`. */
+export interface ActivityBucket {
+    hourStartMs: number;
+    transactions: number;
+    signedExtrinsics: number;
+    evmTransactions: number;
+}
+
+/** Transaction activity bucketed per hour over the last N hours of chain time. */
+export interface IndexerActivity {
+    hours: number;
+    anchorMs: number | null;
+    buckets: ActivityBucket[];
 }
 
 /** A registered relayer stored by the indexer. */
