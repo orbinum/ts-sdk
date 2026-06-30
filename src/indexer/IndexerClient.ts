@@ -5,6 +5,7 @@ import type {
     IndexedExtrinsic,
     IndexedSession,
     IndexedValidator,
+    IndexerActivity,
     IndexerStats,
     MerkleRoot,
     NullifierStatusResult,
@@ -409,6 +410,14 @@ export class IndexerClient {
     /** Returns aggregated indexer statistics. */
     async getStats(): Promise<IndexerStats> {
         return this.get<IndexerStats>('/stats');
+    }
+
+    /**
+     * Returns transaction activity bucketed per hour over the last `hours` hours
+     * of chain time (default 24, max 168). For sparklines / activity charts.
+     */
+    async getActivity(hours = 24): Promise<IndexerActivity> {
+        return this.get<IndexerActivity>(`/stats/activity?hours=${hours}`);
     }
 
     /** Returns true if the indexer health endpoint responds OK. */

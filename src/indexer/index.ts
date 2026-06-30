@@ -8,6 +8,8 @@ export type {
     IndexedSession,
     IndexedValidator,
     IndexerStats,
+    IndexerActivity,
+    ActivityBucket,
     ShieldedAddressEvent,
     ShieldedCommitment,
     SpentNullifier,

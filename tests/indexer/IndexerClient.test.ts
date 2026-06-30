@@ -7,6 +7,7 @@ import type {
     IndexedSession,
     IndexedValidator,
     IndexerStats,
+    IndexerActivity,
     MerkleRoot,
     PaginatedResult,
     RegisteredAsset,
@@ -655,7 +656,7 @@ describe('IndexerClient', () => {
     it('getStats returns indexer statistics', async () => {
         const stats: IndexerStats = {
             blocks: { indexed: 100, latest: 100, latestHash: '0xabc', latestTimestampMs: 1000 },
-            extrinsics: { total: 500 },
+            extrinsics: { total: 500, signed: 120 },
             evm: { transactions: 200 },
             shielded: { commitments: 50, spentNullifiers: 20, merkleRoot: '0xroot', treeSize: 64 },
             relayers: { active: 3 },
@@ -664,9 +665,34 @@ describe('IndexerClient', () => {
         mockFetch(stats);
         const result = await client.getStats();
         expect(result.blocks.indexed).toBe(100);
+        expect(result.extrinsics.signed).toBe(120);
         expect(result.shielded.commitments).toBe(50);
         expect(result.relayers.active).toBe(3);
         expect(lastUrl()).toBe(`${BASE}/stats`);
+    });
+
+    // ── getActivity ──────────────────────────────────────────────────────────
+
+    it('getActivity requests the default 24h window and returns buckets', async () => {
+        const activity: IndexerActivity = {
+            hours: 24,
+            anchorMs: 360000000,
+            buckets: [
+                { hourStartMs: 356400000, transactions: 1, signedExtrinsics: 1, evmTransactions: 0 },
+                { hourStartMs: 360000000, transactions: 3, signedExtrinsics: 2, evmTransactions: 1 },
+            ],
+        };
+        mockFetch(activity);
+        const result = await client.getActivity();
+        expect(result.buckets).toHaveLength(2);
+        expect(result.buckets[1]!.transactions).toBe(3);
+        expect(lastUrl()).toBe(`${BASE}/stats/activity?hours=24`);
+    });
+
+    it('getActivity passes a custom hours window', async () => {
+        mockFetch({ hours: 48, anchorMs: null, buckets: [] } satisfies IndexerActivity);
+        await client.getActivity(48);
+        expect(lastUrl()).toBe(`${BASE}/stats/activity?hours=48`);
     });
 
     // ── getRelayers ─────────────────────────────────────────────────────────────
