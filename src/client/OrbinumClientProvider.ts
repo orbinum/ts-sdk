@@ -40,6 +40,13 @@ export interface ClientProviderConfig {
     reconnectBaseMs?: number;
     /** Maximum reconnect delay cap in milliseconds. Default: `30_000`. */
     reconnectMaxMs?: number;
+    /**
+     * How long a connection must stay live before the reconnect backoff is reset
+     * to base, in milliseconds. Prevents a flapping node (connect → drop →
+     * connect) from resetting the backoff on every brief connect and hammering
+     * the node every `reconnectBaseMs`. Default: `10_000`.
+     */
+    stableAfterMs?: number;
 }
 
 // ─── Defaults ─────────────────────────────────────────────────────────────────
@@ -49,6 +56,7 @@ const DEFAULT_HEARTBEAT_INTERVAL_MS = 5_000;
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 4_000;
 const DEFAULT_RECONNECT_BASE_MS = 3_000;
 const DEFAULT_RECONNECT_MAX_MS = 30_000;
+const DEFAULT_STABLE_AFTER_MS = 10_000;
 
 /**
  * Manages the lifecycle of an `OrbinumClient` with heartbeat monitoring,
@@ -76,6 +84,7 @@ export class OrbinumClientProvider {
     private readonly heartbeatTimeoutMs: number;
     private readonly reconnectBaseMs: number;
     private readonly reconnectMaxMs: number;
+    private readonly stableAfterMs: number;
 
     // ─── State ──────────────────────────────────────────────────────────────
     private _status: ConnectionStatus = 'idle';
@@ -85,6 +94,7 @@ export class OrbinumClientProvider {
     // ─── Timers ─────────────────────────────────────────────────────────────
     private _heartbeatTimer: ReturnType<typeof setInterval> | null = null;
     private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    private _stableTimer: ReturnType<typeof setTimeout> | null = null;
     private _reconnectAttempt = 0;
 
     // ─── Events ─────────────────────────────────────────────────────────────
@@ -98,6 +108,7 @@ export class OrbinumClientProvider {
         this.heartbeatTimeoutMs = config.heartbeatTimeoutMs ?? DEFAULT_HEARTBEAT_TIMEOUT_MS;
         this.reconnectBaseMs = config.reconnectBaseMs ?? DEFAULT_RECONNECT_BASE_MS;
         this.reconnectMaxMs = config.reconnectMaxMs ?? DEFAULT_RECONNECT_MAX_MS;
+        this.stableAfterMs = config.stableAfterMs ?? DEFAULT_STABLE_AFTER_MS;
     }
 
     // ─── Status ─────────────────────────────────────────────────────────────
@@ -200,9 +211,9 @@ export class OrbinumClientProvider {
 
             this._orbinumClient = client;
             this._connectingPromise = null;
-            this._reconnectAttempt = 0;
             this.setStatus('connected');
             this.startHeartbeat();
+            this.startStableTimer();
 
             return client;
         } catch (err) {
@@ -266,18 +277,45 @@ export class OrbinumClientProvider {
         }
     }
 
+    // ─── Connection stability ───────────────────────────────────────────────
+
+    /**
+     * After a successful connect, wait `stableAfterMs` before resetting the
+     * backoff. If the connection survives that long it's considered stable and
+     * the next drop starts from base delay again; if it drops sooner the backoff
+     * keeps growing, so a flapping node backs off instead of hammering.
+     */
+    private startStableTimer(): void {
+        this.stopStableTimer();
+        this._stableTimer = setTimeout(() => {
+            this._stableTimer = null;
+            if (this._status === 'connected') this._reconnectAttempt = 0;
+        }, this.stableAfterMs);
+    }
+
+    /** Clears the stability timer if active (on disconnect/teardown/reset). */
+    private stopStableTimer(): void {
+        if (this._stableTimer) {
+            clearTimeout(this._stableTimer);
+            this._stableTimer = null;
+        }
+    }
+
     // ─── Reconnection ───────────────────────────────────────────────────────
 
     /**
      * Schedules the next connection attempt using exponential backoff
-     * (capped at `reconnectMaxMs`), then transitions to `'reconnecting'`.
+     * (capped at `reconnectMaxMs`) with full jitter, then transitions to
+     * `'reconnecting'`. Jitter (a random fraction of the delay) spreads out
+     * reconnects so many clients don't retry in lockstep after a shared outage.
      */
     private scheduleReconnect(): void {
         if (this._reconnectTimer) clearTimeout(this._reconnectTimer);
-        const delay = Math.min(
+        const capped = Math.min(
             this.reconnectBaseMs * 2 ** this._reconnectAttempt,
             this.reconnectMaxMs
         );
+        const delay = capped / 2 + Math.random() * (capped / 2);
         this._reconnectAttempt++;
         this.setStatus('reconnecting');
         this._reconnectTimer = setTimeout(() => {
@@ -299,6 +337,7 @@ export class OrbinumClientProvider {
     /** Stops the heartbeat, destroys the active client, and clears all in-progress promises. */
     private teardownClient(): void {
         this.stopHeartbeat();
+        this.stopStableTimer();
         try {
             this._orbinumClient?.destroy();
         } catch {

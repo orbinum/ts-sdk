@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { OrbinumClientProvider } from '../../src/client/OrbinumClientProvider';
 import { OrbinumClient } from '../../src/client/OrbinumClient';
 import type { ConnectionStatus } from '../../src/client/OrbinumClientProvider';
@@ -345,5 +345,79 @@ describe('OrbinumClientProvider.evmRpcBatch', () => {
             { method: 'eth_chainId' },
             { method: 'eth_blockNumber' },
         ]);
+    });
+});
+
+// ─── Reconnect backoff on flapping ──────────────────────────────────────────────
+
+describe('OrbinumClientProvider — flapping backoff', () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    // A node that connects then immediately drops, repeatedly, must NOT reset the
+    // backoff on each brief connect — otherwise it reconnects every reconnectBaseMs
+    // forever. The backoff should keep growing until the connection stays live for
+    // stableAfterMs. We observe this through the scheduled reconnect delay growing
+    // across flaps (measured via setTimeout call args).
+    it('does not reset backoff on a connect shorter than stableAfterMs', async () => {
+        const orbClient = makeOrbinumClient({ peers: 1 });
+        vi.mocked(OrbinumClient.connect).mockResolvedValue(orbClient);
+
+        const provider = makeProvider({
+            reconnectBaseMs: 1_000,
+            reconnectMaxMs: 60_000,
+            stableAfterMs: 10_000,
+            heartbeatIntervalMs: 500,
+            heartbeatTimeoutMs: 100,
+        });
+
+        const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+        const reconnectDelays: number[] = [];
+        // Capture only the reconnect delays: they use the base/backoff range,
+        // distinct from the heartbeat interval (500) and stable timer (10_000).
+        const record = () => {
+            for (const call of setTimeoutSpy.mock.calls) {
+                const d = call[1] as number;
+                if (d >= 500 && d !== 500 && d !== 10_000) reconnectDelays.push(d);
+            }
+            setTimeoutSpy.mockClear();
+        };
+
+        provider.connect();
+        await vi.advanceTimersByTimeAsync(1); // resolve connect
+        expect(provider.status).toBe<ConnectionStatus>('connected');
+
+        // Flap 3 times, each connect lasting < stableAfterMs (drop after ~600ms via
+        // a failing heartbeat). Make the node fail probes now.
+        (orbClient.substrate.request as ReturnType<typeof vi.fn>).mockRejectedValue(
+            new Error('down')
+        );
+
+        for (let i = 0; i < 3; i++) {
+            record();
+            await vi.advanceTimersByTimeAsync(600); // heartbeat fires, probe fails → disconnected → scheduleReconnect
+            record();
+            // Let the reconnect timer fire and reconnect succeed again (flap back up).
+            (orbClient.substrate.request as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+                peers: 1,
+            });
+            await vi.advanceTimersByTimeAsync(60_000);
+        }
+
+        record();
+        // The captured reconnect delays should be non-decreasing (backoff grows),
+        // NOT pinned at the base delay — proving the flap didn't reset it.
+        expect(reconnectDelays.length).toBeGreaterThan(0);
+        const maxDelay = Math.max(...reconnectDelays);
+        // With reset-on-connect (the bug), every delay would be ~base (≤1000).
+        // With the fix, later delays exceed the base as the backoff grows.
+        expect(maxDelay).toBeGreaterThan(1_000);
+
+        provider.reset();
+        setTimeoutSpy.mockRestore();
     });
 });
