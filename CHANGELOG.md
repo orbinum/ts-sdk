@@ -5,6 +5,18 @@ All notable changes to the Orbinum TypeScript SDK will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.9] - 2026-07-01
+
+### Fixed
+
+- **`OrbinumClientProvider` reconnect backoff no longer resets on a flapping connection.** The backoff counter was reset to base on every `connected` transition, so a node that connected then immediately dropped would reconnect every `reconnectBaseMs` (default 3s) forever, hammering the node. The backoff is now reset only after the connection stays live for `stableAfterMs` (new config, default `10_000`); a flapping node backs off up to `reconnectMaxMs` instead. Reconnect delays also get **full jitter** (random in `[delay/2, delay]`) so many clients don't retry in lockstep after a shared outage.
+
+### Added
+
+- **`ClientProviderConfig.stableAfterMs`** — how long a connection must stay live before the reconnect backoff resets to base. Default `10_000`.
+
+---
+
 ## [0.7.8] - 2026-06-29
 
 ### Added
