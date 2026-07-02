@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `getNullifierChunk(idx, digest): Promise<string[]>` — one immutable sealed chunk (ascending, lowercased). The digest lives in the URL: a corrected chunk is a different URL, safe to cache forever.
   - `getNullifierTail(): Promise<NullifierTail>` — the mutable remainder after the last sealed chunk; `afterChunks` detects a chunk sealed mid-sync.
   - New types: `NullifierManifest`, `NullifierChunkInfo`, `NullifierTail`.
-  - No client-supplied position parameter exists anywhere in the flow — no wallet ever expresses interest in a specific nullifier or range (PIR-A preserved; see the indexer's `docs/nullifier-set-scaling.md`).
+  - No client-supplied position parameter exists anywhere in the flow — no wallet ever expresses interest in a specific nullifier or range (PIR-A preserved).
 - `getAllSpentNullifiers` stays as the fallback path; its docstring now points new integrations at the chunk flow.
 
 ---
