@@ -158,38 +158,94 @@ export class IndexerClient {
 
     // ─── Private transfers ─────────────────────────────────────────────────────
 
+    /** Server-enforced max items per by-nullifiers / by-commitments request. */
+    private static readonly TRANSFER_LOOKUP_CHUNK = 50;
+
+    /**
+     * Chunked fetch for the transfer timestamp lookups. The reader silently
+     * truncates each request to 50 items, so larger inputs MUST be split or
+     * results are silently lost. Responses are merged per extrinsic
+     * (`blockNumber:extrinsicIndex`), concatenating the matched arrays, and
+     * sorted by block descending.
+     *
+     * Privacy note: these lookups send the wallet's own note identifiers to
+     * the indexer — a bounded, documented linkage tradeoff for timestamp
+     * recovery. They are NEVER used for spent-STATUS checks (PIR-A: status
+     * comes from the anonymous full-set `/shielded/nullifiers/all` download).
+     */
+    private async fetchTransfersChunked(
+        path: string,
+        param: string,
+        items: string[],
+        matchedField: 'matchedNullifiers' | 'matchedCommitments'
+    ): Promise<PrivateTransferTimestamp[]> {
+        if (items.length === 0) return [];
+        const normalized = items.map((i) => i.toLowerCase());
+        const chunks: string[][] = [];
+        for (let i = 0; i < normalized.length; i += IndexerClient.TRANSFER_LOOKUP_CHUNK) {
+            chunks.push(normalized.slice(i, i + IndexerClient.TRANSFER_LOOKUP_CHUNK));
+        }
+
+        const responses = await Promise.all(
+            chunks.map((chunk) => {
+                const qs = this.buildQuery({ [param]: chunk.join(',') });
+                return this.get<{ data: PrivateTransferTimestamp[]; total: number }>(
+                    `${path}${qs}`
+                );
+            })
+        );
+
+        // Merge: the same transfer extrinsic can match items from different
+        // chunks — combine its matched arrays (deduped).
+        const byExtrinsic = new Map<string, PrivateTransferTimestamp>();
+        for (const res of responses) {
+            for (const transfer of res.data) {
+                const key = `${transfer.blockNumber}:${transfer.extrinsicIndex ?? 'null'}`;
+                const existing = byExtrinsic.get(key);
+                if (!existing) {
+                    byExtrinsic.set(key, transfer);
+                    continue;
+                }
+                const merged = new Set([
+                    ...(existing[matchedField] ?? []),
+                    ...(transfer[matchedField] ?? []),
+                ]);
+                existing[matchedField] = [...merged];
+            }
+        }
+        return [...byExtrinsic.values()].sort((a, b) => b.blockNumber - a.blockNumber);
+    }
+
     /**
      * Returns temporal metadata for private transfers that spent any of the given nullifiers.
      * Only blockNumber, extrinsicIndex, timestampMs, and hash are returned — no cross-link
      * between inputs and outputs to prevent graph reconstruction.
-     * Accepts up to 50 nullifiers (0x-prefixed hex).
+     * Inputs of any size are transparently chunked into requests of 50 (the server cap)
+     * and merged per extrinsic.
      */
     async getTransfersByNullifiers(nullifiers: string[]): Promise<PrivateTransferTimestamp[]> {
-        if (nullifiers.length === 0) return [];
-        const qs = this.buildQuery({
-            nullifiers: nullifiers.map((n) => n.toLowerCase()).join(','),
-        });
-        const res = await this.get<{ data: PrivateTransferTimestamp[]; total: number }>(
-            `/shielded/transfers/by-nullifiers${qs}`
+        return this.fetchTransfersChunked(
+            '/shielded/transfers/by-nullifiers',
+            'nullifiers',
+            nullifiers,
+            'matchedNullifiers'
         );
-        return res.data;
     }
 
     /**
      * Returns temporal metadata for private transfers that produced any of the given commitments.
      * Only blockNumber, extrinsicIndex, timestampMs, and hash are returned — no cross-link
      * between outputs and inputs to prevent graph reconstruction.
-     * Accepts up to 50 commitments (0x-prefixed hex).
+     * Inputs of any size are transparently chunked into requests of 50 (the server cap)
+     * and merged per extrinsic.
      */
     async getTransfersByCommitments(commitments: string[]): Promise<PrivateTransferTimestamp[]> {
-        if (commitments.length === 0) return [];
-        const qs = this.buildQuery({
-            commitments: commitments.map((c) => c.toLowerCase()).join(','),
-        });
-        const res = await this.get<{ data: PrivateTransferTimestamp[]; total: number }>(
-            `/shielded/transfers/by-commitments${qs}`
+        return this.fetchTransfersChunked(
+            '/shielded/transfers/by-commitments',
+            'commitments',
+            commitments,
+            'matchedCommitments'
         );
-        return res.data;
     }
 
     // ─── Unshields ─────────────────────────────────────────────────────────────

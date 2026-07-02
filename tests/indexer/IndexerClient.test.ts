@@ -431,6 +431,90 @@ describe('IndexerClient', () => {
         expect(rC[0]!.matchedCommitments).toBeUndefined();
     });
 
+    // ── transfer lookups: chunking (server caps each request at 50) ──────────
+
+    /** Stub fetch to answer each call in order; returns the mock for call inspection. */
+    function mockFetchSequence(responses: unknown[]) {
+        let call = 0;
+        const fn = vi.fn().mockImplementation(() => {
+            const body = responses[Math.min(call, responses.length - 1)];
+            call += 1;
+            return Promise.resolve({
+                ok: true,
+                status: 200,
+                json: () => Promise.resolve(body),
+            });
+        });
+        vi.stubGlobal('fetch', fn);
+        return fn;
+    }
+
+    const hex32 = (n: number) => '0x' + n.toString(16).padStart(64, '0');
+
+    it('getTransfersByNullifiers chunks >50 inputs into multiple requests and merges', async () => {
+        const nullifiers = Array.from({ length: 120 }, (_, i) => hex32(i + 1));
+        const fetchMock = mockFetchSequence([
+            { data: [{ blockNumber: 30, extrinsicIndex: 0, hash: '0x03', timestampMs: 3, matchedNullifiers: [hex32(1)] }], total: 1 },
+            { data: [{ blockNumber: 10, extrinsicIndex: 0, hash: '0x01', timestampMs: 1, matchedNullifiers: [hex32(60)] }], total: 1 },
+            { data: [{ blockNumber: 20, extrinsicIndex: 0, hash: '0x02', timestampMs: 2, matchedNullifiers: [hex32(110)] }], total: 1 },
+        ]);
+
+        const result = await client.getTransfersByNullifiers(nullifiers);
+
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+        // each request carries at most 50 items
+        for (const [url] of fetchMock.mock.calls as [string][]) {
+            const param = new URL(url).searchParams.get('nullifiers')!;
+            expect(param.split(',').length).toBeLessThanOrEqual(50);
+        }
+        // merged + sorted by block desc
+        expect(result.map((t) => t.blockNumber)).toEqual([30, 20, 10]);
+    });
+
+    it('getTransfersByNullifiers merges the same extrinsic across chunks (deduped matched)', async () => {
+        const nullifiers = Array.from({ length: 60 }, (_, i) => hex32(i + 1));
+        // Same transfer (block 100, index 2) matched from both chunks with overlap.
+        const fetchMock = mockFetchSequence([
+            { data: [{ blockNumber: 100, extrinsicIndex: 2, hash: '0xab', timestampMs: 9, matchedNullifiers: [hex32(1), hex32(2)] }], total: 1 },
+            { data: [{ blockNumber: 100, extrinsicIndex: 2, hash: '0xab', timestampMs: 9, matchedNullifiers: [hex32(2), hex32(55)] }], total: 1 },
+        ]);
+
+        const result = await client.getTransfersByNullifiers(nullifiers);
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(result).toHaveLength(1);
+        expect(result[0]!.matchedNullifiers).toHaveLength(3); // deduped union
+        expect(result[0]!.matchedNullifiers).toEqual(
+            expect.arrayContaining([hex32(1), hex32(2), hex32(55)])
+        );
+    });
+
+    it('getTransfersByCommitments chunks >50 inputs and merges matchedCommitments', async () => {
+        const commitments = Array.from({ length: 51 }, (_, i) => hex32(i + 1));
+        const fetchMock = mockFetchSequence([
+            { data: [{ blockNumber: 7, extrinsicIndex: 1, hash: '0xcd', timestampMs: 7, matchedCommitments: [hex32(3)] }], total: 1 },
+            { data: [{ blockNumber: 7, extrinsicIndex: 1, hash: '0xcd', timestampMs: 7, matchedCommitments: [hex32(51)] }], total: 1 },
+        ]);
+
+        const result = await client.getTransfersByCommitments(commitments);
+
+        expect(fetchMock).toHaveBeenCalledTimes(2);
+        expect(result).toHaveLength(1);
+        expect(result[0]!.matchedCommitments).toEqual(
+            expect.arrayContaining([hex32(3), hex32(51)])
+        );
+    });
+
+    it('transfer lookups make a single request for ≤50 inputs and none for empty', async () => {
+        const fetchMock = mockFetchSequence([{ data: [], total: 0 }]);
+        await client.getTransfersByCommitments(Array.from({ length: 50 }, (_, i) => hex32(i + 1)));
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+
+        fetchMock.mockClear();
+        await client.getTransfersByNullifiers([]);
+        expect(fetchMock).not.toHaveBeenCalled();
+    });
+
     // ── getUnshields ─────────────────────────────────────────────────────────
 
     it('getUnshields calls correct URL', async () => {
