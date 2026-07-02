@@ -32,8 +32,6 @@ export interface ShieldedCommitment {
     assetId: string;
     /** Origin of the commitment: direct shield, output of private transfer, or change from unshield. */
     source: 'shield' | 'transfer' | 'unshield';
-    /** SS58 or 0x-prefixed depositor address, null if not tracked. */
-    sender: string | null;
     /** 0x-prefixed encrypted memo hex, null if not present. */
     encryptedMemo: string | null;
     timestampMs: number | null;
@@ -239,14 +237,29 @@ export interface RegisteredAsset {
 }
 
 /**
- * A single shielded activity event tied to an address.
- * The `kind` discriminant identifies whether it is a shield (commitment),
- * unshield, or private transfer event.
+ * One shielded-pool BOUNDARY event for an address, as served by
+ * `GET /shielded/address/:addr`. Only boundary facts are exposed — block,
+ * asset, amount (unshield), time, tx hash. Note internals (commitment hex,
+ * leaf index, nullifier, memo, sender/recipient) are never returned
+ * per-address: a public sender→leaf mapping would shrink the shielded pool's
+ * anonymity set. Private transfers carry no address and are never included.
  */
-export type ShieldedAddressEvent =
-    | ({ kind: 'commitment' } & ShieldedCommitment)
-    | ({ kind: 'unshield' } & Unshield)
-    | ({ kind: 'transfer' } & PrivateTransferTimestamp);
+export interface ShieldedAddressEvent {
+    /** 'shield' = deposit into the pool by this address; 'unshield' = withdrawal received by it. */
+    kind: 'shield' | 'unshield';
+    blockNumber: number;
+    extrinsicIndex: number | null;
+    /** Asset ID as decimal string. */
+    assetId: string;
+    /**
+     * Amount as decimal string (bigint-safe) for unshields.
+     * Always null for shields — the shield amount lives in the extrinsic, not the index.
+     */
+    amount: string | null;
+    timestampMs: number | null;
+    /** Blake2-256 hash of the enclosing extrinsic, 0x-prefixed. Null if not decoded. */
+    hash: string | null;
+}
 
 /** A validator node indexed from pallet-validator-set events. */
 export interface IndexedValidator {

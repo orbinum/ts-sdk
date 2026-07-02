@@ -5,6 +5,25 @@ All notable changes to the Orbinum TypeScript SDK will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-07-01
+
+Privacy alignment with Zcash's visibility model: the shielded pool's boundary is public, its interior is opaque. Per-address responses never expose note internals — a public sender→leaf mapping would shrink the pool's anonymity set for everyone. See the indexer's `docs/address-privacy.md` for the full policy.
+
+### Changed
+
+- **BREAKING: `ShieldedAddressEvent` reshaped to boundary-only.** `getAddressShieldedActivity` now returns `{ kind: 'shield' | 'unshield', blockNumber, extrinsicIndex, assetId, amount, timestampMs, hash }` — no more full commitment/unshield rows. The `'transfer'` variant is gone (the reader never returned it: private transfers carry no address, PIR-A). `amount` is null for shields (the shield amount lives in the extrinsic, not the index).
+
+### Removed
+
+- **BREAKING: `getAddressCommitments`.** Its backing route (`GET /address/:addr/shielded`) was removed from the reader: it returned full commitment rows (commitment hex, leaf index, memo, sender) keyed by depositor — exactly the sender→leaf labeling the privacy policy forbids. It had no consumers.
+- **BREAKING: `ShieldedCommitment.sender`.** The reader no longer returns the depositor on any commitment response (`/shielded/commitments`, `/shielded/commitments/:hex`); a commitment→depositor reverse lookup enables the leaf-labeling attack one leaf at a time.
+
+### Unchanged
+
+- `getAddressUnshields` / `Unshield` — unshield rows are single-extrinsic public data (recipient, nullifier and amount all appear together in one public transaction); serving them adds no cross-tx correlation. Consumed by the wallet.
+
+---
+
 ## [0.7.10] - 2026-07-01
 
 ### Fixed

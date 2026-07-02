@@ -108,7 +108,6 @@ describe('IndexerClient', () => {
             leafIndex: 3,
             assetId: '0',
             source: 'shield',
-            sender: null,
             encryptedMemo: null,
             timestampMs: 1000,
         };
@@ -133,7 +132,6 @@ describe('IndexerClient', () => {
             leafIndex: 5,
             assetId: '0',
             source: 'shield',
-            sender: '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
             encryptedMemo: '0x00',
             timestampMs: 2000,
         };
@@ -637,20 +635,6 @@ describe('IndexerClient', () => {
         expect(result).toBeNull();
     });
 
-    // ── getAddressCommitments ────────────────────────────────────────────────
-
-    it('getAddressCommitments lowercases address and builds correct URL', async () => {
-        mockFetch({ data: [], pagination: { page: 1, limit: 20, total: 0 } });
-        await client.getAddressCommitments('0xABC');
-        expect(lastUrl()).toBe(`${BASE}/address/0xabc/shielded`);
-    });
-
-    it('getAddressCommitments passes pagination params', async () => {
-        mockFetch({ data: [], pagination: { page: 2, limit: 5, total: 0 } });
-        await client.getAddressCommitments('0xabc', { page: 2, limit: 5 });
-        expect(lastUrl()).toBe(`${BASE}/address/0xabc/shielded?page=2&limit=5`);
-    });
-
     // ── getStats ─────────────────────────────────────────────────────────────
 
     it('getStats returns indexer statistics', async () => {
@@ -917,49 +901,39 @@ describe('IndexerClient', () => {
         expect(lastUrl()).toBe(`${BASE}/shielded/address/0xabc?page=3&limit=10`);
     });
 
-    it('getAddressShieldedActivity returns PaginatedResult<ShieldedAddressEvent>', async () => {
-        const commitment: ShieldedAddressEvent = {
-            kind: 'commitment',
-            commitmentHex: '0xc0ff',
+    it('getAddressShieldedActivity returns boundary-only events', async () => {
+        const shield: ShieldedAddressEvent = {
+            kind: 'shield',
             blockNumber: 100,
             extrinsicIndex: 1,
-            leafIndex: 5,
             assetId: '0',
-            source: 'shield',
-            sender: '0xabc',
-            encryptedMemo: null,
+            amount: null, // shield amount lives in the extrinsic, not the index
             timestampMs: 1_000_000,
+            hash: '0xaaaa',
         };
         const unshield: ShieldedAddressEvent = {
             kind: 'unshield',
-            id: '100-2',
-            blockNumber: 100,
+            blockNumber: 101,
             extrinsicIndex: 2,
-            hash: null,
-            nullifierHex: '0xabcd',
             assetId: '0',
             amount: '1000000000000',
-            recipient: '0xabc',
             timestampMs: 1_000_001,
-        };
-        const transfer: ShieldedAddressEvent = {
-            kind: 'transfer',
-            blockNumber: 101,
-            extrinsicIndex: 0,
-            hash: null,
-            timestampMs: 1_000_002,
+            hash: '0xbbbb',
         };
         const payload: PaginatedResult<ShieldedAddressEvent> = {
-            data: [commitment, unshield, transfer],
-            pagination: { page: 1, limit: 20, total: 3 },
+            data: [unshield, shield],
+            pagination: { page: 1, limit: 20, total: 2 },
         };
         mockFetch(payload);
         const result = await client.getAddressShieldedActivity('0xabc');
-        expect(result.data).toHaveLength(3);
-        expect(result.pagination.total).toBe(3);
-        expect(result.data[0]).toMatchObject({ kind: 'commitment', commitmentHex: '0xc0ff' });
-        expect(result.data[1]).toMatchObject({ kind: 'unshield', recipient: '0xabc' });
-        expect(result.data[2]).toMatchObject({ kind: 'transfer', blockNumber: 101 });
+        expect(result.data).toHaveLength(2);
+        expect(result.pagination.total).toBe(2);
+        expect(result.data[0]).toMatchObject({ kind: 'unshield', amount: '1000000000000' });
+        expect(result.data[1]).toMatchObject({ kind: 'shield', amount: null });
+        // Note internals must not exist on boundary events.
+        expect(result.data[1]).not.toHaveProperty('commitmentHex');
+        expect(result.data[0]).not.toHaveProperty('nullifierHex');
+        expect(result.data[0]).not.toHaveProperty('recipient');
     });
 
     it('getAddressShieldedActivity passes an SS58 address through verbatim', async () => {

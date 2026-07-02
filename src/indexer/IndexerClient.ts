@@ -271,18 +271,7 @@ export class IndexerClient {
         return this.getOrNull<IndexedBlock>(`/blocks/${encodeURIComponent(String(numberOrHash))}`);
     }
 
-    // ─── Address commitments ───────────────────────────────────────────────────
-
-    /** Returns a paginated list of shielded commitments initiated by an address. */
-    async getAddressCommitments(
-        address: string,
-        params?: { page?: number; limit?: number }
-    ): Promise<PaginatedResult<ShieldedCommitment>> {
-        const qs = this.buildQuery({ page: params?.page, limit: params?.limit });
-        return this.get<PaginatedResult<ShieldedCommitment>>(
-            `/address/${encodeURIComponent(address.toLowerCase())}/shielded${qs}`
-        );
-    }
+    // ─── Address-scoped shielded activity ─────────────────────────────────────
 
     /**
      * Returns a paginated list of unshield events where the given address is the recipient.
@@ -299,9 +288,11 @@ export class IndexerClient {
     }
 
     /**
-     * Returns a paginated list of all shielded activity (commitments, unshields,
-     * private transfers) associated with the given address.
-     * Each item is tagged with a `kind` discriminant.
+     * Returns the shielded-pool BOUNDARY activity for an address: shields it
+     * deposited and unshields it received, tagged `kind: 'shield' | 'unshield'`.
+     * Only boundary fields are returned (block, asset, amount for unshields,
+     * timestamp, tx hash) — note internals are never served per-address, and
+     * private transfers carry no address at all (PIR-A).
      */
     async getAddressShieldedActivity(
         address: string,
