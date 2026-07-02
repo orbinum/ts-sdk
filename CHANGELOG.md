@@ -5,6 +5,18 @@ All notable changes to the Orbinum TypeScript SDK will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-07-02
+
+### Changed
+
+- **Vault note records now blind their on-chain identifiers at rest.** Previously `EncryptedNoteRecord` stored `commitmentHex`, `nullifierHex` and `assetId` in **plaintext** (for filtering without unlock), so a storage dump (disk image, DevTools, synced data) let anyone link the wallet to its on-chain notes/nullifiers. They are now stored as **blind tags** — `HMAC-SHA-256(blindKey, value)` under a vault blind key derived from the same master bytes (`deriveVaultBlindKey`). Equality lookups still work (compare tags); a dump reveals no linkable identifiers. `spent`/`spentAt` stay plaintext (local flags, no chain linkage).
+  - `encryptNote(key, note)` → `encryptNote(key, blindKey, note)`.
+  - `EncryptedNoteRecord` fields `commitmentHex`/`nullifierHex`/`assetId` → `commitmentTag`/`nullifierTag`/`assetTag`.
+  - New exports: `deriveVaultBlindKey(masterBytes)`, `blindTag(blindKey, value)`, `noteBlindTag(blindKey, hex)`.
+  - `decryptNoteRecord` recovers identifiers from the ciphertext (the tags are one-way), so the ZkNote round-trips unchanged.
+
+---
+
 ## [0.8.1] - 2026-07-02
 
 ### Fixed

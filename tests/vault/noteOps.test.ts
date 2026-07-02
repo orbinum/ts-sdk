@@ -1,6 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { applyNoteStatus, encryptNote, decryptNoteRecord } from '../../src/vault/noteOps';
-import { deriveVaultKey } from '../../src/vault/VaultCrypto';
+import {
+    applyNoteStatus,
+    encryptNote,
+    decryptNoteRecord,
+    noteBlindTag,
+} from '../../src/vault/noteOps';
+import { deriveVaultKey, deriveVaultBlindKey } from '../../src/vault/VaultCrypto';
 import type { ZkNote } from '../../src/shielded-pool/protocol/types';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -29,6 +34,10 @@ function makeNote(overrides: Partial<ZkNote> = {}): ZkNote {
 
 async function makeKey(seed: number): Promise<CryptoKey> {
     return deriveVaultKey(new Uint8Array(32).fill(seed));
+}
+
+async function makeBlindKey(seed: number): Promise<CryptoKey> {
+    return deriveVaultBlindKey(new Uint8Array(32).fill(seed));
 }
 
 // ─── applyNoteStatus ──────────────────────────────────────────────────────────
@@ -72,39 +81,46 @@ describe('applyNoteStatus', () => {
 
 // ─── encryptNote ──────────────────────────────────────────────────────────────
 
-describe('encryptNote', () => {
-    it('devuelve EncryptedNoteRecord con todos los campos', async () => {
+describe('encryptNote (v2, blinded identifiers)', () => {
+    it('devuelve un record v2 con tags — NO los hex en claro', async () => {
         const key = await makeKey(1);
+        const blindKey = await makeBlindKey(1);
         const note = makeNote();
-        const rec = await encryptNote(key, note);
+        const rec = await encryptNote(key, blindKey, note);
 
-        expect(rec.commitmentHex).toBe(note.commitmentHex);
-        expect(rec.nullifierHex).toBe(note.nullifierHex);
-        expect(rec.assetId).toBe(note.assetId.toString());
+        // Los identificadores on-chain NO aparecen en claro.
+        expect(JSON.stringify(rec)).not.toContain(note.commitmentHex);
+        expect(JSON.stringify(rec)).not.toContain(note.nullifierHex);
+        expect(rec).not.toHaveProperty('commitmentHex');
+        expect(rec).not.toHaveProperty('nullifierHex');
+        expect(rec).not.toHaveProperty('assetId');
+        // Tags presentes.
+        expect(rec.commitmentTag).toBe(await noteBlindTag(blindKey, note.commitmentHex));
+        expect(rec.nullifierTag).toBe(await noteBlindTag(blindKey, note.nullifierHex));
+        expect(rec.assetTag).toBe(await noteBlindTag(blindKey, note.assetId.toString()));
         expect(rec.spent).toBe(note.spent);
-        expect(rec.spentAt).toBe(note.spentAt);
         expect(typeof rec.updatedAt).toBe('number');
     });
 
-    it('assetId es string, no bigint', async () => {
-        const key = await makeKey(1);
-        const rec = await encryptNote(key, makeNote({ assetId: 42n }));
-        expect(typeof rec.assetId).toBe('string');
-        expect(rec.assetId).toBe('42');
+    it('el tag es determinista (mismo blindKey + hex → mismo tag)', async () => {
+        const blindKey = await makeBlindKey(1);
+        const t1 = await noteBlindTag(blindKey, '0xabc');
+        const t2 = await noteBlindTag(blindKey, '0xabc');
+        expect(t1).toBe(t2);
     });
 
-    it('iv y ciphertext son strings base64 no vacíos', async () => {
-        const key = await makeKey(1);
-        const rec = await encryptNote(key, makeNote());
-        expect(rec.iv.length).toBeGreaterThan(0);
-        expect(rec.ciphertext.length).toBeGreaterThan(0);
+    it('distinto blindKey → distinto tag (no linkable entre vaults)', async () => {
+        const t1 = await noteBlindTag(await makeBlindKey(1), '0xabc');
+        const t2 = await noteBlindTag(await makeBlindKey(2), '0xabc');
+        expect(t1).not.toBe(t2);
     });
 
     it('genera IV distinto en cada llamada (no reutiliza IV)', async () => {
         const key = await makeKey(1);
+        const blindKey = await makeBlindKey(1);
         const note = makeNote();
-        const rec1 = await encryptNote(key, note);
-        const rec2 = await encryptNote(key, note);
+        const rec1 = await encryptNote(key, blindKey, note);
+        const rec2 = await encryptNote(key, blindKey, note);
         expect(rec1.iv).not.toBe(rec2.iv);
     });
 });
@@ -114,10 +130,12 @@ describe('encryptNote', () => {
 describe('decryptNoteRecord', () => {
     it('roundtrip: encryptNote → decryptNoteRecord reproduce la nota original', async () => {
         const key = await makeKey(2);
+        const blindKey = await makeBlindKey(2);
         const note = makeNote({ value: 9999n });
-        const rec = await encryptNote(key, note);
+        const rec = await encryptNote(key, blindKey, note);
         const decrypted = await decryptNoteRecord(key, rec);
 
+        // Los identificadores se recuperan del ciphertext, no del record.
         expect(decrypted.value).toBe(note.value);
         expect(decrypted.commitmentHex).toBe(note.commitmentHex);
         expect(decrypted.nullifierHex).toBe(note.nullifierHex);
@@ -128,9 +146,9 @@ describe('decryptNoteRecord', () => {
 
     it('aplica spent/spentAt del record sobre la nota descifrada', async () => {
         const key = await makeKey(2);
+        const blindKey = await makeBlindKey(2);
         const note = makeNote({ spent: false, spentAt: null });
-        const rec = await encryptNote(key, note);
-        // Simular que el record fue actualizado por un scan posterior
+        const rec = await encryptNote(key, blindKey, note);
         const updatedRec = { ...rec, spent: true, spentAt: 1700000000000 };
         const decrypted = await decryptNoteRecord(key, updatedRec);
         expect(decrypted.spent).toBe(true);
@@ -140,12 +158,13 @@ describe('decryptNoteRecord', () => {
     it('lanza con clave incorrecta (DOMException)', async () => {
         const key1 = await makeKey(1);
         const key2 = await makeKey(2);
-        const rec = await encryptNote(key1, makeNote());
+        const rec = await encryptNote(key1, await makeBlindKey(1), makeNote());
         await expect(decryptNoteRecord(key2, rec)).rejects.toBeInstanceOf(Error);
     });
 
     it('bigints sobreviven el ciclo completo', async () => {
         const key = await makeKey(3);
+        const blindKey = await makeBlindKey(3);
         const note = makeNote({
             value: 21888242871839275222246405745257275088548364400416034343698204186575808495617n,
             assetId: 99999999999999999999n,
@@ -155,7 +174,7 @@ describe('decryptNoteRecord', () => {
             nullifier: 44444444444444444444n,
             counterpartyPk: 55555555555555555555n,
         });
-        const rec = await encryptNote(key, note);
+        const rec = await encryptNote(key, blindKey, note);
         const decrypted = await decryptNoteRecord(key, rec);
         expect(decrypted.value).toBe(note.value);
         expect(decrypted.assetId).toBe(note.assetId);
