@@ -5,6 +5,20 @@ All notable changes to the Orbinum TypeScript SDK will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.0] - 2026-07-02
+
+### Added
+
+- **Incremental nullifier-set transfer (sealed chunks, PIR-A preserving).** New `IndexerClient` methods for the reader's chunked nullifier endpoints — the wallet persists the set locally and re-downloads only new chunks + the tail per rescan, instead of the full set:
+  - `getNullifierManifest(): Promise<NullifierManifest | null>` — universal chunk index (identical for every caller); returns `null` on 404 so callers can fall back to `getAllSpentNullifiers` against older readers.
+  - `getNullifierChunk(idx, digest): Promise<string[]>` — one immutable sealed chunk (ascending, lowercased). The digest lives in the URL: a corrected chunk is a different URL, safe to cache forever.
+  - `getNullifierTail(): Promise<NullifierTail>` — the mutable remainder after the last sealed chunk; `afterChunks` detects a chunk sealed mid-sync.
+  - New types: `NullifierManifest`, `NullifierChunkInfo`, `NullifierTail`.
+  - No client-supplied position parameter exists anywhere in the flow — no wallet ever expresses interest in a specific nullifier or range (PIR-A preserved; see the indexer's `docs/nullifier-set-scaling.md`).
+- `getAllSpentNullifiers` stays as the fallback path; its docstring now points new integrations at the chunk flow.
+
+---
+
 ## [0.9.0] - 2026-07-02
 
 ### Changed

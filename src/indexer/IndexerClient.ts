@@ -8,7 +8,9 @@ import type {
     IndexerActivity,
     IndexerStats,
     MerkleRoot,
+    NullifierManifest,
     NullifierStatusResult,
+    NullifierTail,
     PaginatedResult,
     PrivateTransferTimestamp,
     RegisteredAsset,
@@ -148,12 +150,47 @@ export class IndexerClient {
      * The server sees an identical GET request regardless of which notes the wallet holds —
      * the intersection is computed locally (PIR-A privacy model).
      *
-     * Suitable for wallets with up to ~1M spent nullifiers (~70 MB raw, <20 MB gzip).
-     * For the current Orbinum testnet/mainnet scale this is the recommended approach.
+     * Kept as the FALLBACK for readers that don't serve sealed chunks yet (and for
+     * small sets). New integrations should prefer the incremental chunk flow:
+     * `getNullifierManifest` → `getNullifierChunk` for missing chunks →
+     * `getNullifierTail`, persisting the set locally between rescans.
      */
     async getAllSpentNullifiers(): Promise<Set<string>> {
         const res = await this.get<{ data: string[] }>('/shielded/nullifiers/all');
         return new Set(res.data.map((h) => h.toLowerCase()));
+    }
+
+    /**
+     * Universal index of the sealed nullifier chunks — identical request and
+     * response for every caller (no client-supplied position: PIR-A preserved).
+     *
+     * Returns `null` when the reader does not serve chunks yet (404) — the
+     * caller should fall back to `getAllSpentNullifiers`.
+     */
+    async getNullifierManifest(): Promise<NullifierManifest | null> {
+        return this.getOrNull<NullifierManifest>('/shielded/nullifiers/manifest');
+    }
+
+    /**
+     * One sealed, immutable chunk of the spent-nullifier set (ascending hex,
+     * lowercased). The digest comes from the manifest and lives in the URL, so
+     * a corrected chunk is a different URL — safe to cache forever client-side.
+     */
+    async getNullifierChunk(idx: number, digest: string): Promise<string[]> {
+        const res = await this.get<{ data: string[] }>(
+            `/shielded/nullifiers/chunks/${idx}/${encodeURIComponent(digest)}`
+        );
+        return res.data.map((h) => h.toLowerCase());
+    }
+
+    /**
+     * The mutable remainder of the nullifier set after the last sealed chunk.
+     * Identical request for every caller (no input). `afterChunks` lets the
+     * client detect a chunk sealed between its manifest fetch and this one.
+     */
+    async getNullifierTail(): Promise<NullifierTail> {
+        const res = await this.get<NullifierTail>('/shielded/nullifiers/tail');
+        return { afterChunks: res.afterChunks, data: res.data.map((h) => h.toLowerCase()) };
     }
 
     // ─── Private transfers ─────────────────────────────────────────────────────
