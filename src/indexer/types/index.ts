@@ -46,6 +46,38 @@ export interface SpentNullifier {
     timestampMs: number | null;
 }
 
+/** One sealed, immutable chunk of the spent-nullifier set (manifest entry). */
+export interface NullifierChunkInfo {
+    idx: number;
+    /** Exact number of nullifiers in the chunk. */
+    count: number;
+    /** sha256 (hex) of the chunk's nullifier hexes sorted ascending — goes in the chunk URL. */
+    digest: string;
+}
+
+/**
+ * Universal index of the sealed nullifier chunks — identical for every caller.
+ * No client-supplied position parameter exists anywhere in the chunk flow, so
+ * the PIR-A property of `/nullifiers/all` is preserved while transfers become
+ * incremental (clients persist chunks locally and only fetch new ones).
+ */
+export interface NullifierManifest {
+    /** Bumped by the operator on semantic corrections; a change means: resync from zero. */
+    generation: string;
+    /** Target chunk size (informational; each chunk's exact size is its `count`). */
+    chunkSize: number;
+    chunks: NullifierChunkInfo[];
+    /** Σ sealed counts + current tail size. */
+    total: number;
+}
+
+/** The mutable remainder of the nullifier set after the last sealed chunk. */
+export interface NullifierTail {
+    /** Number of sealed chunks the tail starts after (detects a chunk sealed mid-sync). */
+    afterChunks: number;
+    data: string[];
+}
+
 /** Temporal metadata for a private transfer. No graph data (inputs ↔ outputs) exposed. */
 export interface PrivateTransferTimestamp {
     blockNumber: number;

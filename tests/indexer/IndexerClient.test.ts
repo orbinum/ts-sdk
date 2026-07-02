@@ -228,6 +228,51 @@ describe('IndexerClient', () => {
         expect(lastUrl()).toBe(`${BASE}/shielded/nullifiers/all`);
     });
 
+    // ── Sealed chunk flow (incremental nullifier-set transfer) ────────────────
+
+    it('getNullifierManifest returns the manifest and hits the right URL', async () => {
+        const manifest = {
+            generation: '1',
+            chunkSize: 50000,
+            chunks: [{ idx: 0, count: 50000, digest: 'abc123' }],
+            total: 51000,
+        };
+        mockFetch(manifest);
+        const result = await client.getNullifierManifest();
+        expect(result).toEqual(manifest);
+        expect(lastUrl()).toBe(`${BASE}/shielded/nullifiers/manifest`);
+    });
+
+    it('getNullifierManifest returns null on 404 (old reader → caller falls back to /all)', async () => {
+        mockFetch({ error: 'not found' }, 404);
+        const result = await client.getNullifierManifest();
+        expect(result).toBeNull();
+    });
+
+    it('getNullifierManifest throws on non-404 errors', async () => {
+        mockFetch({ error: 'boom' }, 500);
+        await expect(client.getNullifierManifest()).rejects.toThrow('HTTP 500');
+    });
+
+    it('getNullifierChunk fetches by idx + digest and lowercases hexes', async () => {
+        mockFetch({ data: ['0xAAA', '0xbbb'] });
+        const result = await client.getNullifierChunk(3, 'DIGEST');
+        expect(result).toEqual(['0xaaa', '0xbbb']);
+        expect(lastUrl()).toBe(`${BASE}/shielded/nullifiers/chunks/3/DIGEST`);
+    });
+
+    it('getNullifierChunk throws on 404 (stale digest — caller refetches manifest)', async () => {
+        mockFetch({ error: 'chunk not found' }, 404);
+        await expect(client.getNullifierChunk(0, 'stale')).rejects.toThrow('HTTP 404');
+    });
+
+    it('getNullifierTail returns afterChunks + lowercased data', async () => {
+        mockFetch({ afterChunks: 2, data: ['0xCCC'] });
+        const result = await client.getNullifierTail();
+        expect(result).toEqual({ afterChunks: 2, data: ['0xccc'] });
+        expect(lastUrl()).toBe(`${BASE}/shielded/nullifiers/tail`);
+    });
+
     // ── getTransfersByNullifiers ──────────────────────────────────────────────
 
     it('getTransfersByNullifiers returns empty array for empty input', async () => {
