@@ -309,7 +309,7 @@ export class IndexerClient {
     ): Promise<PaginatedResult<ShieldedAddressEvent>> {
         const qs = this.buildQuery({ page: params?.page, limit: params?.limit });
         return this.get<PaginatedResult<ShieldedAddressEvent>>(
-            `/shielded/address/${encodeURIComponent(address.toLowerCase())}${qs}`
+            `/shielded/address/${encodeURIComponent(address)}${qs}`
         );
     }
 

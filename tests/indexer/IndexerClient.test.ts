@@ -893,10 +893,10 @@ describe('IndexerClient', () => {
 
     // ── getAddressShieldedActivity ────────────────────────────────────────────
 
-    it('getAddressShieldedActivity calls correct URL with lowercase address', async () => {
+    it('getAddressShieldedActivity preserves address case (SS58 is case-sensitive)', async () => {
         mockFetch({ data: [], pagination: { page: 1, limit: 20, total: 0 } });
         await client.getAddressShieldedActivity('0xABCDEF');
-        expect(lastUrl()).toBe(`${BASE}/shielded/address/0xabcdef`);
+        expect(lastUrl()).toBe(`${BASE}/shielded/address/0xABCDEF`);
     });
 
     it('getAddressShieldedActivity passes page param', async () => {
@@ -962,11 +962,11 @@ describe('IndexerClient', () => {
         expect(result.data[2]).toMatchObject({ kind: 'transfer', blockNumber: 101 });
     });
 
-    it('getAddressShieldedActivity encodes special chars in address', async () => {
+    it('getAddressShieldedActivity passes an SS58 address through verbatim', async () => {
+        const ss58 = '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY';
         mockFetch({ data: [], pagination: { page: 1, limit: 20, total: 0 } });
-        await client.getAddressShieldedActivity('5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY');
-        expect(lastUrl()).toContain('/shielded/address/');
-        expect(lastUrl()).not.toContain('GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY');
+        await client.getAddressShieldedActivity(ss58);
+        expect(lastUrl()).toBe(`${BASE}/shielded/address/${ss58}`);
     });
 
     it('getAddressShieldedActivity throws on non-2xx response', async () => {
