@@ -88,6 +88,8 @@ export {
 // ─── Vault ────────────────────────────────────────────────────────────────────
 export {
     deriveVaultKey,
+    deriveVaultBlindKey,
+    blindTag,
     encryptJson,
     decryptJson,
     vaultReplacer,
@@ -96,6 +98,7 @@ export {
     applyNoteStatus,
     encryptNote,
     decryptNoteRecord,
+    noteBlindTag,
 } from './vault/index';
 export type { EncryptedNoteRecord, NoteStatusUpdate } from './vault/index';
 

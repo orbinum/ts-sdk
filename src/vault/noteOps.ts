@@ -6,7 +6,7 @@
  */
 
 import type { ZkNote } from '../shielded-pool/protocol/types';
-import { encryptJson, decryptJson } from './VaultCrypto';
+import { encryptJson, decryptJson, blindTag } from './VaultCrypto';
 import type { EncryptedNoteRecord, NoteStatusUpdate } from './types';
 
 /**
@@ -22,18 +22,30 @@ export function applyNoteStatus(note: ZkNote, status?: NoteStatusUpdate): ZkNote
 }
 
 /**
- * Encrypts a ZkNote into an EncryptedNoteRecord using AES-GCM.
- * The commitmentHex, nullifierHex, and assetId are stored in plaintext
- * for efficient filtering without requiring vault unlock.
+ * Encrypts a ZkNote into a v2 EncryptedNoteRecord.
+ *
+ * The full note (values, secrets) is AES-GCM encrypted under `key`; the note
+ * identifiers (commitment, nullifier, asset) are stored as BLIND TAGS under
+ * `blindKey` instead of plaintext — a storage dump reveals nothing linkable to
+ * chain activity, while equality lookups still work (compare tags).
  */
-export async function encryptNote(key: CryptoKey, note: ZkNote): Promise<EncryptedNoteRecord> {
+export async function encryptNote(
+    key: CryptoKey,
+    blindKey: CryptoKey,
+    note: ZkNote
+): Promise<EncryptedNoteRecord> {
     const { iv, ciphertext } = await encryptJson(key, note);
+    const [commitmentTag, nullifierTag, assetTag] = await Promise.all([
+        blindTag(blindKey, note.commitmentHex),
+        blindTag(blindKey, note.nullifierHex),
+        blindTag(blindKey, note.assetId.toString()),
+    ]);
     return {
-        commitmentHex: note.commitmentHex,
+        commitmentTag,
         iv,
         ciphertext,
-        nullifierHex: note.nullifierHex,
-        assetId: note.assetId.toString(),
+        nullifierTag,
+        assetTag,
         spent: note.spent,
         spentAt: note.spentAt,
         updatedAt: Date.now(),
@@ -41,7 +53,7 @@ export async function encryptNote(key: CryptoKey, note: ZkNote): Promise<Encrypt
 }
 
 /**
- * Decrypts an EncryptedNoteRecord back into a ZkNote using AES-GCM.
+ * Decrypts a note record back into a ZkNote.
  * Applies the record's spent/spentAt metadata onto the decrypted note.
  * Throws DOMException on authentication failure (wrong key or corrupted data).
  */
@@ -51,4 +63,12 @@ export async function decryptNoteRecord(key: CryptoKey, rec: EncryptedNoteRecord
         ...(rec.spent !== undefined && { spent: rec.spent }),
         spentAt: rec.spentAt ?? null,
     });
+}
+
+/**
+ * Blind tag for a note identifier hex — use to build the storage key or to
+ * look a record up by commitment/nullifier without exposing the raw hex.
+ */
+export async function noteBlindTag(blindKey: CryptoKey, hex: string): Promise<string> {
+    return blindTag(blindKey, hex);
 }
