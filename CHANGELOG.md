@@ -5,6 +5,14 @@ All notable changes to the Orbinum TypeScript SDK will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-07-02
+
+### Fixed
+
+- **`getTransfersByNullifiers` / `getTransfersByCommitments` no longer silently lose results for inputs larger than 50.** The reader truncates every request to 50 items server-side; the SDK previously sent the whole array in one query string, so wallets with more than 50 notes silently missed private transfers (broken history rows and failed outgoing-transfer reconstruction). Inputs are now transparently chunked into requests of 50, fetched in parallel, merged per extrinsic (`blockNumber:extrinsicIndex`, matched arrays deduped), and sorted by block descending. These lookups remain a bounded, documented linkage tradeoff — they are never used for spent-status checks (PIR-A: status comes from the anonymous full-set `/shielded/nullifiers/all` download).
+
+---
+
 ## [0.8.0] - 2026-07-01
 
 Privacy alignment with Zcash's visibility model: the shielded pool's boundary is public, its interior is opaque. Per-address responses never expose note internals — a public sender→leaf mapping would shrink the pool's anonymity set for everyone. See the indexer's `docs/address-privacy.md` for the full policy.
