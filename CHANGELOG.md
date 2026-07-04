@@ -5,6 +5,16 @@ All notable changes to the Orbinum TypeScript SDK will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-07-02
+
+### Changed
+
+- **`IndexerClient` now enforces HTTPS on its `baseUrl`.** The indexer carries the wallet's queries, so a plain-`http://` remote endpoint would send them in cleartext. The constructor validates the transport: `https://` is always allowed, `http://` only for loopback hosts (`localhost`, `127.0.0.1`, `[::1]`); any other value — or a non-URL string — throws (fail-closed). Trailing-slash normalization is unchanged.
+  - **Breaking:** constructing an `IndexerClient` with a plain-http remote `baseUrl` now throws instead of silently sending cleartext requests. Local development against `http://localhost` is unaffected.
+  - New export: `normalizeBaseUrl(baseUrl)` — the validator, usable standalone.
+
+---
+
 ## [0.10.0] - 2026-07-02
 
 ### Added

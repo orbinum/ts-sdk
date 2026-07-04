@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { IndexerClient } from '../../src/indexer/IndexerClient';
+import { IndexerClient, normalizeBaseUrl } from '../../src/indexer/IndexerClient';
 import type {
     IndexedBlock,
     IndexedEvmTx,
@@ -1219,5 +1219,34 @@ describe('IndexerClient', () => {
         mockFetch({ data: [session], pagination: { page: 1, limit: 20, total: 1 } });
         const result = await client.getSessions();
         expect(result.data[0]!.timestampMs).toBeNull();
+    });
+});
+
+// ─── baseUrl transport guard ───────────────────────────────────────────────────
+
+describe('normalizeBaseUrl', () => {
+    it('accepts an https:// remote and strips the trailing slash', () => {
+        expect(normalizeBaseUrl('https://indexer.orbinum.net/')).toBe(
+            'https://indexer.orbinum.net'
+        );
+    });
+
+    it('accepts http:// only for loopback hosts', () => {
+        expect(normalizeBaseUrl('http://localhost:3000')).toBe('http://localhost:3000');
+        expect(normalizeBaseUrl('http://127.0.0.1:3001')).toBe('http://127.0.0.1:3001');
+        expect(normalizeBaseUrl('http://[::1]:3001')).toBe('http://[::1]:3001');
+    });
+
+    it('rejects a plain http:// remote (would leak queries in cleartext)', () => {
+        expect(() => normalizeBaseUrl('http://indexer.orbinum.net')).toThrow(/https/);
+    });
+
+    it('rejects a non-URL string', () => {
+        expect(() => normalizeBaseUrl('not a url')).toThrow(/invalid baseUrl/);
+    });
+
+    it('is enforced by the IndexerClient constructor', () => {
+        expect(() => new IndexerClient({ baseUrl: 'http://evil.example.com' })).toThrow(/https/);
+        expect(() => new IndexerClient({ baseUrl: 'https://indexer.orbinum.net' })).not.toThrow();
     });
 });

@@ -1,4 +1,4 @@
-export { IndexerClient } from './IndexerClient';
+export { IndexerClient, normalizeBaseUrl } from './IndexerClient';
 export type {
     IndexerClientConfig,
     PaginatedResult,
