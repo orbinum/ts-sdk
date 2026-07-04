@@ -24,6 +24,32 @@ import type {
     Unshield,
 } from './types';
 
+/** Loopback hosts allowed over plain http:// (local dev). */
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+
+/**
+ * Strips a trailing slash and enforces the transport: the indexer carries the
+ * wallet's queries, so a plain-http `baseUrl` would leak them in cleartext.
+ * `https://` is always allowed; `http://` only for loopback (dev). Anything
+ * else — including a non-URL string — throws (fail-closed).
+ */
+export function normalizeBaseUrl(baseUrl: string): string {
+    let url: URL;
+    try {
+        url = new URL(baseUrl);
+    } catch {
+        throw new Error(`IndexerClient: invalid baseUrl ${JSON.stringify(baseUrl)}`);
+    }
+    const isLocal = LOCAL_HOSTS.has(url.hostname);
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLocal)) {
+        throw new Error(
+            `IndexerClient: baseUrl must use https:// (got ${url.protocol}//${url.hostname}). ` +
+                `Plain http is only allowed for localhost.`
+        );
+    }
+    return baseUrl.replace(/\/$/, '');
+}
+
 /**
  * HTTP client for the Orbinum indexer REST API.
  *
@@ -35,7 +61,7 @@ export class IndexerClient {
     private readonly timeoutMs: number;
 
     constructor(config: IndexerClientConfig) {
-        this.baseUrl = config.baseUrl.replace(/\/$/, '');
+        this.baseUrl = normalizeBaseUrl(config.baseUrl);
         this.timeoutMs = config.timeoutMs ?? 10_000;
     }
 
