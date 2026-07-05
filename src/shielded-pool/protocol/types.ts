@@ -1,26 +1,42 @@
+/** On-chain Merkle tree state for the shielded pool. */
 export type MerkleTreeInfo = {
+    /** 0x-prefixed current Merkle root hex. */
     root: string;
+    /** Number of leaves (commitments) inserted so far. */
     treeSize: number;
+    /** Tree depth (levels from leaf to root). */
     depth: number;
 };
 
+/** A commitment surfaced by the indexer scan feed, for trial-decryption. */
 export type ScanCommitment = {
+    /** 0x-prefixed 32-byte commitment hex. */
     commitmentHex: string;
+    /** Leaf position of the commitment in the Merkle tree. */
     leafIndex: number;
+    /** 0x-prefixed encrypted memo hex, or null if none was published. */
     encryptedMemo: string | null;
 };
 
+/** Plaintext fields recovered from a note's encrypted memo. */
 export type DecryptedMemo = {
+    /** Note amount in planck. */
     value: bigint;
+    /** Owner's BabyJubJub Ax coordinate. */
     ownerPk: bigint;
+    /** Blinding scalar used in the commitment. */
     blinding: bigint;
+    /** Asset ID of the note. */
     assetId: bigint;
     /** Counterparty BabyJubJub Ax coordinate. Zero for shield/unshield notes. */
     counterpartyPk: bigint;
 };
 
+/** Parameters for shieldedPool.shield — deposits one note into the pool. */
 export type ShieldParams = {
+    /** Asset ID being deposited. */
     assetId: number;
+    /** Amount to deposit in planck. */
     amount: bigint;
     /** 0x-prefixed 32-byte commitment hex */
     commitment: string;
@@ -28,6 +44,7 @@ export type ShieldParams = {
     encryptedMemo: Uint8Array;
 };
 
+/** Parameters for shieldedPool.unshield — withdraws from the pool to a clear address. */
 export type UnshieldParams = {
     /** ZK proof bytes */
     proof: Uint8Array;
@@ -35,6 +52,7 @@ export type UnshieldParams = {
     merkleRoot: string;
     /** 0x-prefixed nullifier hex */
     nullifier: string;
+    /** Asset ID being withdrawn. */
     assetId: number;
     /** Net amount recipient receives (planck) */
     amount: bigint;
@@ -71,7 +89,9 @@ export type PrivateTransferOutput = {
 };
 
 export type PrivateTransferParams = {
+    /** Input notes being spent (nullifier + commitment each). */
     inputs: PrivateTransferInput[];
+    /** Output notes being created (commitment + encrypted memo each). */
     outputs: PrivateTransferOutput[];
     /** ZK proof bytes */
     proof: Uint8Array;
@@ -130,10 +150,15 @@ export const CURRENT_CIRCUIT_VERSION = 1;
  * nullifier  = Poseidon(commitment, spendingKey)
  */
 export type ZkNote = {
+    /** Note amount in planck. */
     value: bigint;
+    /** Asset ID of the note. */
     assetId: bigint;
+    /** Owner's BabyJubJub Ax coordinate (or stealth owner Pk for stealth notes). */
     ownerPk: bigint;
+    /** Blinding scalar mixed into the commitment. */
     blinding: bigint;
+    /** Secret spending key used to derive the nullifier. */
     spendingKey: bigint;
     /** Circuit version this note was created under (see `CURRENT_CIRCUIT_VERSION`). Required. */
     circuitVersion: number;
@@ -160,7 +185,9 @@ export type ZkNote = {
 
 /** Parameters for a single item in a shield_batch extrinsic. */
 export type ShieldBatchItem = {
+    /** Asset ID being deposited. */
     assetId: number;
+    /** Amount to deposit in planck. */
     amount: bigint;
     /** 0x-prefixed 32-byte commitment hex */
     commitment: string;
@@ -170,6 +197,7 @@ export type ShieldBatchItem = {
 
 /** Parameters for shieldedPool.shieldBatch — deposits up to 20 notes in one extrinsic. */
 export type ShieldBatchParams = {
+    /** The notes to deposit (up to 20). */
     items: ShieldBatchItem[];
 };
 
