@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Per-note circuit version** (`src/shielded-pool/protocol/types.ts`, `NoteBuilder`, `NoteDecryptor`, `vault/noteOps.ts`): `ZkNote` now carries a required `circuitVersion` so a note is always proven/verified against the circuit that created it, even after a VK rotation. `NoteBuilder.build` stamps it (default `CURRENT_CIRCUIT_VERSION` = 1, exported; callers may pass an explicit version resolved from the chain), and discovered notes are stamped on scan. The field rides inside the encrypted `ZkNote` payload, so no vault migration is needed. Fail-closed: `decryptNoteRecord` throws if a record has no `circuitVersion` (invalid/corrupt) rather than defaulting.
+
 ### Fixed
 
 - **`CircuitId.ValueProof` corrected from 4 to 6** (`src/zk-verifier/types/pallet-extrinsics.ts`): the value the SDK exported did not match the node's on-chain `CircuitId::VALUE_PROOF = 6` (`node/frame/zk-verifier/src/types.rs`), so a version/VK lookup keyed off `ValueProof` (e.g. `getCircuitVersionInfo(4)`) would have queried a non-existent circuit. The constant was unused in flows so far, so this is safe. A new anti-drift test (`tests/zk-verifier/circuit-id.test.ts`) locks all four ids to the node's values.

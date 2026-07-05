@@ -71,6 +71,7 @@ export {
     decodeNoteDisclosureKey,
 } from './shielded-pool/index';
 export type { NoteDisclosure } from './shielded-pool/protocol/NoteDisclosure';
+export { CURRENT_CIRCUIT_VERSION } from './shielded-pool/protocol/types';
 export { BN254_R, BABYJUB_SUBORDER } from './utils/crypto-constants';
 export { randomBlinding } from './utils/blinding';
 

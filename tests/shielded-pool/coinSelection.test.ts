@@ -11,6 +11,7 @@ function note(value: bigint, opts: Partial<ZkNote> = {}): ZkNote {
         ownerPk: 0n,
         blinding: 1n,
         spendingKey: 1n,
+        circuitVersion: 1,
         spent: false,
         spentAt: null,
         commitment: value,        // arbitrary unique identifier for assertions

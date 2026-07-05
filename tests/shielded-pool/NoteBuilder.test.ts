@@ -36,6 +36,16 @@ describe('NoteBuilder.build', () => {
     expect(note.spendingKey).toBe(0n);
   });
 
+  it('stamps the current circuit version by default', async () => {
+    const note = await NoteBuilder.build({ value: 1n, blinding: 1n });
+    expect(note.circuitVersion).toBe(1);
+  });
+
+  it('honors an explicit circuitVersion (caller resolved from chain)', async () => {
+    const note = await NoteBuilder.build({ value: 1n, blinding: 1n, circuitVersion: 2 });
+    expect(note.circuitVersion).toBe(2);
+  });
+
   it('commitment is deterministic for same inputs', async () => {
     const input = { value: 42n, assetId: 1n, ownerPk: 123n, blinding: 456n, spendingKey: 789n };
     const a = await NoteBuilder.build(input);

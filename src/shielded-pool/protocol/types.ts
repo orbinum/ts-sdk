@@ -111,7 +111,17 @@ export type NoteInput = {
     recipientOwnerPk?: bigint;
     /** Counterparty BabyJubJub Ax coordinate. Zero for shield/unshield notes. Default 0n. */
     counterpartyPk?: bigint;
+    /** Circuit version to stamp on the note. Defaults to `CURRENT_CIRCUIT_VERSION`. */
+    circuitVersion?: number;
 };
+
+/**
+ * Circuit version notes are created under today. A note carries its version
+ * (`ZkNote.circuitVersion`) so that, after a VK rotation, it is always proven
+ * and verified against the circuit that created it. Only one version exists
+ * today; callers may pass the chain's active version explicitly.
+ */
+export const CURRENT_CIRCUIT_VERSION = 1;
 
 /**
  * Computed ZK note (commitment + nullifier). Built entirely off-chain.
@@ -125,6 +135,8 @@ export type ZkNote = {
     ownerPk: bigint;
     blinding: bigint;
     spendingKey: bigint;
+    /** Circuit version this note was created under (see `CURRENT_CIRCUIT_VERSION`). Required. */
+    circuitVersion: number;
     /** Whether the note has been spent/nullified on-chain. */
     spent: boolean;
     /** Local timestamp when this note was marked spent, or null if still active/unknown. */

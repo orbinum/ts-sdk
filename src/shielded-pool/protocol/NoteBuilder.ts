@@ -1,4 +1,4 @@
-import type { NoteInput, ZkNote } from './types';
+import { CURRENT_CIRCUIT_VERSION, type NoteInput, type ZkNote } from './types';
 import { EncryptedMemo, ENCRYPTED_MEMO_SIZE } from './EncryptedMemo';
 import { deriveStealthOwnerPk } from '../../utils/stealth';
 import { recoverOwnerPkPoint } from '../../utils/bjj';
@@ -52,6 +52,7 @@ export class NoteBuilder {
         const blinding = input.blinding ?? BigInt(Date.now());
         const spendingKey = input.spendingKey ?? 0n;
         const counterpartyPk = input.counterpartyPk ?? 0n;
+        const circuitVersion = input.circuitVersion ?? CURRENT_CIRCUIT_VERSION;
 
         const useStealth =
             input.viewingPublicKey !== undefined && input.recipientOwnerPk !== undefined;
@@ -121,6 +122,7 @@ export class NoteBuilder {
                 ownerPk: effectiveOwnerPk,
                 blinding,
                 spendingKey,
+                circuitVersion,
                 spent: false,
                 spentAt: null,
                 commitment,
@@ -164,6 +166,7 @@ export class NoteBuilder {
             ownerPk,
             blinding,
             spendingKey,
+            circuitVersion,
             spent: false,
             spentAt: null,
             commitment,

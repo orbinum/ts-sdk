@@ -26,6 +26,7 @@ function makeNote(overrides: Partial<ZkNote> = {}): ZkNote {
     ownerPk,
     blinding,
     spendingKey,
+    circuitVersion: 1,
     commitment,
     nullifier,
     commitmentHex,
