@@ -5,6 +5,12 @@ All notable changes to the Orbinum TypeScript SDK will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`CircuitId.ValueProof` corrected from 4 to 6** (`src/zk-verifier/types/pallet-extrinsics.ts`): the value the SDK exported did not match the node's on-chain `CircuitId::VALUE_PROOF = 6` (`node/frame/zk-verifier/src/types.rs`), so a version/VK lookup keyed off `ValueProof` (e.g. `getCircuitVersionInfo(4)`) would have queried a non-existent circuit. The constant was unused in flows so far, so this is safe. A new anti-drift test (`tests/zk-verifier/circuit-id.test.ts`) locks all four ids to the node's values.
+
 ## [0.11.0] - 2026-07-02
 
 ### Changed

@@ -17,18 +17,22 @@ export type CircuitId = (typeof CircuitId)[keyof typeof CircuitId];
 /**
  * Named constants for all supported ZK circuits.
  *
+ * Values MUST match the node's `CircuitId` constants
+ * (`node/frame/zk-verifier/src/types.rs`). Note: ValueProof is 6, not 4 or
+ * sequential.
+ *
  * | Name         | Value | Circuit                         |
  * |--------------|-------|---------------------------------|
  * | Transfer     | 1     | 2-in-2-out private transfer     |
  * | Unshield     | 2     | Withdrawal from the pool        |
- * | ValueProof   | 4     | Note value binding (fee-claim)  |
  * | PrivateLink  | 5     | Private chain-link proof        |
+ * | ValueProof   | 6     | Note value binding (fee-claim)  |
  */
 export const CircuitId = {
     Transfer: 1,
     Unshield: 2,
-    ValueProof: 4,
     PrivateLink: 5,
+    ValueProof: 6,
 } as const;
 
 // ─── Supporting types ─────────────────────────────────────────────────────────
