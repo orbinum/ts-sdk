@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-11
+
+### Removed (BREAKING)
+
+- **`IndexerClient` and all indexer types are no longer part of the SDK.** The public SDK must not know the shape of the private indexer's REST API — it now ships only crypto/chain (`substrate`, `evm`, `evmExplorer`, `shieldedPool`, `privacy`, `zkVerifier`, `proof-generator`, `vault`, `precompiles`). Consumers that talked to the indexer must supply their own HTTP client.
+  - Removed exports: `IndexerClient`, `normalizeBaseUrl`, and the types `IndexerClientConfig`, `PaginatedResult`, `IndexedBlock`, `IndexedExtrinsic`, `IndexedEvmTx`, `IndexedSession`, `IndexedValidator`, `IndexerStats`, `IndexerActivity`, `ActivityBucket`, `ShieldedAddressEvent`, `ShieldedCommitment`, `SpentNullifier`, `NullifierChunkInfo`, `NullifierManifest`, `NullifierTail`, `PrivateTransferTimestamp`, `Unshield`, `MerkleRoot`, `NullifierStatusResult`, `StealthScanHint`, `Relayer`, `RelayFeeEvent`, `RelayFeeSummaryEntry`, `RegisteredAsset`.
+  - `OrbinumClient` no longer has an `indexer` field; `OrbinumClientConfig` / `OrbinumClientProviderConfig` no longer accept `indexerUrl`.
+  - **No impact on the shielded-pool crypto**: `IndexerClient` was a leaf — note decryption (`tryDecryptNote`), nullifier derivation, memo encrypt/decrypt, vault, proof generation, and Merkle-proof / nullifier-status (via Substrate RPC) never depended on it. Callers fetch indexer data themselves and feed plain records into the SDK crypto as before.
+
 ## [0.12.0] - 2026-07-10
 
 ### Changed (BREAKING — encrypted memo wire format)

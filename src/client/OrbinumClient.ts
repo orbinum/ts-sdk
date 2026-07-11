@@ -1,7 +1,6 @@
 import { SubstrateClient } from '../substrate/SubstrateClient';
 import { EvmClient } from '../evm/EvmClient';
 import { EvmExplorer } from '../evm-explorer/EvmExplorer';
-import { IndexerClient } from '../indexer/IndexerClient';
 import { ShieldedPoolModule } from '../shielded-pool/pallet/ShieldedPoolModule';
 import { AccountMappingModule } from '../account-mapping/AccountMappingModule';
 import { ChainModule } from '../rpc-v2/ChainModule';
@@ -55,12 +54,6 @@ export class OrbinumClient {
      * `null` when `evmRpc` is not configured.
      */
     readonly evmExplorer: EvmExplorer | null;
-    /**
-     * HTTP client for the Orbinum indexer REST API.
-     * Provides paginated access to indexed blocks, extrinsics, shielded events, and nullifiers.
-     * `null` when `indexerUrl` is not configured.
-     */
-    readonly indexer: IndexerClient | null;
     /** Shielded-pool extrinsics and Merkle tree queries (`shield`, `unshield`, `privateTransfer`, …). */
     readonly shieldedPool: ShieldedPoolModule;
     /** Account-mapping extrinsics: aliases, chain links, metadata, marketplace, and identity. */
@@ -95,13 +88,11 @@ export class OrbinumClient {
     private constructor(
         substrate: SubstrateClient,
         evm: EvmClient | null,
-        indexer: IndexerClient | null,
         circuitsBaseUrl?: string
     ) {
         this.substrate = substrate;
         this.evm = evm;
         this.evmExplorer = evm ? new EvmExplorer(evm) : null;
-        this.indexer = indexer;
         this.shieldedPool = new ShieldedPoolModule(substrate);
         this.accountMapping = new AccountMappingModule(substrate);
         this.privacy = new PrivacyModule(substrate);
@@ -130,10 +121,7 @@ export class OrbinumClient {
             config.connectTimeoutMs ?? 15_000
         );
         const evm = config.evmRpc ? new EvmClient(config.evmRpc) : null;
-        const indexer = config.indexerUrl
-            ? new IndexerClient({ baseUrl: config.indexerUrl })
-            : null;
-        return new OrbinumClient(substrate, evm, indexer, config.circuitsBaseUrl);
+        return new OrbinumClient(substrate, evm, config.circuitsBaseUrl);
     }
 
     /** Closes the underlying Substrate WebSocket connection and releases all resources. */

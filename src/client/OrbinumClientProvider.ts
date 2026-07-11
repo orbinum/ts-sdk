@@ -28,8 +28,6 @@ export interface ClientProviderConfig {
     substrateWs: string;
     /** HTTP URL of the EVM JSON-RPC endpoint (e.g. `"http://localhost:9933"`). Omit to disable EVM support. */
     evmRpc?: string;
-    /** Base URL of the Orbinum indexer REST API (e.g. `"https://indexer.orbinum.io"`). Omit to disable indexer support. */
-    indexerUrl?: string;
     /** Base URL of a circuits-artifact mirror (manifest.json + artifacts). Omit to use the default npm CDN. */
     circuitsBaseUrl?: string;
     /** Timeout for the initial WebSocket handshake in milliseconds. Default: `8_000`. */
@@ -203,7 +201,6 @@ export class OrbinumClientProvider {
                 substrateWs: this.config.substrateWs,
             };
             if (this.config.evmRpc) connectConfig.evmRpc = this.config.evmRpc;
-            if (this.config.indexerUrl) connectConfig.indexerUrl = this.config.indexerUrl;
             if (this.config.circuitsBaseUrl)
                 connectConfig.circuitsBaseUrl = this.config.circuitsBaseUrl;
             const clientPromise = OrbinumClient.connect(connectConfig);
