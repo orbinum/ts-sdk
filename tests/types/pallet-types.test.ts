@@ -59,6 +59,7 @@ describe('pallet-args types', () => {
             recipient: '5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY',
             fee: 0n,
             changeCommitment: new Array(32).fill(0),
+            circuitVersion: 1,
         };
         expect(args.proof).toHaveLength(192);
         expect(typeof args.recipient).toBe('string');
@@ -81,6 +82,7 @@ describe('pallet-args types', () => {
             encryptedMemos: [new Array(104).fill(0)],
             assetId: 0,
             fee: 0n,
+            circuitVersion: 1,
         };
         expect(args.nullifiers).toHaveLength(1);
         expect(args.outputs).toHaveLength(1);

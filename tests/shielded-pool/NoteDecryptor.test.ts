@@ -8,7 +8,7 @@ import {
 import { NoteBuilder } from '../../src/shielded-pool/protocol/NoteBuilder';
 import { deriveViewingSecretKey, deriveViewingPublicKey, deriveOwnerPk } from '../../src/privacy-keys/PrivacyKeys';
 import { toHex } from '../../src/utils/hex';
-import type { ZkNote } from '../../src/shielded-pool/protocol/types';
+import { CURRENT_CIRCUIT_VERSION, type ZkNote } from '../../src/shielded-pool/protocol/types';
 
 // ─── Test fixtures ────────────────────────────────────────────────────────────
 
@@ -87,7 +87,7 @@ describe('tryDecryptNote — valid note', () => {
   it('memo field is a number[]', () => {
     const result = tryDecryptNote(validCommitment, viewingKey, SPENDING_KEY)!;
     expect(Array.isArray(result.memo)).toBe(true);
-    expect(result.memo).toHaveLength(176);
+    expect(result.memo).toHaveLength(180);
   });
 
   it('leafIndex on ScanCommitment does not affect decryption', () => {
@@ -171,6 +171,49 @@ describe('tryDecryptNoteVerbose — happy path', () => {
     const simple = tryDecryptNote(validCommitment, viewingKey, SPENDING_KEY);
     expect(verbose.note?.commitmentHex).toBe(simple?.commitmentHex);
     expect(verbose.note?.nullifierHex).toBe(simple?.nullifierHex);
+  });
+});
+
+// ─── circuitVersion carried in the memo ───────────────────────────────────────
+
+describe('tryDecryptNote — circuitVersion from memo', () => {
+  it('recovers the circuit version stamped into the note memo', async () => {
+    // A note built with circuitVersion=2 carries it inside the encrypted memo;
+    // the decryptor reads it back — no indexer lookup.
+    const n = await NoteBuilder.build({
+      value: 1000n,
+      assetId: 0n,
+      ownerPk: 0n,
+      blinding: 42n,
+      spendingKey: SPENDING_KEY,
+      viewingPublicKey,
+      circuitVersion: 2,
+    });
+    const c: ScanCommitment = {
+      commitmentHex: n.commitmentHex,
+      leafIndex: 0,
+      encryptedMemo: toHex(new Uint8Array(n.memo)),
+    };
+    const result = tryDecryptNote(c, viewingKey, SPENDING_KEY)!;
+    expect(result.circuitVersion).toBe(2);
+  });
+
+  it('defaults to CURRENT_CIRCUIT_VERSION when the note is built without one', async () => {
+    const n = await NoteBuilder.build({
+      value: 500n,
+      assetId: 0n,
+      ownerPk: 0n,
+      blinding: 7n,
+      spendingKey: SPENDING_KEY,
+      viewingPublicKey,
+    });
+    const c: ScanCommitment = {
+      commitmentHex: n.commitmentHex,
+      leafIndex: 0,
+      encryptedMemo: toHex(new Uint8Array(n.memo)),
+    };
+    const result = tryDecryptNote(c, viewingKey, SPENDING_KEY)!;
+    expect(result.circuitVersion).toBe(CURRENT_CIRCUIT_VERSION);
   });
 });
 

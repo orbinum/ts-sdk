@@ -22,7 +22,7 @@ import { poseidon2, poseidon4 } from 'poseidon-lite';
  *
  * Memo scheme (EncryptedMemo — native TypeScript, no WASM):
  *   ChaCha20-Poly1305 with ECDH ephemeral key — SHA256(sharedSecret || commitment || domain)
- *   Result: nonce(12) || ciphertext(108 + 16 MAC) || ephPk(32) = 168 bytes
+ *   Result: nonce(12) || ciphertext(120 + 16 MAC) || ephPk(32) = 180 bytes
  *
  * Stealth scheme (when viewingPublicKey + recipientOwnerPk are both provided):
  *   ephSk is generated once and shared between the ECDH memo and the stealth Pk derivation.
@@ -102,6 +102,7 @@ export class NoteBuilder {
                     stealthCommitmentBytes,
                     recipientIvkPacked,
                     bigintTo32Le(counterpartyPk),
+                    circuitVersion,
                     ephSk
                 )
             );
@@ -150,7 +151,8 @@ export class NoteBuilder {
                           Number(assetId),
                           commitmentBytes,
                           input.viewingPublicKey,
-                          bigintTo32Le(counterpartyPk)
+                          bigintTo32Le(counterpartyPk),
+                          circuitVersion
                       )
                   )
                 : Array.from(EncryptedMemo.dummy());
@@ -179,7 +181,7 @@ export class NoteBuilder {
     }
 
     /**
-     * Build the 168-byte ECDH-encrypted memo for a note.
+     * Build the 180-byte ECDH-encrypted memo for a note.
      *
      * Pure TypeScript implementation — no WASM dependency.
      * Uses ChaCha20-Poly1305 with ECDH key agreement (BabyJubJub ephemeral keypair).
@@ -202,7 +204,8 @@ export class NoteBuilder {
             Number(note.assetId),
             bigintTo32Le(note.commitment),
             recipientIvkPacked ?? new Uint8Array(32),
-            counterpartyPk ?? bigintTo32Le(note.counterpartyPk ?? 0n)
+            counterpartyPk ?? bigintTo32Le(note.counterpartyPk ?? 0n),
+            note.circuitVersion
         );
     }
 }

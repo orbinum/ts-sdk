@@ -7,6 +7,7 @@ import { AccountMappingModule } from '../account-mapping/AccountMappingModule';
 import { ChainModule } from '../rpc-v2/ChainModule';
 import { PrivacyModule } from '../rpc-v2/PrivacyModule';
 import { ZkVerifierModule } from '../zk-verifier/ZkVerifierModule';
+import { CircuitVersionResolver } from '../shielded-pool/CircuitVersionResolver';
 import { RelayerStatusModule } from '../relayer/RelayerStatusModule';
 import { ShieldedPoolPrecompile } from '../precompiles/ShieldedPoolPrecompile';
 import { AccountMappingPrecompile } from '../precompiles/AccountMappingPrecompile';
@@ -70,6 +71,11 @@ export class OrbinumClient {
     readonly chain: ChainModule;
     /** Typed access to `zkVerifier_*` custom RPC endpoints. */
     readonly zkVerifier: ZkVerifierModule;
+    /**
+     * Resolves a note's circuit version to a pinned prover + on-chain version
+     * before spending it (fail-closed: throws on unsupported version / VK mismatch).
+     */
+    readonly circuitVersionResolver: CircuitVersionResolver;
     /** Typed access to `relayer_*` RPC endpoints (registry lookup and pending fee queries). */
     readonly relayerStatus: RelayerStatusModule;
     /**
@@ -89,7 +95,8 @@ export class OrbinumClient {
     private constructor(
         substrate: SubstrateClient,
         evm: EvmClient | null,
-        indexer: IndexerClient | null
+        indexer: IndexerClient | null,
+        circuitsBaseUrl?: string
     ) {
         this.substrate = substrate;
         this.evm = evm;
@@ -100,6 +107,7 @@ export class OrbinumClient {
         this.privacy = new PrivacyModule(substrate);
         this.chain = new ChainModule(substrate);
         this.zkVerifier = new ZkVerifierModule(substrate);
+        this.circuitVersionResolver = new CircuitVersionResolver(this.zkVerifier, circuitsBaseUrl);
         this.relayerStatus = new RelayerStatusModule(substrate);
         this.precompiles = evm
             ? {
@@ -125,7 +133,7 @@ export class OrbinumClient {
         const indexer = config.indexerUrl
             ? new IndexerClient({ baseUrl: config.indexerUrl })
             : null;
-        return new OrbinumClient(substrate, evm, indexer);
+        return new OrbinumClient(substrate, evm, indexer, config.circuitsBaseUrl);
     }
 
     /** Closes the underlying Substrate WebSocket connection and releases all resources. */

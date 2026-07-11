@@ -22,18 +22,10 @@ export interface ShieldedCommitment {
     blockNumber: number;
     extrinsicIndex: number | null;
     leafIndex: number;
-    /**
-     * Asset ID as decimal string.
-     * For `source: 'shield'` and `source: 'unshield'` this reflects the real asset.
-     * For `source: 'transfer'` it is always `"0"` — the chain intentionally omits the asset ID
-     * from `CommitmentsInserted` events to prevent graph correlation across assets.
-     * The true asset is recoverable only by decrypting `encryptedMemo`.
-     */
     assetId: string;
-    /** Origin of the commitment: direct shield, output of private transfer, or change from unshield. */
     source: 'shield' | 'transfer' | 'unshield';
-    /** 0x-prefixed encrypted memo hex, null if not present. */
     encryptedMemo: string | null;
+    circuitVersion: number | null;
     timestampMs: number | null;
 }
 
@@ -333,6 +325,7 @@ export interface StealthScanHint {
     assetId: string;
     /** Ephemeral public key (last 32 bytes of encrypted_memo), 0x-prefixed. null if memo absent. */
     ephPkHex: string | null;
-    /** Full 168-byte encrypted memo (0x-prefixed hex). null if not present. */
+    /** Full 180-byte encrypted memo (0x-prefixed hex). null if not present. The note's
+     * circuit version travels inside this memo — recovered by NoteDecryptor on scan. */
     encryptedMemo: string | null;
 }

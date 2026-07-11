@@ -44,7 +44,7 @@ describe('decodePrecompileCalldata — null cases', () => {
             assetId: 0,
             amount: 1n,
             commitment: COMMITMENT,
-            encryptedMemo: new Uint8Array(176),
+            encryptedMemo: new Uint8Array(180),
         });
         const upper = SP_ADDR.toUpperCase();
         const result = decodePrecompileCalldata(upper, calldata);
@@ -60,25 +60,25 @@ describe('decodePrecompileCalldata — shield', () => {
     const sp = new ShieldedPoolPrecompile(mockEvm());
 
     it('decodes fnSig correctly', () => {
-        const calldata = sp.buildShieldCalldata({ assetId: 0, amount: 1_000n, commitment: COMMITMENT, encryptedMemo: new Uint8Array(176) });
+        const calldata = sp.buildShieldCalldata({ assetId: 0, amount: 1_000n, commitment: COMMITMENT, encryptedMemo: new Uint8Array(180) });
         const result = decodePrecompileCalldata(SP_ADDR, calldata);
         expect(result?.fnSig).toBe('shield(uint32,bytes32,bytes)');
     });
 
     it('round-trips assetId', () => {
-        const calldata = sp.buildShieldCalldata({ assetId: 7, amount: 1n, commitment: COMMITMENT, encryptedMemo: new Uint8Array(176) });
+        const calldata = sp.buildShieldCalldata({ assetId: 7, amount: 1n, commitment: COMMITMENT, encryptedMemo: new Uint8Array(180) });
         const result = decodePrecompileCalldata(SP_ADDR, calldata);
         expect(result?.args['assetId']).toBe(7n);
     });
 
     it('amount is NOT present in args (it is msg.value)', () => {
-        const calldata = sp.buildShieldCalldata({ assetId: 0, amount: 1_000_000_000_000_000_000n, commitment: COMMITMENT, encryptedMemo: new Uint8Array(176) });
+        const calldata = sp.buildShieldCalldata({ assetId: 0, amount: 1_000_000_000_000_000_000n, commitment: COMMITMENT, encryptedMemo: new Uint8Array(180) });
         const result = decodePrecompileCalldata(SP_ADDR, calldata);
         expect(result?.args['amount']).toBeUndefined();
     });
 
     it('round-trips commitment as 0x-prefixed hex', () => {
-        const calldata = sp.buildShieldCalldata({ assetId: 0, amount: 1n, commitment: COMMITMENT, encryptedMemo: new Uint8Array(176) });
+        const calldata = sp.buildShieldCalldata({ assetId: 0, amount: 1n, commitment: COMMITMENT, encryptedMemo: new Uint8Array(180) });
         const result = decodePrecompileCalldata(SP_ADDR, calldata);
         expect(typeof result?.args['commitment']).toBe('string');
         expect((result?.args['commitment'] as string).toLowerCase()).toBe(COMMITMENT.toLowerCase());
@@ -97,12 +97,19 @@ describe('decodePrecompileCalldata — unshield', () => {
         assetId: 1,
         amount: 500_000n,
         recipientAddress: RECIPIENT,
+        circuitVersion: 1,
     };
 
     it('decodes fnSig correctly', () => {
         const calldata = sp.buildUnshieldCalldata(params);
         const result = decodePrecompileCalldata(SP_ADDR, calldata);
-        expect(result?.fnSig).toBe('unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32)');
+        expect(result?.fnSig).toBe('unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32,bytes,uint32)');
+    });
+
+    it('round-trips circuitVersion', () => {
+        const calldata = sp.buildUnshieldCalldata({ ...params, circuitVersion: 7 });
+        const result = decodePrecompileCalldata(SP_ADDR, calldata);
+        expect(result?.args['circuitVersion']).toBe(7n);
     });
 
     it('round-trips root', () => {
@@ -157,14 +164,21 @@ describe('decodePrecompileCalldata — privateTransfer', () => {
         proof: PROOF,
         merkleRoot: ROOT,
         inputs: [{ nullifier: NULLIFIER, commitment: COMMITMENT }],
-        outputs: [{ commitment: COMMITMENT, encryptedMemo: new Uint8Array(176) }],
+        outputs: [{ commitment: COMMITMENT, encryptedMemo: new Uint8Array(180) }],
         assetId: 0,
+        circuitVersion: 1,
     };
 
     it('decodes fnSig correctly', () => {
         const calldata = sp.buildPrivateTransferCalldata(BASE_TRANSFER);
         const result = decodePrecompileCalldata(SP_ADDR, calldata);
-        expect(result?.fnSig).toBe('privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256)');
+        expect(result?.fnSig).toBe('privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32)');
+    });
+
+    it('round-trips circuitVersion', () => {
+        const calldata = sp.buildPrivateTransferCalldata({ ...BASE_TRANSFER, circuitVersion: 5 });
+        const result = decodePrecompileCalldata(SP_ADDR, calldata);
+        expect(result?.args['circuitVersion']).toBe(5n);
     });
 
     it('round-trips root', () => {
@@ -189,8 +203,8 @@ describe('decodePrecompileCalldata — privateTransfer', () => {
         const calldata = sp.buildPrivateTransferCalldata({
             ...BASE_TRANSFER,
             outputs: [
-                { commitment: COMMITMENT, encryptedMemo: new Uint8Array(176) },
-                { commitment: COMMITMENT, encryptedMemo: new Uint8Array(176) },
+                { commitment: COMMITMENT, encryptedMemo: new Uint8Array(180) },
+                { commitment: COMMITMENT, encryptedMemo: new Uint8Array(180) },
             ],
         });
         const result = decodePrecompileCalldata(SP_ADDR, calldata);

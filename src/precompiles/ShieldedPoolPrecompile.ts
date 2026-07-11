@@ -76,7 +76,8 @@ export class ShieldedPoolPrecompile {
 
     /**
      * Returns the ABI-encoded calldata for
-     * `privateTransfer(bytes, bytes32, bytes32[], bytes32[], bytes[], uint32, uint256)`.
+     * `privateTransfer(bytes, bytes32, bytes32[], bytes32[], bytes[], uint32, uint256, uint32)`.
+     * The trailing `uint32` is the circuit version the input notes were created under.
      */
     buildPrivateTransferCalldata(params: PrivateTransferParams): string {
         const nullifiers = params.inputs.map((i) => fromHex(i.nullifier));
@@ -98,7 +99,8 @@ export class ShieldedPoolPrecompile {
             { type: 'bytes32[]', value: commitments },
             { type: 'bytes[]', value: memos },
             { type: 'uint', value: BigInt(params.assetId) },
-            { type: 'uint', value: params.fee ?? 0n }
+            { type: 'uint', value: params.fee ?? 0n },
+            { type: 'uint', value: BigInt(params.circuitVersion) }
         );
     }
 
@@ -137,7 +139,7 @@ export class ShieldedPoolPrecompile {
         const changeCommitmentHex = params.changeCommitment ?? '0x' + '00'.repeat(32);
         const changeCommitment = fromHex(changeCommitmentHex);
 
-        // changeEncryptedMemo: 176 bytes or empty (0-length) for total unshield
+        // changeEncryptedMemo: 180 bytes or empty (0-length) for total unshield
         const changeEncryptedMemo = params.changeEncryptedMemo ?? new Uint8Array();
 
         return encodeHex(
@@ -150,7 +152,8 @@ export class ShieldedPoolPrecompile {
             { type: 'bytes32', value: recipientBytes },
             { type: 'uint', value: params.fee ?? 0n },
             { type: 'bytes32', value: changeCommitment },
-            { type: 'bytes', value: changeEncryptedMemo }
+            { type: 'bytes', value: changeEncryptedMemo },
+            { type: 'uint', value: BigInt(params.circuitVersion) }
         );
     }
 
@@ -207,7 +210,7 @@ export class ShieldedPoolPrecompile {
 
     /**
      * Returns the ABI-encoded calldata for
-     * `claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes)`.
+     * `claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes,uint32)`.
      *
      * ABI layout (params after selector):
      * - `commitment`    — bytes32 (fixed)
@@ -216,6 +219,7 @@ export class ShieldedPoolPrecompile {
      * - `memo`          — bytes   (dynamic)
      * - `proof`         — bytes   (dynamic, 128 bytes Groth16)
      * - `publicSignals` — bytes   (dynamic, 76 bytes)
+     * - `circuitVersion` — uint32 (fixed, right-aligned)
      *
      * The validator identity is derived from `msg.sender` in the precompile —
      * do NOT include it in the calldata.
@@ -244,7 +248,8 @@ export class ShieldedPoolPrecompile {
             { type: 'uint', value: BigInt(params.assetId) },
             { type: 'bytes', value: params.encryptedMemo },
             { type: 'bytes', value: params.proof },
-            { type: 'bytes', value: params.publicSignals }
+            { type: 'bytes', value: params.publicSignals },
+            { type: 'uint', value: BigInt(params.circuitVersion) }
         );
     }
 

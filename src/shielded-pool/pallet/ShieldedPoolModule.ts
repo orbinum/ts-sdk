@@ -65,7 +65,7 @@ export class ShieldedPoolModule {
      * Withdraws tokens from the shielded pool to a public address.
      * Submits as an UNSIGNED (gasless) transaction — fee is embedded in the ZK proof.
      * Pass a `signer` to fall back to signed submission (e.g. for testing).
-     * Extrinsic: shieldedPool.unshield(proof, merkleRoot, nullifier, assetId, amount, recipient, fee)
+     * Extrinsic: shieldedPool.unshield(proof, merkleRoot, nullifier, assetId, amount, recipient, fee, changeCommitment, changeEncryptedMemo, relayer, circuitVersion)
      */
     async unshield(
         params: UnshieldParams,
@@ -99,6 +99,7 @@ export class ShieldedPoolModule {
             change_commitment: changeCommitment,
             change_encrypted_memo: changeEncryptedMemo,
             relayer: undefined, // Option<H160> — None for direct Substrate submissions
+            circuit_version: params.circuitVersion,
         });
         if (signer) {
             return toTxResult(
@@ -114,7 +115,7 @@ export class ShieldedPoolModule {
      * Performs a private (shielded) transfer between two notes.
      * Submits as an UNSIGNED (gasless) transaction — fee is embedded in the ZK proof.
      * Pass a `signer` to fall back to signed submission (e.g. for testing).
-     * Extrinsic: shieldedPool.privateTransfer(proof, merkleRoot, nullifiers, commitments, memos, assetId, fee)
+     * Extrinsic: shieldedPool.privateTransfer(proof, merkleRoot, nullifiers, commitments, memos, assetId, fee, relayer, circuitVersion)
      */
     async privateTransfer(
         params: PrivateTransferParams,
@@ -141,6 +142,7 @@ export class ShieldedPoolModule {
             asset_id: params.assetId,
             fee: params.fee ?? 0n,
             relayer: undefined, // Option<H160> — None for direct Substrate submissions
+            circuit_version: params.circuitVersion,
         });
         if (signer) {
             return toTxResult(
@@ -184,7 +186,7 @@ export class ShieldedPoolModule {
      * This is a SIGNED transaction — the relayer must sign it with their wallet.
      * Before calling this, generate a ZK value proof with generateFeeClaimProof() (not yet implemented).
      *
-     * Extrinsic: shieldedPool.claim_shielded_fees(commitment, amount, asset_id, memo, proof, public_signals)
+     * Extrinsic: shieldedPool.claim_shielded_fees(commitment, amount, asset_id, memo, proof, public_signals, circuit_version)
      */
     async claimShieldedFees(
         params: ClaimShieldedFeesParams,
@@ -200,6 +202,7 @@ export class ShieldedPoolModule {
             encrypted_memo: params.encryptedMemo,
             proof: params.proof,
             public_signals: params.publicSignals,
+            circuit_version: params.circuitVersion,
         });
         return toTxResult(
             await (txOptions !== undefined

@@ -170,6 +170,37 @@ describe('selectNotes', () => {
         expect(r1![0]).toBe(r2![0]);
         expect(r1![1]).toBe(r2![1]);
     });
+
+    // ── version-aware pairing ─────────────────────────────────────────────────
+    // Both transfer inputs prove against ONE VK, so a pair must share a version.
+
+    it('does not pair notes of different circuit versions', () => {
+        // 50 (v1) + 50 (v2) = 100 covers needed, but versions differ → no valid pair.
+        const v1 = note(50n, { circuitVersion: 1 });
+        const v2 = note(50n, { circuitVersion: 2 });
+        expect(selectNotes([v1, v2], 100n)).toBeNull();
+    });
+
+    it('pairs two notes of the same version even when a cheaper cross-version pair exists', () => {
+        // Cross pair (40v1 + 70v2)=110 is cheaper-sorted but forbidden;
+        // same-version pair (70v2 + 60v2)=130 is the only legal one.
+        const a = note(40n, { circuitVersion: 1 });
+        const b = note(70n, { circuitVersion: 2 });
+        const c = note(60n, { circuitVersion: 2 });
+        const result = selectNotes([a, b, c], 100n);
+        expect(result).not.toBeNull();
+        expect(result![0]!.circuitVersion).toBe(2);
+        expect(result![1]!.circuitVersion).toBe(2);
+    });
+
+    it('a single note of any version still wins over the version-pair rule', () => {
+        // One v2 note alone covers needed → priority 1, no pairing considered.
+        const single = note(120n, { circuitVersion: 2 });
+        const other = note(90n, { circuitVersion: 1 });
+        const result = selectNotes([other, single], 100n);
+        expect(result![0]).toBe(single);
+        expect(result![1]).toBeNull();
+    });
 });
 
 // ─── buildDummyTransferInput ──────────────────────────────────────────────────

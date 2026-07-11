@@ -22,16 +22,16 @@ const counterpartyPk = new Uint8Array(32).fill(0x09);
 // ─── ENCRYPTED_MEMO_SIZE ──────────────────────────────────────────────────────
 
 describe('ENCRYPTED_MEMO_SIZE', () => {
-  it('equals 176 (v2 ECDH)', () => {
-    expect(ENCRYPTED_MEMO_SIZE).toBe(176);
+  it('equals 180 (v2 ECDH)', () => {
+    expect(ENCRYPTED_MEMO_SIZE).toBe(180);
   });
 });
 
 // ─── EncryptedMemo.dummy ──────────────────────────────────────────────────────
 
 describe('EncryptedMemo.dummy', () => {
-  it('returns exactly 176 bytes', () => {
-    expect(EncryptedMemo.dummy()).toHaveLength(176);
+  it('returns exactly 180 bytes', () => {
+    expect(EncryptedMemo.dummy()).toHaveLength(180);
   });
 
   it('is all zeros', () => {
@@ -49,7 +49,7 @@ describe('EncryptedMemo.dummy', () => {
 // ─── EncryptedMemo.encrypt ────────────────────────────────────────────────────
 
 describe('EncryptedMemo.encrypt', () => {
-  it('returns exactly 176 bytes', () => {
+  it('returns exactly 180 bytes', () => {
     const memo = EncryptedMemo.encrypt(value, ownerPk, blinding, assetId, commitment, viewingPublicKey);
     expect(memo).toHaveLength(ENCRYPTED_MEMO_SIZE);
   });
@@ -178,7 +178,7 @@ describe('EncryptedMemo.decrypt — ECDH round-trip', () => {
 // ─── EncryptedMemo.encryptPublic ──────────────────────────────────────────────
 
 describe('EncryptedMemo.encryptPublic', () => {
-  it('returns exactly 176 bytes', () => {
+  it('returns exactly 180 bytes', () => {
     const memo = EncryptedMemo.encryptPublic(100n, new Uint8Array(32), new Uint8Array(32), 0, new Uint8Array(32));
     expect(memo).toHaveLength(ENCRYPTED_MEMO_SIZE);
   });
@@ -207,7 +207,7 @@ describe('EncryptedMemo.extractSharedSecret', () => {
   it('ECDH commutativity — extracted secret matches the one used during encrypt', () => {
     // Use a fixed ephSk so the sender-side sharedSecret is reproducible.
     const ephSk = new Uint8Array(32).fill(0x77);
-    const memo = EncryptedMemo.encrypt(value, new Uint8Array(32), new Uint8Array(32), 0, commitment, viewingPublicKey, new Uint8Array(32), ephSk);
+    const memo = EncryptedMemo.encrypt(value, new Uint8Array(32), new Uint8Array(32), 0, commitment, viewingPublicKey, new Uint8Array(32), 1, ephSk);
     const extracted = EncryptedMemo.extractSharedSecret(memo, viewingSecretKey);
     expect(extracted).not.toBeNull();
     expect(extracted!.every((b) => b === 0)).toBe(false); // non-zero shared secret
@@ -242,7 +242,7 @@ describe('EncryptedMemo.extractSharedSecret', () => {
     const memo = EncryptedMemo.encrypt(value, new Uint8Array(32), new Uint8Array(32), 0, commitment, viewingPublicKey);
     // Corrupt the ephPk region with non-zero garbage that won't be a valid point
     const corrupted = new Uint8Array(memo);
-    corrupted.fill(0xff, 12 + 124); // overwrite ephPk bytes with 0xff
+    corrupted.fill(0xff, 12 + 136); // overwrite ephPk bytes with 0xff (ephPk starts at 148)
     expect(EncryptedMemo.extractSharedSecret(corrupted, viewingSecretKey)).toBeNull();
   });
 
@@ -265,28 +265,28 @@ describe('EncryptedMemo.encrypt with ephSkOverride', () => {
   ephSk.fill(0x13);
   ephSk[0] = 0x01;
 
-  it('produces a 176-byte memo', () => {
-    const memo = EncryptedMemo.encrypt(value, new Uint8Array(32), new Uint8Array(32), 0, commitment, viewingPublicKey, new Uint8Array(32), ephSk);
+  it('produces a 180-byte memo', () => {
+    const memo = EncryptedMemo.encrypt(value, new Uint8Array(32), new Uint8Array(32), 0, commitment, viewingPublicKey, new Uint8Array(32), 1, ephSk);
     expect(memo).toHaveLength(ENCRYPTED_MEMO_SIZE);
   });
 
   it('two calls with same ephSkOverride produce different nonces but same ephPk region', () => {
-    const memoA = EncryptedMemo.encrypt(value, new Uint8Array(32), new Uint8Array(32), 0, commitment, viewingPublicKey, new Uint8Array(32), ephSk);
-    const memoB = EncryptedMemo.encrypt(value, new Uint8Array(32), new Uint8Array(32), 0, commitment, viewingPublicKey, new Uint8Array(32), ephSk);
+    const memoA = EncryptedMemo.encrypt(value, new Uint8Array(32), new Uint8Array(32), 0, commitment, viewingPublicKey, new Uint8Array(32), 1, ephSk);
+    const memoB = EncryptedMemo.encrypt(value, new Uint8Array(32), new Uint8Array(32), 0, commitment, viewingPublicKey, new Uint8Array(32), 1, ephSk);
     // nonce (bytes 0..12) is always random → should differ
     const nonceA = memoA.slice(0, 12);
     const nonceB = memoB.slice(0, 12);
     expect(nonceA).not.toEqual(nonceB);
-    // ephPk region (bytes 144..176) is derived from ephSk → must be identical
-    const ephPkA = memoA.slice(12 + 132);
-    const ephPkB = memoB.slice(12 + 132);
+    // ephPk region (bytes 148..180) is derived from ephSk → must be identical
+    const ephPkA = memoA.slice(12 + 136);
+    const ephPkB = memoB.slice(12 + 136);
     expect(ephPkA).toEqual(ephPkB);
   });
 
   it('memo with ephSkOverride is decryptable', () => {
     const memo = EncryptedMemo.encrypt(
       value, new Uint8Array(32).fill(0x01), new Uint8Array(32).fill(0x02),
-      7, commitment, viewingPublicKey, new Uint8Array(32), ephSk
+      7, commitment, viewingPublicKey, new Uint8Array(32), 1, ephSk
     );
     const result = EncryptedMemo.decrypt(memo, commitment, viewingSecretKey);
     expect(result).not.toBeNull();
@@ -295,7 +295,7 @@ describe('EncryptedMemo.encrypt with ephSkOverride', () => {
   });
 
   it('extractSharedSecret on ephSkOverride memo is consistent with manual ECDH', () => {
-    const memo = EncryptedMemo.encrypt(value, new Uint8Array(32), new Uint8Array(32), 0, commitment, viewingPublicKey, new Uint8Array(32), ephSk);
+    const memo = EncryptedMemo.encrypt(value, new Uint8Array(32), new Uint8Array(32), 0, commitment, viewingPublicKey, new Uint8Array(32), 1, ephSk);
     const extracted = EncryptedMemo.extractSharedSecret(memo, viewingSecretKey);
     expect(extracted).not.toBeNull();
     expect(extracted!.some((b) => b !== 0)).toBe(true);
@@ -303,7 +303,7 @@ describe('EncryptedMemo.encrypt with ephSkOverride', () => {
 
   it('throws when ephSkOverride is not 32 bytes', () => {
     expect(() =>
-      EncryptedMemo.encrypt(value, new Uint8Array(32), new Uint8Array(32), 0, commitment, viewingPublicKey, new Uint8Array(32), new Uint8Array(16))
+      EncryptedMemo.encrypt(value, new Uint8Array(32), new Uint8Array(32), 0, commitment, viewingPublicKey, new Uint8Array(32), 1, new Uint8Array(16))
     ).toThrow('ephSkOverride must be 32 bytes');
   });
 });

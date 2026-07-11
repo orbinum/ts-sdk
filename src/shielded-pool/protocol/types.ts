@@ -30,6 +30,8 @@ export type DecryptedMemo = {
     assetId: bigint;
     /** Counterparty BabyJubJub Ax coordinate. Zero for shield/unshield notes. */
     counterpartyPk: bigint;
+    /** ZK circuit version the note is spent under, recovered from the memo plaintext. */
+    circuitVersion: number;
 };
 
 /** Parameters for shieldedPool.shield — deposits one note into the pool. */
@@ -40,7 +42,7 @@ export type ShieldParams = {
     amount: bigint;
     /** 0x-prefixed 32-byte commitment hex */
     commitment: string;
-    /** Encrypted memo bytes (168 bytes). Required — notes without valid memos are irrecoverable. */
+    /** Encrypted memo bytes (180 bytes). Required — notes without valid memos are irrecoverable. */
     encryptedMemo: Uint8Array;
 };
 
@@ -67,11 +69,13 @@ export type UnshieldParams = {
      */
     changeCommitment?: string;
     /**
-     * Encrypted memo for the change note (176 bytes).
+     * Encrypted memo for the change note (180 bytes).
      * Required for partial unshield so the change note can be recovered via blockchain scan.
      * Omit for total unshield.
      */
     changeEncryptedMemo?: Uint8Array;
+    /** Circuit version the spent note was created under. Verified against that version's VK. */
+    circuitVersion: number;
 };
 
 export type PrivateTransferInput = {
@@ -84,7 +88,7 @@ export type PrivateTransferInput = {
 export type PrivateTransferOutput = {
     /** 0x-prefixed commitment hex */
     commitment: string;
-    /** Encrypted memo bytes (168 bytes). Required — notes without valid memos are irrecoverable. */
+    /** Encrypted memo bytes (180 bytes). Required — notes without valid memos are irrecoverable. */
     encryptedMemo: Uint8Array;
 };
 
@@ -102,6 +106,8 @@ export type PrivateTransferParams = {
     /** Gasless fee in planck (default 0n; input_sum == output_sum + fee in circuit).
      *  The fee is paid to the block author (validator) by the pallet runtime. */
     fee?: bigint;
+    /** Circuit version the input notes were created under. Verified against that version's VK. */
+    circuitVersion: number;
 };
 
 /** Input params for NoteBuilder.build(). All fields except value have defaults. */
@@ -118,7 +124,7 @@ export type NoteInput = {
     spendingKey?: bigint;
     /**
      * 32-byte LE-encoded packed BJJ viewing public key of the recipient (from their privacy address).
-     * When provided, NoteBuilder.build() will auto-generate the 168-byte ECDH-encrypted memo.
+     * When provided, NoteBuilder.build() will auto-generate the 180-byte ECDH-encrypted memo.
      * Omit to skip memo generation (use buildMemo() separately if needed).
      */
     viewingPublicKey?: Uint8Array;
@@ -175,7 +181,7 @@ export type ZkNote = {
     /** 0x-prefixed 32-byte little-endian hex nullifier. */
     nullifierHex: string;
     /**
-     * 168-byte encrypted memo (ChaCha20-Poly1305 ECDH) as number[] for SCALE encoding.
+     * 180-byte encrypted memo (ChaCha20-Poly1305 ECDH) as number[] for SCALE encoding.
      * Always populated: uses a dummy memo when no viewingPublicKey is provided.
      */
     memo: number[];
@@ -191,7 +197,7 @@ export type ShieldBatchItem = {
     amount: bigint;
     /** 0x-prefixed 32-byte commitment hex */
     commitment: string;
-    /** Encrypted memo bytes (168 bytes). Required — notes without valid memos are irrecoverable. */
+    /** Encrypted memo bytes (180 bytes). Required — notes without valid memos are irrecoverable. */
     encryptedMemo: Uint8Array;
 };
 
@@ -219,6 +225,8 @@ export type ClaimShieldedFeesParams = {
     proof: Uint8Array;
     /** 76-byte public signals buffer (commitment || amount_u64_le || assetId_u32_le || owner_hash) */
     publicSignals: Uint8Array;
-    /** Encrypted memo bytes (168 bytes). Required — notes without valid memos are irrecoverable. */
+    /** Encrypted memo bytes (180 bytes). Required — notes without valid memos are irrecoverable. */
     encryptedMemo: Uint8Array;
+    /** Circuit version of the fee-claim note. Verified against that version's VK. */
+    circuitVersion: number;
 };

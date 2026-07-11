@@ -19,7 +19,7 @@ import { deriveStealthOwnerPk, deriveStealthSk } from '../../utils/stealth';
 import { recoverOwnerPkPoint } from '../../utils/bjj';
 import { fromHex, toHex } from '../../utils/hex';
 import { bigintTo32Le, bytesToBigintLE } from '../../utils/bytes';
-import { CURRENT_CIRCUIT_VERSION, type ScanCommitment, type ZkNote } from './types';
+import { type ScanCommitment, type ZkNote } from './types';
 export type { ScanCommitment };
 
 // ─── Exported helpers ─────────────────────────────────────────────────────────
@@ -136,7 +136,7 @@ export function tryDecryptNoteVerbose(
             ownerPk: effectiveOwnerPk,
             blinding: plaintext.blinding,
             spendingKey: effectiveSpendingKey,
-            circuitVersion: CURRENT_CIRCUIT_VERSION,
+            circuitVersion: plaintext.circuitVersion,
             spent: false,
             spentAt: null,
             commitment: recomputed,

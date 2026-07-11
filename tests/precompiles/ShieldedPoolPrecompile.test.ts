@@ -33,7 +33,7 @@ const SHIELD_PARAMS: ShieldParams = {
   assetId: 1,
   amount: 1_000_000n,
   commitment: COMMITMENT,
-  encryptedMemo: new Uint8Array(176),
+  encryptedMemo: new Uint8Array(180),
 };
 
 const UNSHIELD_PARAMS: UnshieldParams = {
@@ -43,14 +43,16 @@ const UNSHIELD_PARAMS: UnshieldParams = {
   assetId: 1,
   amount: 500_000n,
   recipientAddress: RECIPIENT,
+  circuitVersion: 1,
 };
 
 const TRANSFER_PARAMS: PrivateTransferParams = {
   proof: PROOF,
   merkleRoot: ROOT,
   inputs:  [{ nullifier: NULLIFIER, commitment: COMMITMENT }],
-  outputs: [{ commitment: COMMITMENT, encryptedMemo: new Uint8Array(176) }],
+  outputs: [{ commitment: COMMITMENT, encryptedMemo: new Uint8Array(180) }],
   assetId: 0,
+  circuitVersion: 1,
 };
 
 // ─── buildShieldCalldata ──────────────────────────────────────────────────────
@@ -78,7 +80,7 @@ describe('ShieldedPoolPrecompile.buildShieldCalldata', () => {
     const precompile = new ShieldedPoolPrecompile(mockEvm());
     expect(() =>
       precompile.buildShieldCalldata({ ...SHIELD_PARAMS, encryptedMemo: new Uint8Array(104) })
-    ).toThrow(/EncryptedMemo: invalid size.*expected 176 bytes, got 104/);
+    ).toThrow(/EncryptedMemo: invalid size.*expected 180 bytes, got 104/);
   });
 });
 
@@ -104,7 +106,7 @@ describe('ShieldedPoolPrecompile.buildPrivateTransferCalldata', () => {
     const two = precompile.buildPrivateTransferCalldata({
       ...TRANSFER_PARAMS,
       inputs:  [{ nullifier: NULLIFIER, commitment: COMMITMENT }, { nullifier: NULLIFIER, commitment: COMMITMENT }],
-      outputs: [{ commitment: COMMITMENT, encryptedMemo: new Uint8Array(176) }, { commitment: COMMITMENT, encryptedMemo: new Uint8Array(176) }],
+      outputs: [{ commitment: COMMITMENT, encryptedMemo: new Uint8Array(180) }, { commitment: COMMITMENT, encryptedMemo: new Uint8Array(180) }],
     });
     expect(two.length).toBeGreaterThan(one.length);
   });
@@ -137,7 +139,7 @@ describe('ShieldedPoolPrecompile.buildPrivateTransferCalldata', () => {
       outputs: [{ commitment: COMMITMENT, encryptedMemo: new Uint8Array(10) }],
     };
     expect(() => precompile.buildPrivateTransferCalldata(params)).toThrow(
-      /EncryptedMemo: invalid size.*expected 176 bytes, got 10/
+      /EncryptedMemo: invalid size.*expected 180 bytes, got 10/
     );
   });
 });
@@ -299,7 +301,7 @@ const CSF_COMMITMENT   = '0x' + '11'.repeat(32);
 const CSF_AMOUNT       = 500_000n;
 const CSF_ASSET_ID     = 0;
 const CSF_PROOF        = new Uint8Array(128).fill(0x01); // 128-byte Groth16 proof
-const CSF_MEMO         = new Uint8Array(176);
+const CSF_MEMO         = new Uint8Array(180);
 const CSF_SIGNALS      = makePublicSignals(CSF_COMMITMENT, CSF_AMOUNT, CSF_ASSET_ID);
 
 const CLAIM_PARAMS: ClaimShieldedFeesParams = {
@@ -309,6 +311,7 @@ const CLAIM_PARAMS: ClaimShieldedFeesParams = {
   proof:         CSF_PROOF,
   publicSignals: CSF_SIGNALS,
   encryptedMemo: CSF_MEMO,
+  circuitVersion: 1,
 };
 
 // ─── buildClaimShieldedFeesCalldata ───────────────────────────────────────────
@@ -320,10 +323,21 @@ describe('ShieldedPoolPrecompile.buildClaimShieldedFeesCalldata', () => {
     expect(calldata.startsWith(toHex(SP_SEL.CLAIM_SHIELDED_FEES))).toBe(true);
   });
 
-  it('selector bytes are 0x42e1e74c', () => {
+  it('selector bytes are 0x88d9deba', () => {
     const precompile = new ShieldedPoolPrecompile(mockEvm());
     const calldata = precompile.buildClaimShieldedFeesCalldata(CLAIM_PARAMS);
-    expect(calldata.slice(0, 10)).toBe('0x42e1e74c');
+    expect(calldata.slice(0, 10)).toBe('0x88d9deba');
+  });
+
+  it('encodes circuitVersion in the 7th head slot (bytes [192..224])', () => {
+    const precompile = new ShieldedPoolPrecompile(mockEvm());
+    const calldata = precompile.buildClaimShieldedFeesCalldata({
+      ...CLAIM_PARAMS,
+      circuitVersion: 3,
+    });
+    // head slot 7 = bytes [192..224]; hex offset after '0x' + selector(8) = 10 + 192*2
+    const slot = calldata.slice(10 + 192 * 2, 10 + 224 * 2);
+    expect(BigInt('0x' + slot)).toBe(3n);
   });
 
   it('returns a 0x-prefixed hex string', () => {
@@ -389,11 +403,11 @@ describe('ShieldedPoolPrecompile.buildClaimShieldedFeesCalldata', () => {
     void calldataBytes; // suppress unused warning
   });
 
-  it('minimum calldata length: selector(4) + head(6×32) + 3 dynamic tails', () => {
+  it('minimum calldata length: selector(4) + head(7×32) + 3 dynamic tails', () => {
     const precompile = new ShieldedPoolPrecompile(mockEvm());
     const calldata = precompile.buildClaimShieldedFeesCalldata(CLAIM_PARAMS);
-    // 4 + 192 (head) + ≥3×32 (length word per tail) = at least 4 + 192 + 96 = 292 bytes = 584 hex chars + '0x'
-    expect(calldata.length).toBeGreaterThanOrEqual(2 + (4 + 192 + 96) * 2);
+    // head is now 7 slots (added trailing uint32 circuitVersion): 4 + 224 (head) + ≥3×32 tails
+    expect(calldata.length).toBeGreaterThanOrEqual(2 + (4 + 224 + 96) * 2);
   });
 
   it('throws when proof is empty', () => {
@@ -430,7 +444,7 @@ describe('ShieldedPoolPrecompile.buildClaimShieldedFeesCalldata', () => {
         ...CLAIM_PARAMS,
         encryptedMemo: new Uint8Array(100),
       })
-    ).toThrow(/EncryptedMemo: invalid size.*expected 176 bytes, got 100/);
+    ).toThrow(/EncryptedMemo: invalid size.*expected 180 bytes, got 100/);
   });
 });
 
