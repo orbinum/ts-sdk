@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { OrbinumClient } from '../../src/client/OrbinumClient';
 import { SubstrateClient } from '../../src/substrate/SubstrateClient';
 import { EvmClient } from '../../src/evm/EvmClient';
-import { IndexerClient } from '../../src/indexer/IndexerClient';
 import { EvmExplorer } from '../../src/evm-explorer/EvmExplorer';
 
 // ─── Module mocks ─────────────────────────────────────────────────────────────
@@ -15,9 +14,6 @@ vi.mock('../../src/substrate/SubstrateClient', () => ({
 
 vi.mock('../../src/evm/EvmClient', () => ({
     EvmClient: vi.fn(),
-}));
-vi.mock('../../src/indexer/IndexerClient', () => ({
-    IndexerClient: vi.fn(),
 }));
 
 vi.mock('../../src/evm-explorer/EvmExplorer', () => ({
@@ -122,31 +118,6 @@ describe('OrbinumClient.connect', () => {
 
         expect(client.evm).not.toBeNull();
         expect(vi.mocked(EvmClient)).toHaveBeenCalledWith('http://localhost:9933');
-    });
-
-    it('sets indexer to null when indexerUrl is not provided', async () => {
-        const substrate = makeSubstrate();
-        vi.mocked(SubstrateClient.connect).mockResolvedValue(substrate);
-
-        const client = await OrbinumClient.connect({ substrateWs: 'ws://localhost:9944' });
-
-        expect(client.indexer).toBeNull();
-    });
-
-    it('creates IndexerClient when indexerUrl is provided', async () => {
-        const substrate = makeSubstrate();
-        vi.mocked(SubstrateClient.connect).mockResolvedValue(substrate);
-        vi.mocked(IndexerClient).mockImplementation(function() { return {}; } as never);
-
-        const client = await OrbinumClient.connect({
-            substrateWs: 'ws://localhost:9944',
-            indexerUrl: 'https://indexer.example.com',
-        });
-
-        expect(client.indexer).not.toBeNull();
-        expect(vi.mocked(IndexerClient)).toHaveBeenCalledWith({
-            baseUrl: 'https://indexer.example.com',
-        });
     });
 
     it('sets evmExplorer to null when evmRpc is not provided', async () => {

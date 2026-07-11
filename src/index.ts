@@ -280,36 +280,6 @@ export type {
 } from './account-mapping/types/pallet-extrinsics';
 // SignatureScheme already exported from './account-mapping/types' above
 
-// ─── Indexer ──────────────────────────────────────────────────────────────────
-export { IndexerClient } from './indexer';
-export type {
-    IndexerClientConfig,
-    PaginatedResult,
-    IndexedBlock,
-    IndexedExtrinsic,
-    IndexedEvmTx,
-    IndexedSession,
-    IndexedValidator,
-    IndexerStats,
-    IndexerActivity,
-    ActivityBucket,
-    ShieldedAddressEvent,
-    ShieldedCommitment,
-    SpentNullifier,
-    NullifierChunkInfo,
-    NullifierManifest,
-    NullifierTail,
-    PrivateTransferTimestamp,
-    Unshield,
-    MerkleRoot,
-    NullifierStatusResult,
-    StealthScanHint,
-    Relayer,
-    RelayFeeEvent,
-    RelayFeeSummaryEntry,
-    RegisteredAsset,
-} from './indexer';
-
 // ─── Utilities ───────────────────────────────────────────────────────────────
 export { formatBalance, formatORB } from './utils/format';
 export type { FormatOptions } from './utils/format';

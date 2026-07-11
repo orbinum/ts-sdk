@@ -4,8 +4,6 @@ export type OrbinumClientConfig = {
     substrateWs: string;
     /** HTTP URL of the EVM JSON-RPC endpoint (e.g. `"http://localhost:9933"`). Omit to disable EVM support. */
     evmRpc?: string;
-    /** Base URL of the Orbinum indexer REST API (e.g. `"https://indexer.orbinum.io"`). Omit to disable indexer support. */
-    indexerUrl?: string;
     /** Timeout for the initial WebSocket handshake in milliseconds. Default: `15_000`. */
     connectTimeoutMs?: number;
     /**
