@@ -20,6 +20,7 @@ function makeNote(overrides: Partial<ZkNote> = {}): ZkNote {
         ownerPk: 0n,
         blinding: 99n,
         spendingKey: 7n,
+        circuitVersion: 1,
         commitment: BigInt(`0x${'ab'.repeat(32)}`),
         nullifier: BigInt(`0x${'cd'.repeat(32)}`),
         commitmentHex: COMMIT_HEX,
@@ -183,5 +184,15 @@ describe('decryptNoteRecord', () => {
         expect(decrypted.commitment).toBe(note.commitment);
         expect(decrypted.nullifier).toBe(note.nullifier);
         expect(decrypted.counterpartyPk).toBe(note.counterpartyPk);
+    });
+
+    it('lanza si la nota descifrada no lleva circuitVersion (fail-closed, cero legacy)', async () => {
+        const key = await makeKey(4);
+        const blindKey = await makeBlindKey(4);
+        // Encrypt a note with circuitVersion stripped — an invalid/foreign record.
+        const noteNoVersion = makeNote();
+        delete (noteNoVersion as Partial<ZkNote>).circuitVersion;
+        const rec = await encryptNote(key, blindKey, noteNoVersion as ZkNote);
+        await expect(decryptNoteRecord(key, rec)).rejects.toThrow(/missing circuitVersion/);
     });
 });

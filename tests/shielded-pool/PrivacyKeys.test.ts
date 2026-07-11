@@ -265,9 +265,9 @@ describe('deriveViewingPublicKey', () => {
   it('ivk es un punto BJJ válido (puede usarse en EncryptedMemo.encrypt)', () => {
     const ivk = deriveViewingPublicKey(ivsk);
     const commitment = new Uint8Array(32).fill(0x05);
-    // Si ivk es inválido, encrypt() lanza. Si es válido, devuelve 176 bytes.
+    // Si ivk es inválido, encrypt() lanza. Si es válido, devuelve 180 bytes.
     const memo = EncryptedMemo.encrypt(1000n, new Uint8Array(32), new Uint8Array(32), 0, commitment, ivk);
-    expect(memo).toHaveLength(176);
+    expect(memo).toHaveLength(180);
   });
 
   it('end-to-end ECDH: memo cifrado con ivk es descifrable con ivsk', () => {

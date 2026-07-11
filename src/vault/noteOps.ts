@@ -59,6 +59,11 @@ export async function encryptNote(
  */
 export async function decryptNoteRecord(key: CryptoKey, rec: EncryptedNoteRecord): Promise<ZkNote> {
     const note = (await decryptJson(key, rec.iv, rec.ciphertext)) as ZkNote;
+    if (typeof note.circuitVersion !== 'number') {
+        throw new Error(
+            'decryptNoteRecord: note is missing circuitVersion (invalid or corrupt record)'
+        );
+    }
     return applyNoteStatus(note, {
         ...(rec.spent !== undefined && { spent: rec.spent }),
         spentAt: rec.spentAt ?? null,

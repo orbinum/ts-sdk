@@ -5,6 +5,30 @@ All notable changes to the Orbinum TypeScript SDK will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.12.0] - 2026-07-10
+
+### Changed (BREAKING — encrypted memo wire format)
+
+- **The encrypted memo grew 176 → 180 bytes (plaintext 116 → 120)** to carry the note's `circuit_version` (`src/shielded-pool/protocol/memo.ts`, `EncryptedMemo.ts`). `circuit_version` (u32 LE) now lives in the memo plaintext at offset `[116, 120)`, so a note is **self-contained**: a scan-recovered note keeps its true circuit version without any indexer lookup. `serializeMemo` and `EncryptedMemo.encrypt` / `encryptPublic` gained a `circuitVersion` parameter; `ENCRYPTED_MEMO_SIZE` is now `180`, `MEMO_PLAINTEXT_SIZE` `120`, `CIPHERTEXT_SIZE` `136`. `NoteDecryptor` reads the version from the decrypted memo (not from any feed), and `ScanCommitment.circuitVersion` / `StealthScanHint.circuitVersion` were **removed** (the version no longer travels in the scan feed). Matches the paired node change (`orbinum-encrypted-memo` plaintext 120, `MAX_ENCRYPTED_MEMO_SIZE` 180, runtime `spec_version` 6). **Breaking:** memos written by earlier versions (176 bytes) cannot be decrypted, and vice-versa.
+
+### Added
+
+- **Per-note circuit version** (`src/shielded-pool/protocol/types.ts`, `NoteBuilder`, `NoteDecryptor`, `vault/noteOps.ts`): `ZkNote` now carries a required `circuitVersion` so a note is always proven/verified against the circuit that created it, even after a VK rotation. `NoteBuilder.build` stamps it (default `CURRENT_CIRCUIT_VERSION` = 1, exported; callers may pass an explicit version resolved from the chain) and writes it into the note's encrypted memo; on scan, `NoteDecryptor` recovers it from that memo. Fail-closed: `decryptNoteRecord` throws if a vault record has no `circuitVersion` (invalid/corrupt) rather than defaulting.
+- **`CircuitVersionResolver`** (`src/shielded-pool/CircuitVersionResolver.ts`, exported; wired onto `OrbinumClient.circuitVersionResolver`): the single fail-closed choke point for spending a note under its own circuit version. Given a note's `circuitVersion`, it pins the artifact provider to that version, cross-checks the prover's VK hash against the chain's VK hash for that version, confirms the chain still lists it in `supportedVersions`, and returns `{ provider, version }` for the proof generator and the extrinsic. Throws before any proof is generated on an unsupported version, a VK-hash mismatch (CDN vs chain), or a prover/chain version disagreement — never falls back to the active version.
+- **`circuitsBaseUrl` config option** on `OrbinumClientConfig` (and `ClientProviderConfig`): points the `CircuitVersionResolver`'s artifact provider at a self-hosted circuits mirror (`manifest.json` + artifacts) instead of the default npm CDN (unpkg). Enables serving a multi-version manifest (e.g. during a VK rotation). Omit to keep the CDN default — backward-compatible.
+
+### Changed
+
+- **Spend extrinsics now carry a required `circuitVersion`** (`ShieldedPoolModule.unshield` / `privateTransfer` / `claimShieldedFees`, and the corresponding `UnshieldParams` / `PrivateTransferParams` / `ClaimShieldedFeesParams`). It is forwarded to the pallet so the proof is verified against that version's VK. Matches the node's consensus change (spec_version 4 / transaction_version 2).
+- **EVM precompile ABI: added a trailing `uint32 circuitVersion`** to `privateTransfer`, `unshield` and `claimShieldedFees` (`src/precompiles/{addresses,ShieldedPoolPrecompile,decode}.ts`). Selectors change (**breaking**): `privateTransfer` → `0x66ed2cd4`, `unshield` → `0x4e505348`, `claimShieldedFees` → `0x88d9deba`. The stale `unshield` selector/signature in the registry was also corrected to the on-chain 10-parameter form.
+- **`@orbinum/proof-generator` bumped to `4.0.0`** — the published release exposing `WebArtifactProvider.getResolvedVersion` (resolved version + `vkHash` per circuit), the `CIRCUIT_ID` map + `circuitTypeToId()`, and fail-closed artifact integrity (sha256-verified against the manifest). `CircuitVersionResolver` consumes these to pin the prover to a note's circuit version and cross-check the VK hash against the chain before proving.
+
+### Fixed
+
+- **`CircuitId.ValueProof` corrected from 4 to 6** (`src/zk-verifier/types/pallet-extrinsics.ts`): the value the SDK exported did not match the node's on-chain `CircuitId::VALUE_PROOF = 6` (`node/frame/zk-verifier/src/types.rs`), so a version/VK lookup keyed off `ValueProof` (e.g. `getCircuitVersionInfo(4)`) would have queried a non-existent circuit. The constant was unused in flows so far, so this is safe. A new anti-drift test (`tests/zk-verifier/circuit-id.test.ts`) locks all four ids to the node's values.
+
 ## [0.11.0] - 2026-07-02
 
 ### Changed

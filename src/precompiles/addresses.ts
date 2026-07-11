@@ -78,12 +78,12 @@ export const AM_SEL = {
 export const SP_SEL = {
     // shield(uint32,bytes32,bytes)                                               → 0x9feb22ea  (payable, amount = msg.value)
     SHIELD: new Uint8Array([0x9f, 0xeb, 0x22, 0xea]),
-    // privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256)    → 0x8c0f5d24
-    PRIVATE_TRANSFER: new Uint8Array([0x8c, 0x0f, 0x5d, 0x24]),
-    // unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32)               → 0xd21d9a79
-    UNSHIELD: new Uint8Array([0xd2, 0x1d, 0x9a, 0x79]),
-    // claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes)                → 0x42e1e74c
-    CLAIM_SHIELDED_FEES: new Uint8Array([0x42, 0xe1, 0xe7, 0x4c]),
+    // privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32)  → 0x66ed2cd4
+    PRIVATE_TRANSFER: new Uint8Array([0x66, 0xed, 0x2c, 0xd4]),
+    // unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32,bytes,uint32)  → 0x4e505348
+    UNSHIELD: new Uint8Array([0x4e, 0x50, 0x53, 0x48]),
+    // claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes,uint32)         → 0x88d9deba
+    CLAIM_SHIELDED_FEES: new Uint8Array([0x88, 0xd9, 0xde, 0xba]),
 } as const;
 
 // ─── Known Precompiles registry ───────────────────────────────────────────────
@@ -134,9 +134,11 @@ export const KNOWN_PRECOMPILES: Record<string, KnownPrecompileInfo> = {
         name: 'ShieldedPool',
         functions: {
             '9feb22ea': 'shield(uint32,bytes32,bytes)',
-            '8c0f5d24': 'privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256)',
-            d21d9a79: 'unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32)',
-            '42e1e74c': 'claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes)',
+            '66ed2cd4':
+                'privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32)',
+            '4e505348':
+                'unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32,bytes,uint32)',
+            '88d9deba': 'claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes,uint32)',
         },
     },
 };

@@ -3,11 +3,11 @@
  *
  * Mirrors primitives/encrypted-memo in the node repository; no WASM required.
  *
- * Layout (176 bytes, ECDH):
- *   nonce(12) || ciphertext+MAC(132) || ephPk_packed(32) = 176
+ * Layout (180 bytes, ECDH):
+ *   nonce(12) || ciphertext+MAC(136) || ephPk_packed(32) = 180
  *
- * Plaintext layout (116 bytes):
- *   value_lo(8 LE) || value_hi(8 LE) || owner_pk(32) || blinding(32) || asset_id(4 LE) || counterparty_pk(32)
+ * Plaintext layout (120 bytes):
+ *   value_lo(8 LE) || value_hi(8 LE) || owner_pk(32) || blinding(32) || asset_id(4 LE) || counterparty_pk(32) || circuit_version(4 LE)
  *
  * value is stored as a 128-bit LE unsigned integer (two uint64 words), supporting
  * amounts up to ~3.4 × 10^38 planck — well above any realistic token supply.
@@ -33,11 +33,11 @@ import type { DecryptedMemo } from './types';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const NONCE_SIZE = 12;
-const CIPHERTEXT_SIZE = 132; // plaintext(116) + MAC(16)
+const CIPHERTEXT_SIZE = 136; // plaintext(120) + MAC(16)
 const EPH_PK_SIZE = 32;
 
-/** Memo size: nonce(12) + ciphertext+MAC(132) + ephPk(32) = 176 */
-export const ENCRYPTED_MEMO_SIZE = NONCE_SIZE + CIPHERTEXT_SIZE + EPH_PK_SIZE; // 176
+/** Memo size: nonce(12) + ciphertext+MAC(136) + ephPk(32) = 180 */
+export const ENCRYPTED_MEMO_SIZE = NONCE_SIZE + CIPHERTEXT_SIZE + EPH_PK_SIZE; // 180
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -48,7 +48,7 @@ function bytesToBjjScalar(bytes: Uint8Array): bigint {
 }
 
 /**
- * Decrypt the 108-byte plaintext from nonce+ciphertext bytes and parse fields.
+ * Decrypt the 120-byte plaintext from nonce+ciphertext bytes and parse fields.
  * Returns null if decryption fails (wrong key, bad MAC).
  */
 function parsePlaintext(
@@ -68,7 +68,8 @@ function parsePlaintext(
         const blinding = bytesToBigintLE(plaintext.slice(48, 80));
         const assetId = BigInt(view.getUint32(80, true));
         const counterpartyPk = bytesToBigintLE(plaintext.slice(84, 116));
-        return { value, ownerPk, blinding, assetId, counterpartyPk };
+        const circuitVersion = view.getUint32(116, true);
+        return { value, ownerPk, blinding, assetId, counterpartyPk, circuitVersion };
     } catch {
         return null;
     }
@@ -78,7 +79,7 @@ function parsePlaintext(
 
 export const EncryptedMemo = {
     /**
-     * Build and encrypt a memo for a note using ECDH (v2, 168 bytes).
+     * Build and encrypt a memo for a note using ECDH (v2, 180 bytes).
      *
      * @param value              Note value in planck.
      * @param ownerPk            32-byte owner public key (LE).
@@ -90,7 +91,9 @@ export const EncryptedMemo = {
      *                           decoded from a privacy address).
      *                           Pass `new Uint8Array(32)` (all zeros) for a publicly-readable memo.
      * @param counterpartyPk     32-byte counterparty BJJ Ax. Default: all zeros.
-     * @returns 168-byte encrypted memo: nonce(12) || ciphertext+MAC(124) || ephPk(32).
+     * @param circuitVersion     ZK circuit version the note is spent under. Default: 0.
+     * @param ephSkOverride      32-byte ephemeral secret key (stealth coordination). Optional.
+     * @returns 180-byte encrypted memo: nonce(12) || ciphertext+MAC(136) || ephPk(32).
      */
     encrypt(
         value: bigint,
@@ -100,10 +103,18 @@ export const EncryptedMemo = {
         commitment: Uint8Array,
         recipientIvkPacked: Uint8Array,
         counterpartyPk: Uint8Array = new Uint8Array(32),
+        circuitVersion: number = 0,
         ephSkOverride?: Uint8Array
     ): Uint8Array {
         const nonce = randomBytes(NONCE_SIZE);
-        const plaintext = serializeMemo(value, ownerPk, blinding, assetId, counterpartyPk);
+        const plaintext = serializeMemo(
+            value,
+            ownerPk,
+            blinding,
+            assetId,
+            counterpartyPk,
+            circuitVersion
+        );
 
         // Determine shared secret via ECDH or zero for public notes.
         const isZeroKey = recipientIvkPacked.every((b) => b === 0);
@@ -135,9 +146,9 @@ export const EncryptedMemo = {
 
         const encKey = deriveEncryptionKey(sharedSecret, commitment);
         const cipher = chacha20poly1305(encKey, nonce);
-        const ciphertext = cipher.encrypt(plaintext); // 124 bytes (108 + 16 MAC)
+        const ciphertext = cipher.encrypt(plaintext); // 136 bytes (120 + 16 MAC)
 
-        // Layout: nonce(12) || ciphertext+MAC(124) || ephPk(32) = 168 bytes
+        // Layout: nonce(12) || ciphertext+MAC(136) || ephPk(32) = 180 bytes
         const result = new Uint8Array(ENCRYPTED_MEMO_SIZE);
         result.set(nonce, 0);
         result.set(ciphertext, NONCE_SIZE);
@@ -146,7 +157,7 @@ export const EncryptedMemo = {
     },
 
     /**
-     * Returns a 168-byte public memo encrypted with a zero viewing key.
+     * Returns a 180-byte public memo encrypted with a zero viewing key.
      * Decryptable by anyone with `decrypt(memo, commitment, new Uint8Array(32))`.
      * Convenience alias for `encrypt(..., new Uint8Array(32))`.
      */
@@ -155,7 +166,8 @@ export const EncryptedMemo = {
         ownerPk: Uint8Array,
         blinding: Uint8Array,
         assetId: number,
-        commitment: Uint8Array
+        commitment: Uint8Array,
+        circuitVersion: number = 0
     ): Uint8Array {
         return EncryptedMemo.encrypt(
             value,
@@ -163,12 +175,14 @@ export const EncryptedMemo = {
             blinding,
             assetId,
             commitment,
-            new Uint8Array(32)
+            new Uint8Array(32),
+            new Uint8Array(32),
+            circuitVersion
         );
     },
 
     /**
-     * Returns a 168-byte zeroed dummy memo (no information, always valid on-chain).
+     * Returns a 180-byte zeroed dummy memo (no information, always valid on-chain).
      */
     dummy(): Uint8Array {
         return new Uint8Array(ENCRYPTED_MEMO_SIZE);
@@ -176,7 +190,7 @@ export const EncryptedMemo = {
 
     /**
      * Validates that `bytes` is a properly-sized encrypted memo.
-     * Throws an Error if the length is not ENCRYPTED_MEMO_SIZE (168 bytes).
+     * Throws an Error if the length is not ENCRYPTED_MEMO_SIZE (180 bytes).
      *
      * Call this at system boundaries (extrinsic builders, precompile encoders)
      * to catch malformed memos before they reach the chain and fail on-chain.
@@ -198,7 +212,7 @@ export const EncryptedMemo = {
      * Returns null if decryption fails — wrong key, bad MAC, or malformed memo.
      * Never throws; safe for scan loops.
      *
-     * @param memoBytes        168-byte encrypted memo.
+     * @param memoBytes        180-byte encrypted memo.
      * @param commitment       32-byte note commitment (LE).
      * @param viewingSecretKey 32-byte HKDF viewing secret key from deriveViewingSecretKey().
      */
@@ -215,13 +229,13 @@ export const EncryptedMemo = {
      * Extract the ECDH shared secret from an encrypted memo using the recipient's viewing secret key.
      *
      * Used by NoteDecryptor to obtain the shared secret needed for stealth address derivation
-     * without re-running the full decrypt path. Safe to call on any 168-byte memo.
+     * without re-running the full decrypt path. Safe to call on any 180-byte memo.
      *
      * Returns `new Uint8Array(32)` (all zeros) for public/dummy memos (zero ephPk).
      * Returns `null` if the memo is malformed or the ephPk is not a valid BJJ point.
      * Never throws; safe for scan loops.
      *
-     * @param memoBytes        168-byte encrypted memo.
+     * @param memoBytes        180-byte encrypted memo.
      * @param viewingSecretKey 32-byte HKDF viewing secret key from deriveViewingSecretKey().
      */
     extractSharedSecret(memoBytes: Uint8Array, viewingSecretKey: Uint8Array): Uint8Array | null {

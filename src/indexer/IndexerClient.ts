@@ -135,7 +135,7 @@ export class IndexerClient {
     /**
      * Returns a paginated list of stealth scan hints ordered ascending by leafIndex.
      * Each hint contains only the fields required for ECDH triage and decryption:
-     * leafIndex, commitmentHex, assetId, ephPkHex, encryptedMemo.
+     * leafIndex, commitmentHex, assetId, ephPkHex, encryptedMemo, circuitVersion.
      *
      * Use `sinceLeafIndex` for incremental scans (cursor = last seen leafIndex + 1).
      */

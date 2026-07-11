@@ -1,4 +1,4 @@
-import type { NoteInput, ZkNote } from './types';
+import { CURRENT_CIRCUIT_VERSION, type NoteInput, type ZkNote } from './types';
 import { EncryptedMemo, ENCRYPTED_MEMO_SIZE } from './EncryptedMemo';
 import { deriveStealthOwnerPk } from '../../utils/stealth';
 import { recoverOwnerPkPoint } from '../../utils/bjj';
@@ -22,7 +22,7 @@ import { poseidon2, poseidon4 } from 'poseidon-lite';
  *
  * Memo scheme (EncryptedMemo — native TypeScript, no WASM):
  *   ChaCha20-Poly1305 with ECDH ephemeral key — SHA256(sharedSecret || commitment || domain)
- *   Result: nonce(12) || ciphertext(108 + 16 MAC) || ephPk(32) = 168 bytes
+ *   Result: nonce(12) || ciphertext(120 + 16 MAC) || ephPk(32) = 180 bytes
  *
  * Stealth scheme (when viewingPublicKey + recipientOwnerPk are both provided):
  *   ephSk is generated once and shared between the ECDH memo and the stealth Pk derivation.
@@ -52,6 +52,7 @@ export class NoteBuilder {
         const blinding = input.blinding ?? BigInt(Date.now());
         const spendingKey = input.spendingKey ?? 0n;
         const counterpartyPk = input.counterpartyPk ?? 0n;
+        const circuitVersion = input.circuitVersion ?? CURRENT_CIRCUIT_VERSION;
 
         const useStealth =
             input.viewingPublicKey !== undefined && input.recipientOwnerPk !== undefined;
@@ -101,6 +102,7 @@ export class NoteBuilder {
                     stealthCommitmentBytes,
                     recipientIvkPacked,
                     bigintTo32Le(counterpartyPk),
+                    circuitVersion,
                     ephSk
                 )
             );
@@ -121,6 +123,7 @@ export class NoteBuilder {
                 ownerPk: effectiveOwnerPk,
                 blinding,
                 spendingKey,
+                circuitVersion,
                 spent: false,
                 spentAt: null,
                 commitment,
@@ -148,7 +151,8 @@ export class NoteBuilder {
                           Number(assetId),
                           commitmentBytes,
                           input.viewingPublicKey,
-                          bigintTo32Le(counterpartyPk)
+                          bigintTo32Le(counterpartyPk),
+                          circuitVersion
                       )
                   )
                 : Array.from(EncryptedMemo.dummy());
@@ -164,6 +168,7 @@ export class NoteBuilder {
             ownerPk,
             blinding,
             spendingKey,
+            circuitVersion,
             spent: false,
             spentAt: null,
             commitment,
@@ -176,7 +181,7 @@ export class NoteBuilder {
     }
 
     /**
-     * Build the 168-byte ECDH-encrypted memo for a note.
+     * Build the 180-byte ECDH-encrypted memo for a note.
      *
      * Pure TypeScript implementation — no WASM dependency.
      * Uses ChaCha20-Poly1305 with ECDH key agreement (BabyJubJub ephemeral keypair).
@@ -199,7 +204,8 @@ export class NoteBuilder {
             Number(note.assetId),
             bigintTo32Le(note.commitment),
             recipientIvkPacked ?? new Uint8Array(32),
-            counterpartyPk ?? bigintTo32Le(note.counterpartyPk ?? 0n)
+            counterpartyPk ?? bigintTo32Le(note.counterpartyPk ?? 0n),
+            note.circuitVersion
         );
     }
 }

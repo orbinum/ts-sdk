@@ -12,6 +12,11 @@ const TRANSFER_TREE_DEPTH = 20;
  *   2. The smallest pair whose sum >= needed →  [noteA, noteB]
  *   3. No combination covers needed          →  null  (consolidation via merge required)
  *
+ * Both inputs of a transfer are proven together against ONE circuit VK, so a
+ * pair MUST share a circuitVersion — mixing v1 and v2 would produce an invalid
+ * proof. Priority 2 only pairs notes of the same version; a single note (P1) is
+ * always one version so it needs no check.
+ *
  * Only unspent notes with value > 0 are considered.
  */
 export function selectNotes(notes: ZkNote[], needed: bigint): [ZkNote, ZkNote | null] | null {
@@ -22,12 +27,17 @@ export function selectNotes(notes: ZkNote[], needed: bigint): [ZkNote, ZkNote | 
     const single = sorted.find((n) => n.value >= needed);
     if (single) return [single, null];
 
-    // Priority 2: smallest qualifying pair
+    // Priority 2: smallest qualifying pair, restricted to notes of the same version
     for (let i = 0; i < sorted.length; i++) {
         for (let j = i + 1; j < sorted.length; j++) {
             const a = sorted[i];
             const b = sorted[j];
-            if (a !== undefined && b !== undefined && a.value + b.value >= needed) {
+            if (
+                a !== undefined &&
+                b !== undefined &&
+                a.circuitVersion === b.circuitVersion &&
+                a.value + b.value >= needed
+            ) {
                 return [a, b];
             }
         }

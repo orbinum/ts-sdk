@@ -57,11 +57,11 @@ export function decodePrecompileCalldata(address: string, input: string): Decode
         }
     }
 
-    // unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32)
+    // unshield(bytes,bytes32,bytes32,uint32,uint256,bytes32,uint256,bytes32,bytes,uint32)
     // ABI head after selector:
     // [0-31] offset→proof | [32-63] root | [64-95] nullifier
     // [96-127] assetId    | [128-159] amount | [160-191] recipient | [192-223] fee
-    // [224-255] change_commitment
+    // [224-255] change_commitment | [256-287] offset→change_encrypted_memo | [288-319] circuit_version
     if (fnSig.startsWith('unshield(')) {
         try {
             const data = fromHex(input.slice(10));
@@ -72,20 +72,30 @@ export function decodePrecompileCalldata(address: string, input: string): Decode
             const recipient = toHex(data.slice(160, 192));
             const fee = decodeUint(data, 192);
             const changeCommitment = toHex(data.slice(224, 256));
+            const circuitVersion = decodeUint(data, 288);
             return {
                 fnSig,
-                args: { root, nullifier, assetId, amount, recipient, fee, changeCommitment },
+                args: {
+                    root,
+                    nullifier,
+                    assetId,
+                    amount,
+                    recipient,
+                    fee,
+                    changeCommitment,
+                    circuitVersion,
+                },
             };
         } catch {
             return { fnSig, args: {} };
         }
     }
 
-    // privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256)
+    // privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32)
     // ABI head after selector:
     // [0-31] offset→proof | [32-63] root | [64-95] offset→nullifiers
     // [96-127] offset→commitments | [128-159] offset→memos
-    // [160-191] assetId (uint32) | [192-223] fee (uint256)
+    // [160-191] assetId (uint32) | [192-223] fee (uint256) | [224-255] circuit_version (uint32)
     if (fnSig.startsWith('privateTransfer(')) {
         try {
             const data = fromHex(input.slice(10));
@@ -96,27 +106,30 @@ export function decodePrecompileCalldata(address: string, input: string): Decode
             const commitments = Number(decodeUint(data, commOffset));
             const assetId = decodeUint(data, 160);
             const fee = decodeUint(data, 192);
-            return { fnSig, args: { root, nullifiers, commitments, assetId, fee } };
+            const circuitVersion = decodeUint(data, 224);
+            return { fnSig, args: { root, nullifiers, commitments, assetId, fee, circuitVersion } };
         } catch {
             return { fnSig, args: {} };
         }
     }
 
-    // claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes)
-    // ABI head after selector (6 fixed slots × 32 = 192 bytes):
+    // claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes,uint32)
+    // ABI head after selector (7 slots × 32 = 224 bytes):
     // [0-31]   commitment (bytes32)
     // [32-63]  amount (uint256)
     // [64-95]  asset_id (uint32, right-aligned)
     // [96-127] offset → memo
     // [128-159] offset → proof
     // [160-191] offset → publicSignals
+    // [192-223] circuit_version (uint32, right-aligned)
     if (fnSig.startsWith('claimShieldedFees(')) {
         try {
             const data = fromHex(input.slice(10));
             const commitment = toHex(data.slice(0, 32));
             const amount = decodeUint(data, 32);
             const assetId = decodeUint(data, 64);
-            return { fnSig, args: { commitment, amount, assetId } };
+            const circuitVersion = decodeUint(data, 192);
+            return { fnSig, args: { commitment, amount, assetId, circuitVersion } };
         } catch {
             return { fnSig, args: {} };
         }

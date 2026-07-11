@@ -42,7 +42,7 @@ const SHIELD_PARAMS = {
   assetId: 0,
   amount: 1000n,
   commitment: '0x' + 'ab'.repeat(32),
-  encryptedMemo: new Uint8Array(176),
+  encryptedMemo: new Uint8Array(180),
 };
 
 const UNSHIELD_PARAMS = {
@@ -52,6 +52,7 @@ const UNSHIELD_PARAMS = {
   assetId: 0,
   amount: 500n,
   recipientAddress: '0x' + '12'.repeat(32),
+  circuitVersion: 1,
 };
 
 const TRANSFER_PARAMS = {
@@ -61,11 +62,12 @@ const TRANSFER_PARAMS = {
     { nullifier: '0x' + 'cc'.repeat(32), commitment: '0x' + 'dd'.repeat(32) },
   ],
   outputs: [
-    { commitment: '0x' + 'ee'.repeat(32), encryptedMemo: new Uint8Array(176) },
-    { commitment: '0x' + 'ff'.repeat(32), encryptedMemo: new Uint8Array(176) },
+    { commitment: '0x' + 'ee'.repeat(32), encryptedMemo: new Uint8Array(180) },
+    { commitment: '0x' + 'ff'.repeat(32), encryptedMemo: new Uint8Array(180) },
   ],
   proof: new Uint8Array(32),
   merkleRoot: '0x' + 'a1'.repeat(32),
+  circuitVersion: 1,
 };
 
 // ─── shield ───────────────────────────────────────────────────────────────────
@@ -127,7 +129,7 @@ describe('ShieldedPoolModule.shield', () => {
     const mod = new ShieldedPoolModule(client);
     const params = { ...SHIELD_PARAMS, encryptedMemo: new Uint8Array(100) };
     await expect(mod.shield(params, mockSigner)).rejects.toThrow(
-      /EncryptedMemo: invalid size.*expected 176 bytes, got 100/
+      /EncryptedMemo: invalid size.*expected 180 bytes, got 100/
     );
   });
 
@@ -211,7 +213,7 @@ describe('ShieldedPoolModule.privateTransfer', () => {
       outputs: [{ commitment: '0x' + 'ee'.repeat(32), encryptedMemo: new Uint8Array(50) }],
     };
     await expect(mod.privateTransfer(params, mockSigner)).rejects.toThrow(
-      /EncryptedMemo: invalid size.*expected 176 bytes, got 50/
+      /EncryptedMemo: invalid size.*expected 180 bytes, got 50/
     );
   });
 
@@ -233,14 +235,14 @@ const BATCH_ITEM_A = {
   assetId: 0,
   amount: 100n,
   commitment: '0x' + 'ab'.repeat(32),
-  encryptedMemo: new Uint8Array(176),
+  encryptedMemo: new Uint8Array(180),
 };
 
 const BATCH_ITEM_B = {
   assetId: 1,
   amount: 200n,
   commitment: '0x' + 'cd'.repeat(32),
-  encryptedMemo: new Uint8Array(176),
+  encryptedMemo: new Uint8Array(180),
 };
 
 describe('ShieldedPoolModule.shieldBatch', () => {
@@ -295,7 +297,7 @@ describe('ShieldedPoolModule.shieldBatch', () => {
     const mod = new ShieldedPoolModule(client);
     const item = { ...BATCH_ITEM_A, encryptedMemo: new Uint8Array(32) };
     await expect(mod.shieldBatch({ items: [item] }, mockSigner)).rejects.toThrow(
-      /EncryptedMemo: invalid size.*expected 176 bytes, got 32/
+      /EncryptedMemo: invalid size.*expected 180 bytes, got 32/
     );
   });
 

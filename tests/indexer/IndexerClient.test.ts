@@ -109,6 +109,7 @@ describe('IndexerClient', () => {
             assetId: '0',
             source: 'shield',
             encryptedMemo: null,
+            circuitVersion: null,
             timestampMs: 1000,
         };
         const payload: PaginatedResult<ShieldedCommitment> = {
@@ -133,6 +134,7 @@ describe('IndexerClient', () => {
             assetId: '0',
             source: 'shield',
             encryptedMemo: '0x00',
+            circuitVersion: null,
             timestampMs: 2000,
         };
         mockFetch(commitment);

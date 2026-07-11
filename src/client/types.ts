@@ -8,6 +8,12 @@ export type OrbinumClientConfig = {
     indexerUrl?: string;
     /** Timeout for the initial WebSocket handshake in milliseconds. Default: `15_000`. */
     connectTimeoutMs?: number;
+    /**
+     * Base URL of a circuits-artifact mirror (serving `manifest.json` + artifacts).
+     * Passed to the `CircuitVersionResolver`'s provider. Omit to use the default
+     * npm CDN (unpkg). Use to point at a self-hosted/multi-version manifest.
+     */
+    circuitsBaseUrl?: string;
 };
 
 /** Result returned by extrinsic-submitting methods (shield, unshield, transfer, …). */

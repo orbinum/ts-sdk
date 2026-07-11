@@ -18,10 +18,11 @@
 export type Bytes32 = number[];
 
 /**
- * 176-byte encrypted memo (ChaCha20-Poly1305 ECDH).
- * Layout: nonce(12) || ciphertext(132) || tag(16) || ephPk(32) = 176 bytes.
+ * 180-byte encrypted memo (ChaCha20-Poly1305 ECDH).
+ * Layout: nonce(12) || ciphertext(136) || ephPk(32) = 180 bytes
+ * (ciphertext = plaintext 120 + MAC 16).
  */
-export type Bytes176 = number[];
+export type Bytes180 = number[];
 
 /**
  * A single shield operation for use in `shield_batch`.
@@ -31,7 +32,7 @@ export type ShieldOperation = {
     amount: bigint;
     /** 32-byte Poseidon commitment (LE). */
     commitment: Bytes32;
-    /** Encrypted memo bytes — exactly 104 bytes. */
+    /** Encrypted memo bytes — exactly 180 bytes. */
     encryptedMemo: number[];
 };
 
@@ -46,7 +47,7 @@ export type ShieldArgs = {
     amount: bigint;
     /** 32-byte Poseidon commitment (LE). */
     commitment: Bytes32;
-    /** Encrypted memo — exactly 104 bytes. */
+    /** Encrypted memo — exactly 180 bytes. */
     encryptedMemo: number[];
 };
 
@@ -70,7 +71,7 @@ export type RawTransferInput = {
 export type RawTransferOutput = {
     /** 32-byte Poseidon commitment (LE). */
     commitment: Bytes32;
-    /** Encrypted memo — exactly 104 bytes. */
+    /** Encrypted memo — exactly 180 bytes. */
     memo: number[];
 };
 
@@ -92,6 +93,8 @@ export type PrivateTransferArgs = {
     assetId: number;
     /** Gasless fee in planck. Paid to the block author (validator). */
     fee: bigint;
+    /** Circuit version the input notes were created under (verified against that version's VK). */
+    circuitVersion: number;
 };
 
 /**
@@ -120,10 +123,12 @@ export type UnshieldArgs = {
      */
     changeCommitment: Bytes32;
     /**
-     * Encrypted memo for the change note (176 bytes, empty for total unshield).
+     * Encrypted memo for the change note (180 bytes, empty for total unshield).
      * Enables note recovery via blockchain scan for partial unshield.
      */
-    changeEncryptedMemo?: Bytes176;
+    changeEncryptedMemo?: Bytes180;
+    /** Circuit version the spent note was created under (verified against that version's VK). */
+    circuitVersion: number;
 };
 
 /**
