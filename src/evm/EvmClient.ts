@@ -1,4 +1,5 @@
 import { hexToNumber, hexToBigint } from '../utils/hex';
+import { postJsonWithRetry } from '../utils/jsonRpcHttp';
 
 /** Internal shape of a single JSON-RPC 2.0 response. */
 type JsonRpcResponse<T> = {
@@ -24,11 +25,10 @@ export class EvmClient {
      * Throws on HTTP errors, RPC-level errors, or a `null` result.
      */
     async request<T>(method: string, params: unknown[] = []): Promise<T> {
-        const res = await fetch(this.rpcUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: 1, jsonrpc: '2.0', method, params }),
-        });
+        const res = await postJsonWithRetry(
+            this.rpcUrl,
+            JSON.stringify({ id: 1, jsonrpc: '2.0', method, params })
+        );
         if (!res.ok) throw new Error(`EVM HTTP ${res.status}: ${res.statusText}`);
         const json = (await res.json()) as JsonRpcResponse<T>;
         if (json.error) {
@@ -53,11 +53,7 @@ export class EvmClient {
             method: c.method,
             params: c.params ?? [],
         }));
-        const res = await fetch(this.rpcUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-        });
+        const res = await postJsonWithRetry(this.rpcUrl, JSON.stringify(body));
         if (!res.ok) throw new Error(`EVM HTTP ${res.status}: ${res.statusText}`);
         const arr = (await res.json()) as JsonRpcBatchResponse<unknown>;
         arr.sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
@@ -121,16 +117,15 @@ export class EvmClient {
 
     /** Returns a transaction receipt by hash, or `null` if the transaction has not been mined yet. */
     async getTransactionReceipt(txHash: string): Promise<Record<string, unknown> | null> {
-        const res = await fetch(this.rpcUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
+        const res = await postJsonWithRetry(
+            this.rpcUrl,
+            JSON.stringify({
                 id: 1,
                 jsonrpc: '2.0',
                 method: 'eth_getTransactionReceipt',
                 params: [txHash],
-            }),
-        });
+            })
+        );
         if (!res.ok) throw new Error(`EVM HTTP ${res.status}: ${res.statusText}`);
         const json = (await res.json()) as JsonRpcResponse<Record<string, unknown>>;
         if (json.error) {

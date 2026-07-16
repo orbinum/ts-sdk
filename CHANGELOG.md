@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-07-16
+
+### Fixed
+
+- Failed/timed-out connection attempts no longer leak PAPI clients that keep reconnecting to the node forever. `SubstrateClient.connect` destroys its client on timeout, and `OrbinumClientProvider` destroys a late-resolving client after its outer race times out. Previously every failed attempt left a zombie WebSocket in an endless internal reconnect loop — the visible symptom was rapid, never-ending reconnects and connection churn on the RPC node.
+- `OrbinumClientProvider` now passes its `connectTimeoutMs` down to the inner connect, so the layer that owns cleanup times out first (the inner default of 15s previously outlived the provider's 8s race on every slow connect).
+
+### Changed
+
+- `EvmClient` (`request`, `batchRequest`, `getTransactionReceipt`) now retries HTTP 429/503 with exponential backoff, honoring `Retry-After` — same policy `jsonRpcBatch` already had. Rate-limited single calls no longer surface as hard errors.
+- New internal `postJsonWithRetry` util (`utils/jsonRpcHttp`) shared by the EVM client and the Substrate batch transport.
+
 ## [0.13.0] - 2026-07-11
 
 ### Removed (BREAKING)
