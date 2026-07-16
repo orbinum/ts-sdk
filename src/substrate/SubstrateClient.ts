@@ -41,15 +41,27 @@ export class SubstrateClient {
         const provider = getWsProvider(wsUrl);
         const papi = createClient(provider);
 
-        await Promise.race([
-            papi._request('system_name', []),
-            new Promise<never>((_, reject) =>
-                setTimeout(
-                    () => reject(new Error(`Connection timeout (${timeoutMs}ms) to ${wsUrl}`)),
-                    timeoutMs
-                )
-            ),
-        ]);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+            await Promise.race([
+                papi._request('system_name', []),
+                new Promise<never>((_, reject) => {
+                    timer = setTimeout(
+                        () => reject(new Error(`Connection timeout (${timeoutMs}ms) to ${wsUrl}`)),
+                        timeoutMs
+                    );
+                }),
+            ]);
+        } catch (err) {
+            try {
+                papi.destroy();
+            } catch {
+                /* ignore */
+            }
+            throw err;
+        } finally {
+            clearTimeout(timer);
+        }
 
         return new SubstrateClient(papi, wsUrlToHttp(wsUrl));
     }

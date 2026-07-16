@@ -196,14 +196,16 @@ export class OrbinumClientProvider {
             );
         });
 
+        let clientPromise: Promise<OrbinumClient> | null = null;
         try {
             const connectConfig: OrbinumClientConfig = {
                 substrateWs: this.config.substrateWs,
+                connectTimeoutMs: this.connectTimeoutMs,
             };
             if (this.config.evmRpc) connectConfig.evmRpc = this.config.evmRpc;
             if (this.config.circuitsBaseUrl)
                 connectConfig.circuitsBaseUrl = this.config.circuitsBaseUrl;
-            const clientPromise = OrbinumClient.connect(connectConfig);
+            clientPromise = OrbinumClient.connect(connectConfig);
             const client = await Promise.race([clientPromise, timeoutPromise]);
             orphanClient = client;
 
@@ -225,6 +227,22 @@ export class OrbinumClientProvider {
                 } catch {
                     /* ignore */
                 }
+            } else if (clientPromise) {
+                // Timeout won the race: the in-flight connect may still resolve
+                // later — destroy that late client or it lives on unowned, with
+                // PAPI reconnecting it forever.
+                clientPromise.then(
+                    (c) => {
+                        try {
+                            c.destroy();
+                        } catch {
+                            /* ignore */
+                        }
+                    },
+                    () => {
+                        /* inner connect failed and cleaned up after itself */
+                    }
+                );
             }
             this._connectingPromise = null;
             this.setStatus(

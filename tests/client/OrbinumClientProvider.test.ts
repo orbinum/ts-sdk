@@ -421,3 +421,65 @@ describe('OrbinumClientProvider — flapping backoff', () => {
         setTimeoutSpy.mockRestore();
     });
 });
+
+// ─── Connect-timeout cleanup ──────────────────────────────────────────────────
+
+describe('OrbinumClientProvider — connect timeout cleanup', () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it('passes its connectTimeoutMs down to OrbinumClient.connect', async () => {
+        vi.mocked(OrbinumClient.connect).mockResolvedValue(makeOrbinumClient());
+        const provider = makeProvider({ connectTimeoutMs: 123 });
+        provider.connect();
+
+        expect(OrbinumClient.connect).toHaveBeenCalledWith(
+            expect.objectContaining({ connectTimeoutMs: 123 })
+        );
+
+        await vi.advanceTimersByTimeAsync(1);
+        provider.reset();
+    });
+
+    it('destroys a client that resolves after the outer timeout', async () => {
+        const lateClient = makeOrbinumClient();
+        vi.mocked(OrbinumClient.connect).mockImplementation(
+            () => new Promise((resolve) => setTimeout(() => resolve(lateClient), 200))
+        );
+        const provider = makeProvider({ connectTimeoutMs: 100 });
+        provider.connect();
+
+        // Outer race times out first: the attempt fails and a reconnect is scheduled.
+        await vi.advanceTimersByTimeAsync(150);
+        expect(provider.status).toBe<ConnectionStatus>('reconnecting');
+        expect(lateClient.destroy).not.toHaveBeenCalled();
+
+        // The in-flight connect resolves late — the orphan must be destroyed,
+        // otherwise it lives on unowned with papi reconnecting it forever.
+        await vi.advanceTimersByTimeAsync(100);
+        expect(lateClient.destroy).toHaveBeenCalledTimes(1);
+
+        provider.reset();
+    });
+
+    it('does not destroy anything when the inner connect rejects after the outer timeout', async () => {
+        vi.mocked(OrbinumClient.connect).mockImplementation(
+            () =>
+                new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('inner timeout')), 200)
+                )
+        );
+        const provider = makeProvider({ connectTimeoutMs: 100 });
+        provider.connect();
+
+        await vi.advanceTimersByTimeAsync(300);
+        // No unhandled rejection, provider keeps its reconnecting lifecycle.
+        expect(provider.status).toBe<ConnectionStatus>('reconnecting');
+
+        provider.reset();
+    });
+});

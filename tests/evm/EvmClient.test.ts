@@ -282,3 +282,91 @@ describe('EvmClient.getTransactionReceipt', () => {
     expect(result).toBeNull();
   });
 });
+
+// ─── Rate-limit retry (429/503) ───────────────────────────────────────────────
+
+describe('EvmClient rate-limit retry', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function rateLimited(status: number) {
+    return {
+      ok: false,
+      status,
+      statusText: 'rate limited',
+      headers: { get: () => null },
+    };
+  }
+
+  it('request retries a 429 then returns the result', async () => {
+    vi.useFakeTimers();
+    const f = vi
+      .fn()
+      .mockResolvedValueOnce(rateLimited(429))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ jsonrpc: '2.0', id: 1, result: '0x15' }),
+      });
+    vi.stubGlobal('fetch', f);
+
+    const p = new EvmClient('http://localhost').request<string>('eth_chainId');
+    await vi.runAllTimersAsync();
+    expect(await p).toBe('0x15');
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+
+  it('request gives up after exhausting retries and throws', async () => {
+    vi.useFakeTimers();
+    const f = vi.fn().mockResolvedValue(rateLimited(429));
+    vi.stubGlobal('fetch', f);
+
+    const p = new EvmClient('http://localhost').request('eth_chainId');
+    const assertion = expect(p).rejects.toThrow(/429/);
+    await vi.runAllTimersAsync();
+    await assertion;
+    expect(f).toHaveBeenCalledTimes(6); // initial + 5 retries (default)
+  });
+
+  it('batchRequest retries a 503 then succeeds', async () => {
+    vi.useFakeTimers();
+    const f = vi
+      .fn()
+      .mockResolvedValueOnce(rateLimited(503))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => [{ jsonrpc: '2.0', id: 1, result: 'a' }],
+      });
+    vi.stubGlobal('fetch', f);
+
+    const p = new EvmClient('http://localhost').batchRequest([{ method: 'm' }]);
+    await vi.runAllTimersAsync();
+    expect(await p).toEqual(['a']);
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+
+  it('getTransactionReceipt retries a 429 then succeeds', async () => {
+    vi.useFakeTimers();
+    const f = vi
+      .fn()
+      .mockResolvedValueOnce(rateLimited(429))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ jsonrpc: '2.0', id: 1, result: { status: '0x1' } }),
+      });
+    vi.stubGlobal('fetch', f);
+
+    const p = new EvmClient('http://localhost').getTransactionReceipt('0xabc');
+    await vi.runAllTimersAsync();
+    expect(await p).toEqual({ status: '0x1' });
+    expect(f).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry a non-retryable HTTP error', async () => {
+    mockFetchError(500, 'Internal Server Error');
+    await expect(new EvmClient('http://localhost').request('eth_chainId')).rejects.toThrow(
+      /500/,
+    );
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+  });
+});

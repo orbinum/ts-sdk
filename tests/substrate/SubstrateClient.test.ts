@@ -1143,3 +1143,38 @@ describe('SubstrateClient.extractAuthorFromLogs', () => {
     );
   });
 });
+
+// ─── connect() — cleanup on failure ──────────────────────────────────────────
+
+describe('SubstrateClient.connect — cleanup on failure', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('destroys the papi client when the handshake times out', async () => {
+    vi.useFakeTimers();
+    const papi = makeMockPapi({ _request: vi.fn().mockReturnValue(new Promise(() => {})) });
+    vi.mocked(createClient).mockReturnValue(papi as never);
+
+    const p = SubstrateClient.connect('ws://localhost:9944', 50);
+    const assertion = expect(p).rejects.toThrow(/Connection timeout/);
+    await vi.advanceTimersByTimeAsync(51);
+    await assertion;
+
+    // Without this destroy the papi ws provider keeps reconnecting forever.
+    expect(papi.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('destroys the papi client when the handshake request rejects', async () => {
+    const papi = makeMockPapi({ _request: vi.fn().mockRejectedValue(new Error('boom')) });
+    vi.mocked(createClient).mockReturnValue(papi as never);
+
+    await expect(SubstrateClient.connect('ws://localhost:9944')).rejects.toThrow('boom');
+    expect(papi.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not destroy the client on a successful connect', async () => {
+    const { papi } = await makeClient();
+    expect(papi.destroy).not.toHaveBeenCalled();
+  });
+});
