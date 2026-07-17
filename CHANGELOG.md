@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-07-16
+
+### Fixed
+
+- `SubstrateClient.connect` now enables PAPI's ws-level heartbeat (`heartbeatTimeout: 30s`). An intermediary (Cloudflare cuts proxied WebSocket upgrades after ~100–200s of silence) was silently dropping idle sockets, and PAPI eagerly reopened them — measured on the testnet RPC node as hundreds of reconnects per client and a persistently inflated session count. The heartbeat keeps the socket alive under that idle window so it is not dropped and reopened.
+
 ## [0.14.0] - 2026-07-16
 
 ### Fixed

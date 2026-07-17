@@ -95,9 +95,14 @@ describe('SubstrateClient.connect', () => {
     expect(client).toBeInstanceOf(SubstrateClient);
   });
 
-  it('calls getWsProvider with the provided wsUrl', async () => {
+  it('calls getWsProvider with the provided wsUrl and a ws-level heartbeat', async () => {
     await makeClient();
-    expect(vi.mocked(getWsProvider)).toHaveBeenCalledWith('ws://localhost:9944');
+    // heartbeatTimeout keeps the socket alive through CF's idle cutoff, which
+    // otherwise dropped and reopened it in a reconnect storm.
+    expect(vi.mocked(getWsProvider)).toHaveBeenCalledWith(
+      'ws://localhost:9944',
+      expect.objectContaining({ heartbeatTimeout: expect.any(Number) }),
+    );
   });
 
   it('calls createClient with the provider', async () => {
