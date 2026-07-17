@@ -38,7 +38,10 @@ export class SubstrateClient {
      * Throws if the node does not respond within `timeoutMs`.
      */
     static async connect(wsUrl: string, timeoutMs = 15_000): Promise<SubstrateClient> {
-        const provider = getWsProvider(wsUrl);
+        // Keep PAPI's WebSocket heartbeat active so idle connections are not dropped
+        // by intermediaries (e.g. Cloudflare). A 30s heartbeat stays well below the
+        // typical idle timeout and prevents unnecessary reconnects.
+        const provider = getWsProvider(wsUrl, { heartbeatTimeout: 30_000 });
         const papi = createClient(provider);
 
         let timer: ReturnType<typeof setTimeout> | undefined;
