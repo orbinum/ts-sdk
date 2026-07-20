@@ -4,7 +4,7 @@ export { tryDecryptNote, tryDecryptNoteVerbose, computeNullifier } from './NoteD
 export { createNoteDisclosureKey, decodeNoteDisclosureKey } from './NoteDisclosure';
 export type { NoteDisclosure } from './NoteDisclosure';
 export { selectNotes, buildDummyTransferInput } from './coinSelection';
-export { serializeMemo, deriveEncryptionKey } from './memo';
+export { serializeMemo, deriveEncryptionKey, deriveViewTag } from './memo';
 export type {
     MerkleTreeInfo,
     ScanCommitment,

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-07-20
+
+### Added
+
+- **View tags (Monero-style 1-byte fast-scan filter)**. `EncryptedMemo.encrypt` now embeds `view_tag = SHA256("orbinum-view-tag-v1" || sharedSecret)[0]` as the memo's first nonce byte (`nonce[0]`). Memo size (180) and layout are unchanged — no pallet, event, or indexer changes; legacy memos simply carry a random byte there. Nonce safety is unaffected: the ChaCha20-Poly1305 key is unique per note (bound to `sharedSecret || commitment`), so each key encrypts exactly once and 11 random nonce bytes remain. The tag is set before sealing, so the AEAD MAC covers it — a flipped tag cannot silently hide a note from the unfiltered path.
+- `deriveViewTag(sharedSecret)`, `EncryptedMemo.checkViewTag(memo, sharedSecret)` (one SHA256 + one byte compare, no AEAD work) and `EncryptedMemo.decryptWithSharedSecret(memo, commitment, sharedSecret)` (skips the ECDH when the caller already extracted the secret).
+- `tryDecryptNote` / `tryDecryptNoteVerbose` accept `opts: { viewTag: true }` — the fast path runs the ECDH once, compares the tag and skips the AEAD decrypt on mismatch (`reason: 'view_tag_mismatch'`, 255/256 of foreign notes). The extracted shared secret is reused by the stealth branch (no second ECDH). **Only enable for commitments at/after the wallet's `tagActivationLeaf`** — filtering legacy memos would drop 255/256 of the owner's own pre-activation notes.
+- Fixed test vector pinning the derivation as a cross-repo contract (`tests/shielded-pool/ViewTag.test.ts`).
+
 ## [0.14.1] - 2026-07-16
 
 ### Fixed
