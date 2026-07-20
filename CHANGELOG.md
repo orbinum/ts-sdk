@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-07-20
+
+### Added
+
+- **Deterministic self-note ephemerals (fast cold restore)**. Notes the wallet creates for itself (shields, change, self-transfers) can derive the memo's ephemeral secret from the seed instead of randomness: `deriveSelfEphSk(spendingKey, index)` = `SHA256("orbinum-self-eph-v1" || spendingKey_LE32 || u32le(index))`, passed via the new `NoteInput.ephSkOverride` (non-stealth path only — the stealth path keeps generating its own coordinated ephemeral). A cold restore then recognizes its own notes by a hash lookup on the published ephPk — zero trial ECDH per pool hint. The published points are PRF-derived and indistinguishable from the random ephemerals used before (same argument as BIP-32 HD public keys). The index is a monotonic per-wallet counter callers must persist and never reuse (an index reuse publishes the same ephPk twice, linking the two notes as same-creator).
+- `selfEphWindow(spendingKey, ivkPacked, from, count)` — precomputes the discovery window: for each index, the ephPk the wallet would have published (byte-identical to the memo's last 32 bytes) and the ECDH shared secret needed to decrypt it.
+- `tryDecryptNote` / `tryDecryptNoteVerbose` accept `opts.sharedSecret` — a caller-supplied precomputed secret (from a window match) that skips both the ECDH and the view-tag gate; the AEAD decrypt and commitment check still validate the note as usual. A wrong secret fails the MAC — no false accepts.
+- Fixed test vector pinning the derivation as a cross-repo contract, plus a triple-agreement test (window path == view-tag path == full path on the same note).
+
+### Changed
+
+- **BabyJubJub scalar multiplication is ~17× faster** (`src/utils/bjj-fast.ts`, backed by `@noble/curves`). `@zk-kit/baby-jubjub`'s plain double-and-add mul made the EC math ~90% of a wallet rescan (~6ms per mul in a browser tab); the noble-backed `fastMulBase` (precomputed generator tables, 11×) and `fastMulPoint` (`multiplyUnsafe`, 17×, same variable-time class as the mul it replaces — no constant-time regression) now serve the hot paths: `EncryptedMemo.encrypt`, `EncryptedMemo.extractSharedSecret` (the per-hint scan ECDH) and `selfEphWindow`. Point packing stays on `@zk-kit` — its packed format is the on-chain memo format and noble's is not compatible. Results are byte-identical, pinned by an equivalence suite (`tests/utils/bjj-fast.test.ts`: scalar sweeps on base and variable points, edge scalars, identity). Measured end-to-end on a 14k-leaf pool: full rescan 106s → 8.9s.
+- New dependency: `@noble/curves` (already sharing the `@noble` family with ciphers/hashes).
+
 ## [0.15.0] - 2026-07-20
 
 ### Added

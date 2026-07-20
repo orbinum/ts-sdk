@@ -5,6 +5,7 @@ export { createNoteDisclosureKey, decodeNoteDisclosureKey } from './NoteDisclosu
 export type { NoteDisclosure } from './NoteDisclosure';
 export { selectNotes, buildDummyTransferInput } from './coinSelection';
 export { serializeMemo, deriveEncryptionKey, deriveViewTag } from './memo';
+export { deriveSelfEphSk, selfEphWindow, type SelfEphWindowEntry } from './selfEph';
 export type {
     MerkleTreeInfo,
     ScanCommitment,

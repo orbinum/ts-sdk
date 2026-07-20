@@ -1,6 +1,6 @@
 {
   "name": "@orbinum/sdk",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "Official TypeScript SDK for Orbinum.",
   "author": "Orbinum",
   "license": "MIT",
@@ -58,6 +58,7 @@
   },
   "dependencies": {
     "@noble/ciphers": "2.2.0",
+    "@noble/curves": "^2.2.0",
     "@noble/hashes": "2.2.0",
     "@orbinum/proof-generator": "4.0.0",
     "@polkadot-api/metadata-builders": "0.14.2",

@@ -47,6 +47,13 @@ export interface TryDecryptOptions {
      * legacy memos carry a random byte there and would be silently dropped.
      */
     viewTag?: boolean;
+    /**
+     * Precomputed ECDH shared secret (self-note discovery: the caller matched
+     * the hint's ephPk against a selfEphWindow and already holds the secret).
+     * Skips the ECDH and the view-tag gate entirely; the decrypt + commitment
+     * check still validate the note as usual.
+     */
+    sharedSecret?: Uint8Array;
 }
 
 /**
@@ -105,8 +112,10 @@ export function tryDecryptNoteVerbose(
 
     // View-tag fast path: ECDH once, compare one byte, decrypt only on match.
     // The extracted secret is reused by the stealth branch (no second ECDH).
-    let sharedSecret: Uint8Array | null = null;
-    if (opts?.viewTag) {
+    // A caller-supplied secret (self-note discovery) skips both the ECDH and
+    // the tag gate.
+    let sharedSecret: Uint8Array | null = opts?.sharedSecret ?? null;
+    if (!sharedSecret && opts?.viewTag) {
         sharedSecret = EncryptedMemo.extractSharedSecret(memoBytes, viewingSecretKey);
         if (!sharedSecret) return { note: null, reason: 'stealth_shared_secret_failed' };
         if (!EncryptedMemo.checkViewTag(memoBytes, sharedSecret)) {

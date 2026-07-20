@@ -152,7 +152,8 @@ export class NoteBuilder {
                           commitmentBytes,
                           input.viewingPublicKey,
                           bigintTo32Le(counterpartyPk),
-                          circuitVersion
+                          circuitVersion,
+                          input.ephSkOverride
                       )
                   )
                 : Array.from(EncryptedMemo.dummy());
