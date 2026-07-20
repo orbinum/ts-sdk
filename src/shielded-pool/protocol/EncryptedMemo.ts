@@ -1,7 +1,8 @@
 /**
  * EncryptedMemo — TypeScript implementation of Orbinum's encrypted note memo.
  *
- * Mirrors primitives/encrypted-memo in the node repository; no WASM required.
+ * Native TypeScript implementation — no WASM required. This file IS the
+ * normative memo format: the chain treats memos as opaque 180-byte blobs.
  *
  * Layout (180 bytes, ECDH):
  *   nonce(12) || ciphertext+MAC(136) || ephPk_packed(32) = 180
@@ -29,7 +30,8 @@
 
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { randomBytes } from '@noble/ciphers/utils.js';
-import { mulPointEscalar, Base8, packPoint, unpackPoint } from '@zk-kit/baby-jubjub';
+import { packPoint, unpackPoint } from '@zk-kit/baby-jubjub';
+import { fastMulBase, fastMulPoint } from '../../utils/bjj-fast';
 import { bigintTo32Le, bytesToBigintLE } from '../../utils/bytes';
 import { BABYJUB_SUBORDER } from '../../utils/crypto-constants';
 import { deriveEncryptionKey, deriveViewTag, serializeMemo } from './memo';
@@ -46,8 +48,9 @@ export const ENCRYPTED_MEMO_SIZE = NONCE_SIZE + CIPHERTEXT_SIZE + EPH_PK_SIZE; /
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
-/** Convert 32-byte big-endian buffer to a BABYJUB_SUBORDER-clamped scalar. */
-function bytesToBjjScalar(bytes: Uint8Array): bigint {
+/** Convert 32-byte big-endian buffer to a BABYJUB_SUBORDER-clamped scalar.
+ * Exported: selfEph.ts must clamp identically to reproduce published ephPks. */
+export function bytesToBjjScalar(bytes: Uint8Array): bigint {
     const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
     return BigInt('0x' + hex) % BABYJUB_SUBORDER || 1n;
 }
@@ -137,7 +140,7 @@ export const EncryptedMemo = {
             if (ephSkBytes.length !== 32)
                 throw new Error('EncryptedMemo.encrypt: ephSkOverride must be 32 bytes');
             const ephSkScalar = bytesToBjjScalar(ephSkBytes);
-            const ephPkPoint = mulPointEscalar(Base8, ephSkScalar);
+            const ephPkPoint = fastMulBase(ephSkScalar);
             ephPkPackedBytes = bigintTo32Le(packPoint(ephPkPoint) as bigint);
 
             const ivkPackedBigint = bytesToBigintLE(recipientIvkPacked);
@@ -145,7 +148,7 @@ export const EncryptedMemo = {
             if (!ivkPoint)
                 throw new Error('EncryptedMemo.encrypt: invalid recipient viewing public key');
 
-            const sharedPoint = mulPointEscalar(ivkPoint, ephSkScalar);
+            const sharedPoint = fastMulPoint(ivkPoint, ephSkScalar);
             sharedSecret = bigintTo32Le(sharedPoint[0]);
         }
 
@@ -258,7 +261,7 @@ export const EncryptedMemo = {
         const ephPkPoint = unpackPoint(ephPkPackedBigint);
         if (!ephPkPoint) return null;
         const ivskScalar = bytesToBjjScalar(viewingSecretKey);
-        const sharedPoint = mulPointEscalar(ephPkPoint, ivskScalar);
+        const sharedPoint = fastMulPoint(ephPkPoint, ivskScalar);
         return bigintTo32Le(sharedPoint[0]);
     },
 

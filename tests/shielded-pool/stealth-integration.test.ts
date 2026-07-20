@@ -1,7 +1,7 @@
 /**
  * stealth-integration.test.ts
  *
- * Fase 2 — Tests de integración end-to-end del esquema stealth.
+ * Tests de integración end-to-end del esquema stealth.
  *
  * Estos tests usan criptografía real (sin mocks) para verificar que el flujo
  * completo shield → stealth → scan → nota recuperable funciona correctamente.

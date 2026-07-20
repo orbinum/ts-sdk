@@ -10,8 +10,8 @@ const VIEW_TAG_DOMAIN = new TextEncoder().encode('orbinum-view-tag-v1');
  * value is stored as a 128-bit LE unsigned integer split into two uint64 words.
  * This supports values up to ~3.4 × 10^38, well above any realistic token supply.
  * circuit_version (u32 LE) is the ZK circuit version the note is spent under — carried in the
- * note so a scan-recovered note keeps its version without an indexer lookup. MUST match the
- * node crate `orbinum-encrypted-memo` byte-for-byte (MemoData layout).
+ * note so a scan-recovered note keeps its version without an indexer lookup. This layout is
+ * the wire contract for every memo already on chain — any change needs a new version scheme.
  */
 export const MEMO_PLAINTEXT_SIZE = 120;
 

@@ -139,6 +139,13 @@ export type NoteInput = {
     counterpartyPk?: bigint;
     /** Circuit version to stamp on the note. Defaults to `CURRENT_CIRCUIT_VERSION`. */
     circuitVersion?: number;
+    /**
+     * 32-byte ephemeral secret for the memo ECDH. Self-notes pass a
+     * deterministic one (deriveSelfEphSk) so a cold restore recognizes them by
+     * ephPk equality with no trial ECDH. Ignored on the stealth path (it
+     * generates its own coordinated ephSk). Default: random.
+     */
+    ephSkOverride?: Uint8Array;
 };
 
 /**

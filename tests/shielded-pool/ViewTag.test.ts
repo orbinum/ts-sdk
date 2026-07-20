@@ -73,8 +73,9 @@ describe('deriveViewTag', () => {
     h.update(new TextEncoder().encode('orbinum-view-tag-v1'));
     h.update(ss);
     const expected = h.digest()[0]!;
-    // The derivation is a cross-repo contract (node crate mirror, docs). A
-    // change here must fail this test consciously, not drift silently.
+    // The derivation is a contract: every tag already embedded in on-chain
+    // memos depends on it. A change must fail this test consciously, not
+    // drift silently.
     expect(deriveViewTag(ss)).toBe(expected);
   });
 });
