@@ -6,6 +6,11 @@
  * Layout (180 bytes, ECDH):
  *   nonce(12) || ciphertext+MAC(136) || ephPk_packed(32) = 180
  *
+ * View tag (memos built by SDK ≥ 0.15): nonce[0] = deriveViewTag(sharedSecret)
+ * — see memo.ts. Layout and size are unchanged; legacy memos carry a random
+ * byte there instead, so the filter is only sound at/after the wallet's
+ * tagActivationLeaf.
+ *
  * Plaintext layout (120 bytes):
  *   value_lo(8 LE) || value_hi(8 LE) || owner_pk(32) || blinding(32) || asset_id(4 LE) || counterparty_pk(32) || circuit_version(4 LE)
  *
@@ -27,7 +32,7 @@ import { randomBytes } from '@noble/ciphers/utils.js';
 import { mulPointEscalar, Base8, packPoint, unpackPoint } from '@zk-kit/baby-jubjub';
 import { bigintTo32Le, bytesToBigintLE } from '../../utils/bytes';
 import { BABYJUB_SUBORDER } from '../../utils/crypto-constants';
-import { deriveEncryptionKey, serializeMemo } from './memo';
+import { deriveEncryptionKey, deriveViewTag, serializeMemo } from './memo';
 import type { DecryptedMemo } from './types';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -144,6 +149,10 @@ export const EncryptedMemo = {
             sharedSecret = bigintTo32Le(sharedPoint[0]);
         }
 
+        // View tag as nonce[0], set BEFORE sealing so the AEAD MAC binds it —
+        // a flipped tag cannot silently hide a note from a filtered scan.
+        nonce[0] = deriveViewTag(sharedSecret);
+
         const encKey = deriveEncryptionKey(sharedSecret, commitment);
         const cipher = chacha20poly1305(encKey, nonce);
         const ciphertext = cipher.encrypt(plaintext); // 136 bytes (120 + 16 MAC)
@@ -253,31 +262,44 @@ export const EncryptedMemo = {
         return bigintTo32Le(sharedPoint[0]);
     },
 
+    /**
+     * Cheap view-tag check: does memo nonce[0] match the tag derived from
+     * `sharedSecret`? One SHA256 + one byte compare — no AEAD work.
+     *
+     * Only meaningful for memos built with view tags (commitments at/after
+     * the wallet's tagActivationLeaf): a legacy memo carries a random byte
+     * there and would false-negative 255/256 of the time.
+     */
+    checkViewTag(memoBytes: Uint8Array, sharedSecret: Uint8Array): boolean {
+        if (memoBytes.length !== ENCRYPTED_MEMO_SIZE) return false;
+        return memoBytes[0] === deriveViewTag(sharedSecret);
+    },
+
+    /**
+     * Decrypt with an already-computed shared secret (from
+     * extractSharedSecret), skipping the ECDH. Pair with checkViewTag for the
+     * fast scan path: ECDH once → tag check → decrypt only on match.
+     */
+    decryptWithSharedSecret(
+        memoBytes: Uint8Array,
+        commitment: Uint8Array,
+        sharedSecret: Uint8Array
+    ): DecryptedMemo | null {
+        if (memoBytes.length !== ENCRYPTED_MEMO_SIZE) return null;
+        const nonce = memoBytes.slice(0, NONCE_SIZE);
+        const ciphertextWithMac = memoBytes.slice(NONCE_SIZE, NONCE_SIZE + CIPHERTEXT_SIZE);
+        const encKey = deriveEncryptionKey(sharedSecret, commitment);
+        return parsePlaintext(nonce, ciphertextWithMac, encKey);
+    },
+
     /** @internal */
     _decrypt(
         memoBytes: Uint8Array,
         commitment: Uint8Array,
         viewingSecretKey: Uint8Array
     ): DecryptedMemo | null {
-        const nonce = memoBytes.slice(0, NONCE_SIZE);
-        const ciphertextWithMac = memoBytes.slice(NONCE_SIZE, NONCE_SIZE + CIPHERTEXT_SIZE);
-        const ephPkPackedBytes = memoBytes.slice(NONCE_SIZE + CIPHERTEXT_SIZE);
-
-        const ephPkPackedBigint = bytesToBigintLE(ephPkPackedBytes);
-
-        let sharedSecret: Uint8Array;
-        if (ephPkPackedBigint === 0n) {
-            // Public note (zero ephPk → zero shared secret).
-            sharedSecret = new Uint8Array(32);
-        } else {
-            const ephPkPoint = unpackPoint(ephPkPackedBigint);
-            if (!ephPkPoint) return null;
-            const ivskScalar = bytesToBjjScalar(viewingSecretKey);
-            const sharedPoint = mulPointEscalar(ephPkPoint, ivskScalar);
-            sharedSecret = bigintTo32Le(sharedPoint[0]);
-        }
-
-        const encKey = deriveEncryptionKey(sharedSecret, commitment);
-        return parsePlaintext(nonce, ciphertextWithMac, encKey);
+        const sharedSecret = EncryptedMemo.extractSharedSecret(memoBytes, viewingSecretKey);
+        if (!sharedSecret) return null;
+        return EncryptedMemo.decryptWithSharedSecret(memoBytes, commitment, sharedSecret);
     },
 };

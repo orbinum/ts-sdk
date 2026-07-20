@@ -37,6 +37,18 @@ export function computeNullifier(commitment: bigint, spendingKey: bigint): bigin
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+export interface TryDecryptOptions {
+    /**
+     * View-tag fast path: compute the ECDH shared secret once, compare the
+     * 1-byte tag in memo nonce[0], and skip the AEAD decrypt on mismatch
+     * (255/256 of foreign notes; `reason: 'view_tag_mismatch'`).
+     *
+     * Only enable for commitments at/after the wallet's tagActivationLeaf —
+     * legacy memos carry a random byte there and would be silently dropped.
+     */
+    viewTag?: boolean;
+}
+
 /**
  * Attempt to decrypt an on-chain commitment using the recipient's viewing secret key.
  *
@@ -50,14 +62,16 @@ export function computeNullifier(commitment: bigint, spendingKey: bigint): bigin
  * @param spendingKey      Spending key bigint (for nullifier computation).
  * @param ownOwnerPk       The viewer's global BabyJubJub Ax (ownerPk). Required for stealth detection.
  *                         Pass 0n to disable stealth detection (legacy/own-note-only scanning).
+ * @param opts             See TryDecryptOptions (view-tag fast path).
  */
 export function tryDecryptNote(
     commitment: ScanCommitment,
     viewingSecretKey: Uint8Array,
     spendingKey: bigint,
-    ownOwnerPk: bigint = 0n
+    ownOwnerPk: bigint = 0n,
+    opts?: TryDecryptOptions
 ): ZkNote | null {
-    return tryDecryptNoteVerbose(commitment, viewingSecretKey, spendingKey, ownOwnerPk).note;
+    return tryDecryptNoteVerbose(commitment, viewingSecretKey, spendingKey, ownOwnerPk, opts).note;
 }
 
 /**
@@ -68,7 +82,8 @@ export function tryDecryptNoteVerbose(
     commitment: ScanCommitment,
     viewingSecretKey: Uint8Array,
     spendingKey: bigint,
-    ownOwnerPk: bigint = 0n
+    ownOwnerPk: bigint = 0n,
+    opts?: TryDecryptOptions
 ): { note: ZkNote | null; reason?: string } {
     if (!commitment.encryptedMemo) return { note: null, reason: 'no_memo' };
 
@@ -88,7 +103,20 @@ export function tryDecryptNoteVerbose(
         };
     }
 
-    const plaintext = EncryptedMemo.decrypt(memoBytes, commitmentBytes, viewingSecretKey);
+    // View-tag fast path: ECDH once, compare one byte, decrypt only on match.
+    // The extracted secret is reused by the stealth branch (no second ECDH).
+    let sharedSecret: Uint8Array | null = null;
+    if (opts?.viewTag) {
+        sharedSecret = EncryptedMemo.extractSharedSecret(memoBytes, viewingSecretKey);
+        if (!sharedSecret) return { note: null, reason: 'stealth_shared_secret_failed' };
+        if (!EncryptedMemo.checkViewTag(memoBytes, sharedSecret)) {
+            return { note: null, reason: 'view_tag_mismatch' };
+        }
+    }
+
+    const plaintext = sharedSecret
+        ? EncryptedMemo.decryptWithSharedSecret(memoBytes, commitmentBytes, sharedSecret)
+        : EncryptedMemo.decrypt(memoBytes, commitmentBytes, viewingSecretKey);
     if (!plaintext) return { note: null, reason: 'decrypt_failed:wrong_key_or_corrupt_mac' };
 
     // Stealth detection: if the decrypted ownerPk differs from our global ownerPk, this is
@@ -98,22 +126,22 @@ export function tryDecryptNoteVerbose(
     let effectiveSpendingKey = spendingKey;
 
     if (ownOwnerPk !== 0n && plaintext.ownerPk !== ownOwnerPk) {
-        // Extract the sharedSecret from the memo using our viewing secret key.
-        const sharedSecret = EncryptedMemo.extractSharedSecret(memoBytes, viewingSecretKey);
-        if (!sharedSecret) return { note: null, reason: 'stealth_shared_secret_failed' };
+        // Shared secret: reuse the fast-path one, or extract it now.
+        const ss = sharedSecret ?? EncryptedMemo.extractSharedSecret(memoBytes, viewingSecretKey);
+        if (!ss) return { note: null, reason: 'stealth_shared_secret_failed' };
 
         // Recover the full BJJ point [Ax, Ay] from our ownerPk (Ax only).
         const ownPkPoint = recoverOwnerPkPoint(ownOwnerPk);
         if (!ownPkPoint) return { note: null, reason: 'stealth_invalid_own_owner_pk' };
 
         // Derive the expected stealthOwnerPk and verify it matches the decrypted plaintext.
-        const stealthOwnerPk = deriveStealthOwnerPk(sharedSecret, ownOwnerPk, ownPkPoint);
+        const stealthOwnerPk = deriveStealthOwnerPk(ss, ownOwnerPk, ownPkPoint);
         if (stealthOwnerPk !== plaintext.ownerPk) {
             return { note: null, reason: 'commitment_mismatch' };
         }
 
         effectiveOwnerPk = stealthOwnerPk;
-        effectiveSpendingKey = deriveStealthSk(sharedSecret, ownOwnerPk, spendingKey);
+        effectiveSpendingKey = deriveStealthSk(ss, ownOwnerPk, spendingKey);
     }
 
     // Verify: recompute commitment and assert it matches the on-chain value.

@@ -1,6 +1,7 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 
 const KEY_DOMAIN = new TextEncoder().encode('orbinum-note-encryption-v1');
+const VIEW_TAG_DOMAIN = new TextEncoder().encode('orbinum-view-tag-v1');
 
 /**
  * Plaintext layout (120 bytes):
@@ -47,4 +48,26 @@ export function deriveEncryptionKey(sharedSecret: Uint8Array, commitment: Uint8A
     h.update(commitment);
     h.update(KEY_DOMAIN);
     return h.digest();
+}
+
+/**
+ * Derive the 1-byte view tag (Monero-style fast-scan filter) from the ECDH
+ * shared secret:
+ *   view_tag = SHA256("orbinum-view-tag-v1" || sharedSecret)[0]
+ *
+ * The sender embeds it as the memo's first nonce byte (nonce[0]); a scanner
+ * that has computed the shared secret compares one byte and skips the AEAD
+ * decrypt on mismatch — 255/256 of foreign notes. Safe to publish: without
+ * the viewing key the shared secret is unknowable, so the byte reads as
+ * uniform noise to any observer.
+ *
+ * Nonce safety: the encryption key is unique per note (see
+ * deriveEncryptionKey), so each key encrypts exactly one message and the
+ * remaining 11 random nonce bytes are more than enough.
+ */
+export function deriveViewTag(sharedSecret: Uint8Array): number {
+    const h = sha256.create();
+    h.update(VIEW_TAG_DOMAIN);
+    h.update(sharedSecret);
+    return h.digest()[0]!;
 }
