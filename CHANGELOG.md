@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-07-24
+
+### Added
+
+- `computeNoteCommitment(value, assetId, ownerPk, blinding)` — computes a note commitment (`Poseidon4`), mirroring `NoteCommitment` in `note.circom`. Exported so wallets can verify a stored note against its on-chain commitment *before* proving. The ZK circuits ignore the ownerPk supplied by the caller and rebuild the commitment from `BabyPbk(spending_key).Ax`; if a stored note's spendingKey, value, assetId or blinding drift from what was committed on-chain, witness generation fails on the Merkle constraint with an opaque `Assert Failed` (e.g. `Unshield_164 line: 82`) after seconds of proving. Recomputing the commitment with `deriveOwnerPk(spendingKey)` and comparing it against the note's `commitmentHex` detects the drift up front — wrong session key (non-deterministic signers: smart/MPC wallets), a mis-recovered stealth key, or a corrupted vault note. Covered by tests pinning it byte-identical to `NoteBuilder`'s commitment, including the re-derived-ownerPk path and the LE `commitmentHex` round-trip.
+
 ## [0.16.0] - 2026-07-20
 
 ### Added
