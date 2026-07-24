@@ -35,6 +35,22 @@ export function computeNullifier(commitment: bigint, spendingKey: bigint): bigin
     return poseidon2([commitment, spendingKey]);
 }
 
+/**
+ * Computes a note commitment.
+ *   commitment = Poseidon4(value, assetId, ownerPk, blinding)
+ *
+ * Mirrors NoteCommitment in note.circom — use it to verify a stored note
+ * against its on-chain commitment before spending it.
+ */
+export function computeNoteCommitment(
+    value: bigint,
+    assetId: bigint,
+    ownerPk: bigint,
+    blinding: bigint
+): bigint {
+    return poseidon4([value, assetId, ownerPk, blinding]);
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export interface TryDecryptOptions {

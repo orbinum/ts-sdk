@@ -3,11 +3,13 @@ import {
     tryDecryptNote,
     tryDecryptNoteVerbose,
     computeNullifier,
+    computeNoteCommitment,
     type ScanCommitment,
 } from '../../src/shielded-pool/protocol/NoteDecryptor';
 import { NoteBuilder } from '../../src/shielded-pool/protocol/NoteBuilder';
 import { deriveViewingSecretKey, deriveViewingPublicKey, deriveOwnerPk } from '../../src/privacy-keys/PrivacyKeys';
-import { toHex } from '../../src/utils/hex';
+import { toHex, fromHex } from '../../src/utils/hex';
+import { bytesToBigintLE } from '../../src/utils/bytes';
 import { CURRENT_CIRCUIT_VERSION, type ZkNote } from '../../src/shielded-pool/protocol/types';
 
 // ─── Test fixtures ────────────────────────────────────────────────────────────
@@ -335,6 +337,60 @@ describe('computeNullifier', () => {
     const decrypted = tryDecryptNote(commitment, vsk, sk);
     expect(decrypted).not.toBeNull();
     expect(decrypted!.nullifier).toBe(computeNullifier(n.commitment, sk));
+  });
+});
+
+// ─── computeNoteCommitment ────────────────────────────────────────────────────
+
+describe('computeNoteCommitment', () => {
+  it('matches the commitment produced by NoteBuilder for the same inputs', () => {
+    // `note` is built in beforeAll with value=1000n, assetId=0n, blinding=42n.
+    const recomputed = computeNoteCommitment(note.value, note.assetId, note.ownerPk, note.blinding);
+    expect(recomputed).toBe(note.commitment);
+  });
+
+  it('matches when ownerPk is re-derived from the spending key (circuit invariant)', async () => {
+    // Mirrors the pre-proof guard: BabyPbk(spending_key).Ax must reproduce
+    // the on-chain commitment. Same path as unshield.circom:60-71.
+    // Needs a note whose ownerPk was actually derived from the spending key
+    // (the shared fixture uses ownerPk: 0n literally).
+    const ownedNote = await NoteBuilder.build({
+      value: 250n,
+      assetId: 1n,
+      ownerPk: deriveOwnerPk(SPENDING_KEY),
+      blinding: 55n,
+      spendingKey: SPENDING_KEY,
+    });
+    const recomputed = computeNoteCommitment(
+      ownedNote.value,
+      ownedNote.assetId,
+      deriveOwnerPk(SPENDING_KEY),
+      ownedNote.blinding,
+    );
+    expect(recomputed).toBe(ownedNote.commitment);
+    expect(recomputed).toBe(bytesToBigintLE(fromHex(ownedNote.commitmentHex)));
+  });
+
+  it('round-trips through commitmentHex (LE bytes) as the app guard compares it', () => {
+    const fromHexScalar = bytesToBigintLE(fromHex(note.commitmentHex));
+    const recomputed = computeNoteCommitment(note.value, note.assetId, note.ownerPk, note.blinding);
+    expect(recomputed).toBe(fromHexScalar);
+  });
+
+  it('is deterministic', () => {
+    expect(computeNoteCommitment(1n, 2n, 3n, 4n)).toBe(computeNoteCommitment(1n, 2n, 3n, 4n));
+  });
+
+  it('changes when any field changes', () => {
+    const base = computeNoteCommitment(1n, 2n, 3n, 4n);
+    expect(computeNoteCommitment(9n, 2n, 3n, 4n)).not.toBe(base);
+    expect(computeNoteCommitment(1n, 9n, 3n, 4n)).not.toBe(base);
+    expect(computeNoteCommitment(1n, 2n, 9n, 4n)).not.toBe(base);
+    expect(computeNoteCommitment(1n, 2n, 3n, 9n)).not.toBe(base);
+  });
+
+  it('is order-sensitive — matches Poseidon4(value, assetId, ownerPk, blinding) exactly', () => {
+    expect(computeNoteCommitment(1n, 2n, 3n, 4n)).not.toBe(computeNoteCommitment(4n, 3n, 2n, 1n));
   });
 });
 

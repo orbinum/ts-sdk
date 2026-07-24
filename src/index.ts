@@ -65,6 +65,7 @@ export {
     tryDecryptNote,
     tryDecryptNoteVerbose,
     computeNullifier,
+    computeNoteCommitment,
     deriveViewTag,
     deriveSelfEphSk,
     selfEphWindow,

@@ -22,6 +22,7 @@ export {
     tryDecryptNote,
     tryDecryptNoteVerbose,
     computeNullifier,
+    computeNoteCommitment,
     type TryDecryptOptions,
 } from './protocol/NoteDecryptor';
 export { createNoteDisclosureKey, decodeNoteDisclosureKey } from './protocol/NoteDisclosure';
