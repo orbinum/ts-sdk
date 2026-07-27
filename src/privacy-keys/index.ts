@@ -5,6 +5,7 @@ export {
     SPENDING_KEY_WARNING,
 } from './SpendingKeyRequest';
 export type { SpendingKeyTypedData } from './SpendingKeyRequest';
+export { canonicalAccountId } from './accountIdentity';
 export {
     deriveSpendingKeyFromSignature,
     deriveMasterKeyBytes,

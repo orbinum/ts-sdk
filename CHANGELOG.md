@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-07-27
+
+### Fixed
+
+- **An SS58 address no longer rotates the spending key when its network prefix changes.** The address string is load-bearing twice — it goes into the signed payload *and* into the HKDF `info` — and SS58 encodes the same public key differently per prefix (`5Grwva…` under the generic prefix 42, `kcuMUg…` under 2700). A wallet listing an account under one prefix today and another tomorrow (a wallet setting, a chain-metadata update) therefore derived a **different** spending key for the same account, and the user opened the app to an empty vault with no error: a fresh, valid, empty identity rather than a failure. `canonicalAccountId` now reduces SS58 to the underlying 32-byte public key before it reaches either the message builder or the KDF, so every prefix of one account maps to one identity. EVM addresses pass through lowercased and unchanged. Regression tests pin that the derived key and the signed Substrate message are identical across prefixes 0, 42 and 2700, and that distinct accounts stay distinct.
+
+### Added
+
+- `canonicalAccountId(address)` — the identifier derivation actually uses. Exported so callers can key their own per-identity storage the same way instead of on a prefix-dependent string.
+
 ## [0.20.0] - 2026-07-27
 
 ### Removed

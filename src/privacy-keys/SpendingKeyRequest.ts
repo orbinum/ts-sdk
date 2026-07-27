@@ -36,6 +36,7 @@
  */
 
 import { PRECOMPILE_ADDR } from '../precompiles/addresses';
+import { canonicalAccountId } from './accountIdentity';
 
 /**
  * EIP-712 `verifyingContract` for spending-key derivation: the shielded pool
@@ -118,6 +119,6 @@ export function deriveSpendingKeyTypedData(chainId: number, address: string): Sp
 export function deriveSpendingKeyMessageV2(chainId: number, address: string): string {
     return (
         `⚠ ${SPENDING_KEY_WARNING}\n\n` +
-        `orbinum-spending-key-v2\n${chainId}\n${address.toLowerCase()}`
+        `orbinum-spending-key-v2\n${chainId}\n${canonicalAccountId(address)}`
     );
 }
