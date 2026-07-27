@@ -96,6 +96,7 @@ export class OrbinumClientProvider {
     private _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     private _stableTimer: ReturnType<typeof setTimeout> | null = null;
     private _reconnectAttempt = 0;
+    private _probeFailures = 0;
 
     // ─── Events ─────────────────────────────────────────────────────────────
     private _listeners: Set<StatusListener> = new Set();
@@ -255,13 +256,39 @@ export class OrbinumClientProvider {
 
     // ─── Heartbeat ──────────────────────────────────────────────────────────
 
+    /**
+     * Consecutive failed probes required before the client is torn down. A
+     * single missed probe is routine (throttled background tab, node busy
+     * verifying a ZK proof, transient network blip) — destroying the client on
+     * it rejects every in-flight request with "Client destroyed" even though
+     * the tx may still land on-chain.
+     */
+    private static readonly PROBE_FAILURE_THRESHOLD = 2;
+    /**
+     * With a tx awaiting finalization, tolerate more missed probes: an unsigned
+     * private_transfer/unshield makes the node CPU-bound on proof verification,
+     * which is exactly when probes time out — tearing down then kills the very
+     * tx being processed.
+     */
+    private static readonly PROBE_FAILURE_THRESHOLD_INFLIGHT = 6;
+
     /** Starts the periodic heartbeat loop. Replaces any existing timer. */
     private startHeartbeat(): void {
         this.stopHeartbeat();
+        this._probeFailures = 0;
         this._heartbeatTimer = setInterval(async () => {
             if (this._status !== 'connected' || !this._orbinumClient) return;
             const alive = await this.probe();
-            if (!alive && this._status === 'connected') {
+            if (this._status !== 'connected') return;
+            if (alive) {
+                this._probeFailures = 0;
+                return;
+            }
+            this._probeFailures++;
+            const threshold = this._orbinumClient?.substrate.hasInflightTx
+                ? OrbinumClientProvider.PROBE_FAILURE_THRESHOLD_INFLIGHT
+                : OrbinumClientProvider.PROBE_FAILURE_THRESHOLD;
+            if (this._probeFailures >= threshold) {
                 this.setStatus('disconnected', 'Node is unreachable');
                 this.teardownClient();
                 this.scheduleReconnect();

@@ -135,20 +135,52 @@ export class EvmClient {
     }
 
     /**
+     * Fetches a transaction by hash, or `null` when the node no longer knows it
+     * (never mined and evicted from the pool). Unlike `request`, a `null`
+     * result is a valid answer here, not an error.
+     */
+    async getTransactionByHash(txHash: string): Promise<Record<string, unknown> | null> {
+        const res = await postJsonWithRetry(
+            this.rpcUrl,
+            JSON.stringify({
+                id: 1,
+                jsonrpc: '2.0',
+                method: 'eth_getTransactionByHash',
+                params: [txHash],
+            })
+        );
+        if (!res.ok) throw new Error(`EVM HTTP ${res.status}: ${res.statusText}`);
+        const json = (await res.json()) as JsonRpcResponse<Record<string, unknown>>;
+        if (json.error) {
+            throw new Error(`EVM RPC [${json.error.code}]: ${json.error.message}`);
+        }
+        return json.result ?? null;
+    }
+
+    /**
      * Polls `eth_getTransactionReceipt` until the transaction is included in a block.
+     *
+     * After `timeoutMs`, the tx-pool is consulted: a tx no longer known to the
+     * node is reported as dropped (safe to retry), while a tx still in the pool
+     * gets an extended grace window (up to 4× `timeoutMs`) before a "still
+     * pending" error — it may confirm later, so callers must NOT blindly retry.
      *
      * @param txHash - The transaction hash to wait for.
      * @param intervalMs - Polling interval in milliseconds (default: 500).
      * @param timeoutMs - Maximum time to wait in milliseconds (default: 60_000).
      * @returns The transaction receipt once mined.
-     * @throws If the transaction is not mined within `timeoutMs` or if it reverted (`status == 0x0`).
+     * @throws If the transaction dropped, is still pending after the grace window, or reverted (`status == 0x0`).
      */
     async waitForReceipt(
         txHash: string,
         intervalMs = 500,
         timeoutMs = 60_000
     ): Promise<Record<string, unknown>> {
-        const deadline = Date.now() + timeoutMs;
+        // Hard cap: keep waiting past the soft deadline only while the pool
+        // still knows the tx — bounded so a stuck tx can't hang the caller forever.
+        const start = Date.now();
+        const hardDeadline = start + timeoutMs * 4;
+        let deadline = start + timeoutMs;
         while (Date.now() < deadline) {
             const receipt = await this.getTransactionReceipt(txHash);
             if (receipt !== null) {
@@ -166,10 +198,7 @@ export class EvmClient {
                         try {
                             const blockParam =
                                 (receipt['blockNumber'] as string | undefined) ?? 'latest';
-                            const rawTx = await this.request<Record<string, unknown> | null>(
-                                'eth_getTransactionByHash',
-                                [txHash]
-                            ).catch(() => null);
+                            const rawTx = await this.getTransactionByHash(txHash).catch(() => null);
                             if (rawTx) {
                                 // Frontier uses 'input' for the calldata field.
                                 const calldata = (rawTx['input'] ?? rawTx['data']) as
@@ -198,7 +227,24 @@ export class EvmClient {
                 return receipt;
             }
             await new Promise<void>((resolve) => setTimeout(resolve, intervalMs));
+
+            // Soft deadline reached: decide between "dropped" (gone from the
+            // pool — safe to retry) and "still pending" (extend the wait).
+            if (Date.now() >= deadline && Date.now() < hardDeadline) {
+                // RPC failure (undefined) must NOT read as "dropped" — a
+                // transient error would tell the caller a live tx is safe to
+                // retry. Only a definitive null result counts as dropped.
+                const known = await this.getTransactionByHash(txHash).catch(() => undefined);
+                if (known === null) {
+                    throw new Error(
+                        `Transaction dropped from the tx pool (not mined within ${Date.now() - start}ms): ${txHash}`
+                    );
+                }
+                deadline = Math.min(deadline + timeoutMs, hardDeadline);
+            }
         }
-        throw new Error(`Transaction not mined within ${timeoutMs}ms: ${txHash}`);
+        throw new Error(
+            `Transaction still pending after ${Date.now() - start}ms: ${txHash} — it may still confirm; check the hash on the explorer before retrying`
+        );
     }
 }

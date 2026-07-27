@@ -483,3 +483,89 @@ describe('OrbinumClientProvider — connect timeout cleanup', () => {
         provider.reset();
     });
 });
+
+// ─── Heartbeat probe-failure tolerance ────────────────────────────────────────
+
+describe('OrbinumClientProvider — heartbeat probe tolerance', () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    const HEARTBEAT_MS = 500;
+
+    async function connectProvider(orbClient: OrbinumClient): Promise<OrbinumClientProvider> {
+        vi.mocked(OrbinumClient.connect).mockResolvedValue(orbClient);
+        const provider = makeProvider({
+            heartbeatIntervalMs: HEARTBEAT_MS,
+            heartbeatTimeoutMs: 100,
+        });
+        provider.connect();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(provider.status).toBe<ConnectionStatus>('connected');
+        return provider;
+    }
+
+    it('a single failed probe does NOT tear down the client', async () => {
+        const orbClient = makeOrbinumClient();
+        const provider = await connectProvider(orbClient);
+
+        // One failed probe, then healthy again.
+        (orbClient.substrate.request as ReturnType<typeof vi.fn>)
+            .mockRejectedValueOnce(new Error('blip'))
+            .mockResolvedValue({ peers: 1 });
+
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_MS + 10);
+        expect(provider.status).toBe<ConnectionStatus>('connected');
+        expect(orbClient.destroy).not.toHaveBeenCalled();
+
+        // Recovery resets the failure counter: another single blip later still survives.
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_MS);
+        (orbClient.substrate.request as ReturnType<typeof vi.fn>)
+            .mockRejectedValueOnce(new Error('blip'))
+            .mockResolvedValue({ peers: 1 });
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_MS);
+        expect(provider.status).toBe<ConnectionStatus>('connected');
+
+        provider.reset();
+    });
+
+    it('tears down after 2 consecutive failed probes with no tx in flight', async () => {
+        const orbClient = makeOrbinumClient();
+        const provider = await connectProvider(orbClient);
+
+        (orbClient.substrate.request as ReturnType<typeof vi.fn>).mockRejectedValue(
+            new Error('down')
+        );
+
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_MS * 2 + 10);
+        expect(provider.status).not.toBe<ConnectionStatus>('connected');
+        expect(orbClient.destroy).toHaveBeenCalledTimes(1);
+
+        provider.reset();
+    });
+
+    it('tolerates up to 5 failed probes while a tx awaits finalization', async () => {
+        const orbClient = makeOrbinumClient();
+        (orbClient.substrate as unknown as { hasInflightTx: boolean }).hasInflightTx = true;
+        const provider = await connectProvider(orbClient);
+
+        (orbClient.substrate.request as ReturnType<typeof vi.fn>).mockRejectedValue(
+            new Error('node busy verifying zk proof')
+        );
+
+        // 5 failed probes: still connected — the in-flight tx keeps the client alive.
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_MS * 5 + 10);
+        expect(provider.status).toBe<ConnectionStatus>('connected');
+        expect(orbClient.destroy).not.toHaveBeenCalled();
+
+        // 6th consecutive failure: even an in-flight tx can't hold a dead node.
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_MS);
+        expect(provider.status).not.toBe<ConnectionStatus>('connected');
+        expect(orbClient.destroy).toHaveBeenCalledTimes(1);
+
+        provider.reset();
+    });
+});

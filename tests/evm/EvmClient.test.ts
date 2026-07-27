@@ -370,3 +370,97 @@ describe('EvmClient rate-limit retry', () => {
     expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
   });
 });
+
+// ─── EvmClient.waitForReceipt — timeout semantics ─────────────────────────────
+
+describe('EvmClient.waitForReceipt timeout handling', () => {
+  /** Routes fetch by JSON-RPC method; each handler returns the `result` value. */
+  function mockFetchByMethod(handlers: Record<string, () => unknown>): void {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (_url: string, init: { body: string }) => {
+        const { method } = JSON.parse(init.body) as { method: string };
+        const handler = handlers[method];
+        return {
+          ok: true,
+          json: async () => ({ jsonrpc: '2.0', id: 1, result: handler ? handler() : null }),
+        };
+      }),
+    );
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('throws "dropped" when the pool no longer knows the tx after the soft timeout', async () => {
+    vi.useFakeTimers();
+    mockFetchByMethod({
+      eth_getTransactionReceipt: () => null,
+      eth_getTransactionByHash: () => null,
+    });
+
+    const p = new EvmClient('http://localhost')
+      .waitForReceipt('0xabc', 100, 1_000)
+      .then(() => null, (e: Error) => e);
+    await vi.advanceTimersByTimeAsync(1_500);
+    const err = await p;
+    expect(err?.message).toMatch(/dropped from the tx pool/);
+  });
+
+  it('keeps waiting past the soft timeout while the pool knows the tx, and resolves when mined late', async () => {
+    vi.useFakeTimers();
+    let receiptPolls = 0;
+    mockFetchByMethod({
+      // Mine the tx well after the soft timeout (10 polls ≈ 1s at 100ms).
+      eth_getTransactionReceipt: () =>
+        ++receiptPolls > 15 ? { status: '0x1', blockHash: '0x1', blockNumber: '0x2' } : null,
+      eth_getTransactionByHash: () => ({ hash: '0xabc' }),
+    });
+
+    const p = new EvmClient('http://localhost').waitForReceipt('0xabc', 100, 1_000);
+    await vi.advanceTimersByTimeAsync(4_000);
+    const receipt = await p;
+    expect(receipt['status']).toBe('0x1');
+  });
+
+  it('throws "still pending" at the hard cap when the tx never leaves the pool', async () => {
+    vi.useFakeTimers();
+    mockFetchByMethod({
+      eth_getTransactionReceipt: () => null,
+      eth_getTransactionByHash: () => ({ hash: '0xabc' }),
+    });
+
+    const p = new EvmClient('http://localhost')
+      .waitForReceipt('0xabc', 100, 1_000)
+      .then(() => null, (e: Error) => e);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const err = await p;
+    expect(err?.message).toMatch(/still pending after \d+ms/);
+    expect(err?.message).toMatch(/check the hash/);
+  });
+
+  it('treats a pool-check RPC failure as still-pending, never as dropped', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation(async (_url: string, init: { body: string }) => {
+        const { method } = JSON.parse(init.body) as { method: string };
+        if (method === 'eth_getTransactionByHash') {
+          return { ok: false, status: 500, statusText: 'boom' };
+        }
+        return { ok: true, json: async () => ({ jsonrpc: '2.0', id: 1, result: null }) };
+      }),
+    );
+
+    const p = new EvmClient('http://localhost')
+      .waitForReceipt('0xabc', 100, 1_000)
+      .then(() => null, (e: Error) => e);
+    await vi.advanceTimersByTimeAsync(5_000);
+    const err = await p;
+    // A transient RPC error must not report "dropped" (which invites a retry
+    // and a potential double-spend) — it falls through to "still pending".
+    expect(err?.message).toMatch(/still pending/);
+    expect(err?.message).not.toMatch(/dropped/);
+  });
+});

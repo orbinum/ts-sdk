@@ -32,6 +32,29 @@ export class SubstrateClient {
 
     private _dynamicBuilder: ReturnType<typeof getDynamicBuilder> | null = null;
     private _extDecoder: ExtrinsicDecoder | null = null;
+    private _inflightTxCount = 0;
+
+    /**
+     * `true` while any submitted transaction is still waiting for finalization.
+     * Connection managers use this to defer destroying the client — killing the
+     * WS mid-submit rejects the pending tx with "Client destroyed" even though
+     * it may still land on-chain.
+     *
+     * Only covers promise-based submits (`submit`, `submitUnsignedAndWatch`,
+     * `signAndSubmit`); observable-based `submitAndWatch` callers are not tracked.
+     */
+    get hasInflightTx(): boolean {
+        return this._inflightTxCount > 0;
+    }
+
+    private async trackTx<T>(p: Promise<T>): Promise<T> {
+        this._inflightTxCount++;
+        try {
+            return await p;
+        } finally {
+            this._inflightTxCount--;
+        }
+    }
 
     /**
      * Connects to the Orbinum node via WebSocket.
@@ -289,7 +312,7 @@ export class SubstrateClient {
      * Submits a pre-signed extrinsic (hex string) and waits for finalization.
      */
     async submit(signedHex: string): Promise<TxFinalizedPayload> {
-        return this._papi.submit(Binary.fromHex(signedHex));
+        return this.trackTx(this._papi.submit(Binary.fromHex(signedHex)));
     }
 
     /**
@@ -306,7 +329,7 @@ export class SubstrateClient {
      * The bare tx bytes are produced by `tx.getBareTx()` from polkadot-api.
      */
     async submitUnsignedAndWatch(bareTx: Uint8Array): Promise<TxFinalizedPayload> {
-        return this._papi.submit(bareTx);
+        return this.trackTx(this._papi.submit(bareTx));
     }
 
     /**
@@ -314,7 +337,7 @@ export class SubstrateClient {
      */
     async signAndSubmit(callData: Uint8Array, signer: PolkadotSigner): Promise<TxFinalizedPayload> {
         const tx = await this.txFromCallData(callData);
-        return tx.signAndSubmit(signer);
+        return this.trackTx(tx.signAndSubmit(signer));
     }
 
     /** Closes the WebSocket connection. */

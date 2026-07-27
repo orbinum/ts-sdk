@@ -1183,3 +1183,46 @@ describe('SubstrateClient.connect — cleanup on failure', () => {
     expect(papi.destroy).not.toHaveBeenCalled();
   });
 });
+
+// ─── In-flight tx tracking ────────────────────────────────────────────────────
+
+describe('SubstrateClient.hasInflightTx', () => {
+  it('is true while a bare submit is pending and false after it settles', async () => {
+    let resolveSubmit!: (v: unknown) => void;
+    const { client, papi } = await makeClient();
+    papi.submit.mockReturnValue(new Promise((r) => (resolveSubmit = r)));
+
+    expect(client.hasInflightTx).toBe(false);
+    const pending = client.submitUnsignedAndWatch(new Uint8Array([1]));
+    expect(client.hasInflightTx).toBe(true);
+
+    resolveSubmit(FINALIZED);
+    await pending;
+    expect(client.hasInflightTx).toBe(false);
+  });
+
+  it('clears the flag when the submit rejects', async () => {
+    const { client, papi } = await makeClient();
+    papi.submit.mockRejectedValue(new Error('Client destroyed'));
+
+    await expect(client.submit('0xdead')).rejects.toThrow('Client destroyed');
+    expect(client.hasInflightTx).toBe(false);
+  });
+
+  it('stays true while any of several concurrent submits is pending', async () => {
+    const { client, papi } = await makeClient();
+    let resolveSlow!: (v: unknown) => void;
+    papi.submit
+      .mockReturnValueOnce(Promise.resolve(FINALIZED))
+      .mockReturnValueOnce(new Promise((r) => (resolveSlow = r)));
+
+    const fast = client.submitUnsignedAndWatch(new Uint8Array([1]));
+    const slow = client.submitUnsignedAndWatch(new Uint8Array([2]));
+    await fast;
+    expect(client.hasInflightTx).toBe(true);
+
+    resolveSlow(FINALIZED);
+    await slow;
+    expect(client.hasInflightTx).toBe(false);
+  });
+});
