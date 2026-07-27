@@ -91,10 +91,16 @@ export {
     deriveViewingSecretKey,
     deriveViewingPublicKey,
     deriveOwnerPk,
+    deriveSpendingKeyTypedData,
+    deriveSpendingKeyMessageV2,
     deriveSpendingKeyMessage,
     deriveSpendingKeyFromSignature,
     deriveMasterKeyBytes,
+    SPENDING_KEY_VERIFYING_CONTRACT,
+    SPENDING_KEY_WARNING,
+    MIN_SIGNATURE_BYTES,
 } from './privacy-keys/index';
+export type { KeyVersion, SpendingKeyTypedData } from './privacy-keys/index';
 
 // ─── Vault ────────────────────────────────────────────────────────────────────
 export {

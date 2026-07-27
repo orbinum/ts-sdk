@@ -1,23 +1,33 @@
 /**
  * PrivacyKeys
  *
- * Pure cryptographic derivation functions for the Orbinum shielded pool identity.
- * These are protocol-level operations — independent of storage, UI, or session.
+ * Pure cryptographic derivation for the Orbinum shielded pool identity: turns a
+ * wallet signature into key material, and key material into the public values
+ * that make up a privacy address. Protocol-level only — no storage, UI or
+ * session concerns. What the user *signs* to produce that signature lives in
+ * `SpendingKeyRequest`.
  *
- * Derivation scheme (ECDH viewing key — v2):
- *   viewingSecretKey (ivsk) = HKDF-SHA256(ikm=spendingKey_bytes, info="orbinum-ivk-v1") → 32 bytes
- *   ivsk_scalar             = BigInt(ivsk_BE) % BABYJUB_SUBORDER  (clamped to [1, ∞))
- *   viewingPublicKey (ivk)  = BJJ_mul(Base8, ivsk_scalar)  →  packPoint([Ax, Ay])  → 32-byte bigint stored LE
- *   ownerPk                 = BabyJubJub Ax from (spendingKey * Base8)  → bigint
+ * Full derivation chain:
  *
- * Spending key derivation (from wallet signature):
- *   message     = "orbinum-spending-key-v1\n${chainId}\n${address.toLowerCase()}"
- *   skBytes     = HKDF-SHA256(ikm=sig_bytes, salt=empty, info="orbinum-sk-v1:${chainId}:${address}")
- *   spendingKey = BigInt(skBytes_as_big_endian) % BABYJUB_SUBORDER  (if 0 → 1)
+ *   signature ──HKDF(info="orbinum-sk-{version}:{chainId}:{address}")──► masterBytes (32B)
+ *                                                                            │
+ *          ┌─────────────────────────────────────────────────────────────────┤
+ *          ▼                                                                 ▼
+ *   spendingKey = BigInt(masterBytes) % BABYJUB_SUBORDER            vaultKey (see vault/)
+ *          │                                     = HKDF(masterBytes, "orbinum-vault-key-v1")
+ *          ├──► ownerPk = BJJ_mul(Base8, spendingKey).Ax                    (public)
+ *          │
+ *          └──► ivsk = HKDF(LE32(spendingKey), info="orbinum-ivk-v1")       (secret)
+ *                 └──► ivk = packPoint(BJJ_mul(Base8, ivsk_scalar))         (public)
  *
- * IMPORTANT: must reduce mod BABYJUB_SUBORDER (not BN254_R). circomlib's BabyPbk uses
- * Num2Bits(253) which asserts spending_key < 2^253. BABYJUB_SUBORDER < 2^252 satisfies
- * this. BN254_R ≈ 2^254.8 does not — ~34% of values would exceed 2^253 at runtime.
+ * VERSIONING: the HKDF `info` carries the identity version, so v1 and v2 are
+ * cryptographically disjoint even given identical signature bytes. This is the
+ * layer that still separates the identities when the message-level defense fails
+ * — see the security model in `SpendingKeyRequest`.
+ *
+ * MODULUS: reduce mod BABYJUB_SUBORDER, never BN254_R. circomlib's BabyPbk uses
+ * Num2Bits(253), asserting spending_key < 2^253. BABYJUB_SUBORDER < 2^252
+ * satisfies it; BN254_R ≈ 2^254.8 does not — ~34% of values would fail at runtime.
  */
 
 import { hkdf } from '@noble/hashes/hkdf.js';
@@ -29,20 +39,43 @@ import { BABYJUB_SUBORDER } from '../utils/crypto-constants';
 
 const IVK_DOMAIN = new TextEncoder().encode('orbinum-ivk-v1');
 
-// ─── Key derivation from wallet signature ─────────────────────────────────────
+/** Identity version. `v1` is the legacy personal_sign scheme, kept for sweeping only. */
+export type KeyVersion = 'v1' | 'v2';
 
 /**
- * Returns the message string the user must sign with their wallet to derive
- * a deterministic Orbinum spending key.
+ * Shortest signature any supported signer produces: sr25519 VRF output is 32
+ * bytes, ed25519 is 64, ECDSA `personal_sign` is 65. Anything shorter is not a
+ * signature, so it must never reach the KDF.
  */
-export function deriveSpendingKeyMessage(chainId: number, address: string): string {
-    return `orbinum-spending-key-v1\n${chainId}\n${address.toLowerCase()}`;
+export const MIN_SIGNATURE_BYTES = 32;
+
+/**
+ * Rejects input that is not a real signature before it seeds the identity.
+ *
+ * HKDF accepts any-length IKM, including zero bytes, so without this an empty
+ * or stub signature still yields a perfectly usable spending key — one derived
+ * entirely from PUBLIC inputs (chainId, address), i.e. reproducible by anyone.
+ * A wallet that returns `''`, `'0x'` or an error string instead of signing would
+ * silently mint that key and let the user shield funds into it.
+ *
+ * Fail closed: an unusable signature is a bug or a hostile signer, never a
+ * degraded-but-acceptable identity.
+ */
+function assertUsableSignature(sigBytes: Uint8Array): void {
+    if (sigBytes.length < MIN_SIGNATURE_BYTES) {
+        throw new Error(
+            `Cannot derive a spending key: signature is ${sigBytes.length} bytes, ` +
+                `expected at least ${MIN_SIGNATURE_BYTES}. The wallet did not return a signature.`
+        );
+    }
 }
+
+// ─── Key derivation from wallet signature ─────────────────────────────────────
 
 /**
  * Derives the 32-byte master key bytes from a wallet signature.
  *
- * masterBytes = HKDF-SHA256(ikm=sigBytes, salt=empty, info="orbinum-sk-v1:{chainId}:{address}")
+ * masterBytes = HKDF-SHA256(ikm=sigBytes, salt=empty, info="orbinum-sk-{version}:{chainId}:{address}")
  *
  * These bytes are the stable root for ALL derived keys:
  *   - spendingKey (circuit scalar) = BigInt(masterBytes) % BABYJUB_SUBORDER
@@ -52,21 +85,32 @@ export function deriveSpendingKeyMessage(chainId: number, address: string): stri
  * Separating masterBytes from the circuit scalar means the viewingSecretKey and
  * vault key are STABLE across any future change to the modulus — they never
  * depend on which prime field the circuit uses.
+ *
+ * The version is folded into the HKDF `info`, so v1 and v2 stay disjoint even if
+ * the underlying signature bytes were somehow identical.
+ *
+ * @param version Defaults to 'v2'. Pass 'v1' only from the legacy sweep flow.
+ * @throws If the signature is not valid hex, or carries less entropy than the
+ *         shortest real signing scheme (see {@link MIN_SIGNATURE_BYTES}).
  */
 export async function deriveMasterKeyBytes(
     signatureHex: string,
     chainId: number,
-    address: string
+    address: string,
+    version: KeyVersion = 'v2'
 ): Promise<Uint8Array> {
     const sigBytes = fromHex(signatureHex);
-    const info = new TextEncoder().encode(`orbinum-sk-v1:${chainId}:${address.toLowerCase()}`);
+    assertUsableSignature(sigBytes);
+    const info = new TextEncoder().encode(
+        `orbinum-sk-${version}:${chainId}:${address.toLowerCase()}`
+    );
     return hkdf(sha256, sigBytes, new Uint8Array(0), info, 32);
 }
 
 /**
  * Derives an Orbinum spending key from a wallet signature.
  *
- * Uses HKDF-SHA256(ikm=sigBytes, salt=empty, info="orbinum-sk-v1:{chainId}:{address}")
+ * Uses HKDF-SHA256(ikm=sigBytes, salt=empty, info="orbinum-sk-{version}:{chainId}:{address}")
  * and reduces the resulting 32-byte value modulo BABYJUB_SUBORDER.
  *
  * IMPORTANT: viewingSecretKey and vaultKey must be derived from masterBytes (via
@@ -76,14 +120,18 @@ export async function deriveMasterKeyBytes(
  * @param signatureHex  0x-prefixed or bare hex of the wallet signature.
  * @param chainId       Chain ID used when building the signing message.
  * @param address       Signer address (EVM or SS58) used in the signing message.
+ * @param version       Defaults to 'v2'. Pass 'v1' only from the legacy sweep flow.
  * @returns bigint in [1, BABYJUB_SUBORDER)
+ * @throws If the signature is not valid hex or is shorter than
+ *         {@link MIN_SIGNATURE_BYTES} — see `deriveMasterKeyBytes`.
  */
 export async function deriveSpendingKeyFromSignature(
     signatureHex: string,
     chainId: number,
-    address: string
+    address: string,
+    version: KeyVersion = 'v2'
 ): Promise<bigint> {
-    const masterBytes = await deriveMasterKeyBytes(signatureHex, chainId, address);
+    const masterBytes = await deriveMasterKeyBytes(signatureHex, chainId, address, version);
     const skBigint = BigInt(toHex(masterBytes)) % BABYJUB_SUBORDER;
     return skBigint === 0n ? 1n : skBigint;
 }

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-07-27
+
+### Security
+
+- **Spending key derivation moved to EIP-712 (v2).** v1 signed a fixed public string via `personal_sign`. Because ECDSA `personal_sign` is deterministic (RFC-6979) and that string depends only on public data (`chainId`, `address`), **any dapp the user connected their wallet to could request the exact same signature and reconstruct their spending key, viewing key and vault key** — full compromise of the shielded identity from an innocuous-looking prompt. `deriveSpendingKeyTypedData(chainId, address)` replaces the flat message with typed data whose `verifyingContract` is the shielded pool precompile (2049, `0x…0801`): the wallet renders the domain, so a hostile origin can no longer harvest the signature behind a prompt that looks like something else, and the message's `warning` field is displayed inside the wallet — the one surface the attacker does not control. The payload deliberately carries **no nonce and no timestamp**: the digest must stay a pure function of `(chainId, address, domain)`, or the key would change per session and leave already-shielded notes unspendable. Version separation is cryptographic, not merely textual — the HKDF `info` becomes `orbinum-sk-v2:{chainId}:{address}`, so v1 and v2 are disjoint identities even if the signature bytes were identical. See `SPENDING_KEY_DERIVATION_SECURITY.md`.
+
+- **An invalid signature no longer mints an identity.** HKDF accepts IKM of any length, including zero, so `deriveSpendingKeyFromSignature('')` returned a perfectly usable spending key — derived entirely from **public** inputs (`chainId`, `address`) and therefore reproducible by anyone. A wallet returning `''`, `'0x'` or an error string instead of signing would have silently minted that key, leaving any funds shielded into it spendable by whoever knew the address. `deriveMasterKeyBytes` now validates against `MIN_SIGNATURE_BYTES` (32 — the sr25519 VRF output length, the shortest of the supported schemes) and throws. The guard covers both v1 and v2, so the sweep path cannot mint a bogus identity either.
+
+### Added
+
+- `deriveSpendingKeyTypedData(chainId, address)` — EIP-712 payload for `eth_signTypedData_v4`. The default derivation path on EVM.
+- `deriveSpendingKeyMessageV2(chainId, address)` — message for signers without EIP-712 (Substrate), with the warning leading the text, since that is the only channel the extension renders and the attacker cannot rewrite. Wired into both Substrate routes: sr25519 via VRF and ed25519 (Ledger) via `signRaw`. Derives under the same v2 HKDF domain as the EVM route. Note that ed25519 already signs deterministically by design (RFC 8032), so those accounts were harvestable **before** VRF ever landed — determinism solves usability, not security; it is precisely what turns a signature into a stealable bearer token.
+- `SPENDING_KEY_VERIFYING_CONTRACT` — the EIP-712 domain's `verifyingContract`, re-exported from `PRECOMPILE_ADDR.SHIELDED_POOL` rather than written out a second time. It is part of the digest: changing it changes every derived spending key and orphans existing notes, so it is a protocol constant, not a config knob. A test pins it against `PRECOMPILE_ADDR` so the two cannot drift apart silently.
+- `SPENDING_KEY_WARNING` — the warning text, shared by the EVM and Substrate routes.
+- `MIN_SIGNATURE_BYTES` — minimum signature length accepted by derivation (sr25519 VRF = 32, ed25519 = 64, ECDSA = 65).
+- `KeyVersion` (`'v1' | 'v2'`) and `SpendingKeyTypedData` types.
+
+### Changed
+
+- **`SpendingKeyRequest` split out of `PrivacyKeys`.** Building what the user signs (typed data / message, platform-specific) and turning that signature into key material (HKDF, platform-agnostic) were distinct responsibilities living in one file. The builders now live in `src/privacy-keys/SpendingKeyRequest.ts` with the threat model documented in one place, leaving `PrivacyKeys` as pure derivation. No behavioural change: the same names are exported from the package root.
+- `deriveMasterKeyBytes` and `deriveSpendingKeyFromSignature` take a fourth `version: KeyVersion` parameter defaulting to `'v2'` — no caller lands on the insecure identity by omission. Pass `'v1'` only from the legacy note-sweeping flow.
+
+### Deprecated
+
+- `deriveSpendingKeyMessage(chainId, address)` — v1 derivation, insecure (see above). Kept exported **solely** so existing v1 notes can be swept into a v2 identity via a `private_transfer` to one's own v2 `ownerPk`. Never call it on a connect/login path. A removal date is still to be set.
+
 ## [0.18.0] - 2026-07-26
 
 ### Fixed
