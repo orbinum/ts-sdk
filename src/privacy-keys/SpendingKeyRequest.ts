@@ -121,16 +121,3 @@ export function deriveSpendingKeyMessageV2(chainId: number, address: string): st
         `orbinum-spending-key-v2\n${chainId}\n${address.toLowerCase()}`
     );
 }
-
-/**
- * @deprecated INSECURE — v1 derivation. Signs a fixed public string via
- * `personal_sign`, so any dapp can request it and, because the signature is
- * deterministic, reconstruct the user's spending key, viewing key and vault key.
- *
- * Retained ONLY so existing v1 notes can be swept into a v2 identity. Never call
- * it on a connect/login path. Use {@link deriveSpendingKeyTypedData} (EVM) or
- * {@link deriveSpendingKeyMessageV2} (Substrate) instead.
- */
-export function deriveSpendingKeyMessage(chainId: number, address: string): string {
-    return `orbinum-spending-key-v1\n${chainId}\n${address.toLowerCase()}`;
-}

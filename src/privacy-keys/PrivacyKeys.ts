@@ -39,8 +39,12 @@ import { BABYJUB_SUBORDER } from '../utils/crypto-constants';
 
 const IVK_DOMAIN = new TextEncoder().encode('orbinum-ivk-v1');
 
-/** Identity version. `v1` is the legacy personal_sign scheme, kept for sweeping only. */
-export type KeyVersion = 'v1' | 'v2';
+/**
+ * Identity version, folded into the HKDF `info` so a future scheme is disjoint
+ * from this one by construction. Only v2 exists: v1 derived from a harvestable
+ * `personal_sign` and was removed, not deprecated, so no caller can reach it.
+ */
+const KEY_VERSION = 'v2';
 
 /**
  * Shortest signature any supported signer produces: sr25519 VRF output is 32
@@ -75,7 +79,7 @@ function assertUsableSignature(sigBytes: Uint8Array): void {
 /**
  * Derives the 32-byte master key bytes from a wallet signature.
  *
- * masterBytes = HKDF-SHA256(ikm=sigBytes, salt=empty, info="orbinum-sk-{version}:{chainId}:{address}")
+ * masterBytes = HKDF-SHA256(ikm=sigBytes, salt=empty, info="orbinum-sk-v2:{chainId}:{address}")
  *
  * These bytes are the stable root for ALL derived keys:
  *   - spendingKey (circuit scalar) = BigInt(masterBytes) % BABYJUB_SUBORDER
@@ -86,23 +90,18 @@ function assertUsableSignature(sigBytes: Uint8Array): void {
  * vault key are STABLE across any future change to the modulus — they never
  * depend on which prime field the circuit uses.
  *
- * The version is folded into the HKDF `info`, so v1 and v2 stay disjoint even if
- * the underlying signature bytes were somehow identical.
- *
- * @param version Defaults to 'v2'. Pass 'v1' only from the legacy sweep flow.
  * @throws If the signature is not valid hex, or carries less entropy than the
  *         shortest real signing scheme (see {@link MIN_SIGNATURE_BYTES}).
  */
 export async function deriveMasterKeyBytes(
     signatureHex: string,
     chainId: number,
-    address: string,
-    version: KeyVersion = 'v2'
+    address: string
 ): Promise<Uint8Array> {
     const sigBytes = fromHex(signatureHex);
     assertUsableSignature(sigBytes);
     const info = new TextEncoder().encode(
-        `orbinum-sk-${version}:${chainId}:${address.toLowerCase()}`
+        `orbinum-sk-${KEY_VERSION}:${chainId}:${address.toLowerCase()}`
     );
     return hkdf(sha256, sigBytes, new Uint8Array(0), info, 32);
 }
@@ -110,7 +109,7 @@ export async function deriveMasterKeyBytes(
 /**
  * Derives an Orbinum spending key from a wallet signature.
  *
- * Uses HKDF-SHA256(ikm=sigBytes, salt=empty, info="orbinum-sk-{version}:{chainId}:{address}")
+ * Uses HKDF-SHA256(ikm=sigBytes, salt=empty, info="orbinum-sk-v2:{chainId}:{address}")
  * and reduces the resulting 32-byte value modulo BABYJUB_SUBORDER.
  *
  * IMPORTANT: viewingSecretKey and vaultKey must be derived from masterBytes (via
@@ -120,7 +119,6 @@ export async function deriveMasterKeyBytes(
  * @param signatureHex  0x-prefixed or bare hex of the wallet signature.
  * @param chainId       Chain ID used when building the signing message.
  * @param address       Signer address (EVM or SS58) used in the signing message.
- * @param version       Defaults to 'v2'. Pass 'v1' only from the legacy sweep flow.
  * @returns bigint in [1, BABYJUB_SUBORDER)
  * @throws If the signature is not valid hex or is shorter than
  *         {@link MIN_SIGNATURE_BYTES} — see `deriveMasterKeyBytes`.
@@ -128,10 +126,9 @@ export async function deriveMasterKeyBytes(
 export async function deriveSpendingKeyFromSignature(
     signatureHex: string,
     chainId: number,
-    address: string,
-    version: KeyVersion = 'v2'
+    address: string
 ): Promise<bigint> {
-    const masterBytes = await deriveMasterKeyBytes(signatureHex, chainId, address, version);
+    const masterBytes = await deriveMasterKeyBytes(signatureHex, chainId, address);
     const skBigint = BigInt(toHex(masterBytes)) % BABYJUB_SUBORDER;
     return skBigint === 0n ? 1n : skBigint;
 }
