@@ -98,6 +98,7 @@ export {
     SPENDING_KEY_VERIFYING_CONTRACT,
     SPENDING_KEY_WARNING,
     MIN_SIGNATURE_BYTES,
+    canonicalAccountId,
 } from './privacy-keys/index';
 export type { SpendingKeyTypedData } from './privacy-keys/index';
 

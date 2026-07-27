@@ -89,9 +89,6 @@ describe('deriveOwnerPk', () => {
   });
 });
 
-// ─── deriveSpendingKeyMessage ──────────────────────────────────────────────────
-
-
 // ─── deriveSpendingKeyFromSignature ───────────────────────────────────────────
 
 // A synthetic 65-byte signature (all zeros except first byte) for deterministic tests

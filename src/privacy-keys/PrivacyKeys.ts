@@ -36,6 +36,7 @@ import { mulPointEscalar, Base8, packPoint } from '@zk-kit/baby-jubjub';
 import { bigintTo32Le } from '../utils/bytes';
 import { fromHex, toHex } from '../utils/hex';
 import { BABYJUB_SUBORDER } from '../utils/crypto-constants';
+import { canonicalAccountId } from './accountIdentity';
 
 const IVK_DOMAIN = new TextEncoder().encode('orbinum-ivk-v1');
 
@@ -101,7 +102,7 @@ export async function deriveMasterKeyBytes(
     const sigBytes = fromHex(signatureHex);
     assertUsableSignature(sigBytes);
     const info = new TextEncoder().encode(
-        `orbinum-sk-${KEY_VERSION}:${chainId}:${address.toLowerCase()}`
+        `orbinum-sk-${KEY_VERSION}:${chainId}:${canonicalAccountId(address)}`
     );
     return hkdf(sha256, sigBytes, new Uint8Array(0), info, 32);
 }
