@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-07-26
+
+### Fixed
+
+- **A single missed heartbeat probe no longer destroys the client.** `OrbinumClientProvider` tore down the `OrbinumClient` (and rejected every in-flight request with `Client destroyed`) after one failed `system_health` probe — a 4s blip from a throttled background tab, a transient network drop, or the node being CPU-bound verifying a ZK proof. Teardown now requires 2 consecutive failed probes (~10s), and the failure counter resets on recovery.
+- **Transactions awaiting finalization keep the connection alive longer.** With a tx in flight the probe-failure threshold rises to 6 (~30s). An unsigned `private_transfer`/`unshield` makes the node CPU-bound on proof verification — exactly when probes time out — so the old behavior destroyed the client while the node was processing the very tx it had submitted, surfacing as `Private Transfer failed: Client destroyed` for a tx that often finalized anyway.
+- **`EvmClient.waitForReceipt` no longer reports a live transaction as failed.** On hitting `timeoutMs` it now consults `eth_getTransactionByHash`: a tx the pool no longer knows throws `Transaction dropped from the tx pool` (safe to retry), while a tx still in the pool gets an extended wait (up to 4× `timeoutMs`) before throwing `still pending — check the hash before retrying`. Previously the generic `Transaction not mined within 60000ms` invited a retry against a tx that could still mine — a double-spend risk. A transient RPC failure during the pool check is never read as "dropped".
+
+### Added
+
+- `SubstrateClient.hasInflightTx` — `true` while a promise-based submit (`submit`, `submitUnsignedAndWatch`, `signAndSubmit`) awaits finalization. Used by the provider's heartbeat; observable-based `submitAndWatch` callers are not tracked.
+- `EvmClient.getTransactionByHash(txHash)` — returns the tx or `null` when the node no longer knows it. Unlike `request`, a `null` result is a valid answer, not an error.
+
 ## [0.17.0] - 2026-07-24
 
 ### Added
