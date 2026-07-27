@@ -1,12 +1,16 @@
+// Key DERIVATION only. What the user signs to produce these signatures is
+// covered in tests/privacy-keys/SpendingKeyRequest.test.ts.
 import { describe, it, expect } from 'vitest';
 import {
     deriveViewingSecretKey,
     deriveViewingPublicKey,
     deriveOwnerPk,
-    deriveSpendingKeyMessage,
     deriveSpendingKeyFromSignature,
     deriveMasterKeyBytes,
+    MIN_SIGNATURE_BYTES,
 } from '../../src/privacy-keys/PrivacyKeys';
+import { hkdf } from '@noble/hashes/hkdf.js';
+import { sha256 } from '@noble/hashes/sha2.js';
 import { EncryptedMemo } from '../../src/shielded-pool/protocol/EncryptedMemo';
 import { BABYJUB_SUBORDER } from '../../src/utils/crypto-constants';
 
@@ -87,30 +91,6 @@ describe('deriveOwnerPk', () => {
 
 // ─── deriveSpendingKeyMessage ──────────────────────────────────────────────────
 
-describe('deriveSpendingKeyMessage', () => {
-  it('builds the expected message format', () => {
-    const msg = deriveSpendingKeyMessage(1, '0xABCDEF1234abcdef1234ABCDEF1234abcdef1234');
-    expect(msg).toBe(
-      'orbinum-spending-key-v1\n1\n0xabcdef1234abcdef1234abcdef1234abcdef1234',
-    );
-  });
-
-  it('lowercases the address', () => {
-    const msg = deriveSpendingKeyMessage(42, '0xDEADBEEF00000000000000000000000000000000');
-    expect(msg).toContain('0xdeadbeef00000000000000000000000000000000');
-  });
-
-  it('includes the chainId as a number, not hex', () => {
-    const msg = deriveSpendingKeyMessage(100, '0x0000000000000000000000000000000000000001');
-    expect(msg.split('\n')[1]).toBe('100');
-  });
-
-  it('is deterministic', () => {
-    const a = deriveSpendingKeyMessage(1, '0xabc');
-    const b = deriveSpendingKeyMessage(1, '0xabc');
-    expect(a).toBe(b);
-  });
-});
 
 // ─── deriveSpendingKeyFromSignature ───────────────────────────────────────────
 
@@ -162,6 +142,59 @@ describe('deriveSpendingKeyFromSignature', () => {
     const withPrefix = await deriveSpendingKeyFromSignature(NON_ZERO_SIG, 1, '0xabc');
     const withoutPrefix = await deriveSpendingKeyFromSignature(NON_ZERO_SIG.slice(2), 1, '0xabc');
     expect(withPrefix).toBe(withoutPrefix);
+  });
+
+  it('agrees with deriveMasterKeyBytes — both must read the same identity', async () => {
+    const addr = '0x1111111111111111111111111111111111111111';
+    for (const version of ['v1', 'v2'] as const) {
+      const mb = await deriveMasterKeyBytes(NON_ZERO_SIG, 1, addr, version);
+      const sk = await deriveSpendingKeyFromSignature(NON_ZERO_SIG, 1, addr, version);
+      const expected = BigInt(
+        '0x' + Array.from(mb, (b) => b.toString(16).padStart(2, '0')).join(''),
+      ) % BABYJUB_SUBORDER;
+      expect(sk).toBe(expected === 0n ? 1n : expected);
+    }
+  });
+});
+
+// ─── Signature validation (fail closed) ──────────────────────────────────────
+
+// HKDF accepts any-length IKM, so without an explicit guard an empty or stub
+// signature still yields a usable spending key — derived purely from PUBLIC
+// inputs (chainId, address) and therefore reproducible by anyone. A wallet that
+// returns '' or an error string instead of signing must never mint an identity.
+describe('signature validation', () => {
+  const ADDR = '0x1111111111111111111111111111111111111111';
+
+  it.each([
+    ['empty string', ''],
+    ['bare 0x', '0x'],
+    ['1 byte', '0xab'],
+    ['31 bytes — one short of the shortest real scheme', '0x' + 'ab'.repeat(31)],
+  ])('SECURITY: rejects %s', async (_label, sig) => {
+    await expect(deriveSpendingKeyFromSignature(sig, 1, ADDR)).rejects.toThrow(
+      /signature/i,
+    );
+    await expect(deriveMasterKeyBytes(sig, 1, ADDR)).rejects.toThrow(/signature/i);
+  });
+
+  it('SECURITY: rejects on the v1 sweep path too', async () => {
+    await expect(deriveSpendingKeyFromSignature('', 1, ADDR, 'v1')).rejects.toThrow(
+      /signature/i,
+    );
+  });
+
+  it('rejects non-hex and odd-length input', async () => {
+    await expect(deriveSpendingKeyFromSignature('zzzz', 1, ADDR)).rejects.toThrow();
+    await expect(deriveSpendingKeyFromSignature('0xabc', 1, ADDR)).rejects.toThrow();
+  });
+
+  it('accepts every real signature length (VRF 32, ed25519 64, ECDSA 65)', async () => {
+    for (const bytes of [MIN_SIGNATURE_BYTES, 64, 65]) {
+      const sk = await deriveSpendingKeyFromSignature('0x' + 'ab'.repeat(bytes), 1, ADDR);
+      expect(sk).toBeGreaterThanOrEqual(1n);
+      expect(sk).toBeLessThan(BABYJUB_SUBORDER);
+    }
   });
 });
 
@@ -288,3 +321,69 @@ describe('deriveViewingPublicKey', () => {
   });
 });
 
+
+// ─── v2 identity (EIP-712) ───────────────────────────────────────────────────
+
+describe('HKDF domain string', () => {
+  const ADDR = '0xAbCdEf0123456789AbCdEf0123456789AbCdEf01';
+  const SIG = '0x' + 'ab'.repeat(65);
+
+  // The `info` string IS the cryptographic domain separator between identities.
+  // Pinning it byte-exactly means an accidental edit (a typo, a reordered field,
+  // a dropped version tag) fails here instead of silently rotating every user's
+  // spending key and orphaning their notes.
+  it.each([
+    ['v2', 'orbinum-sk-v2:2700:0xabcdef0123456789abcdef0123456789abcdef01'],
+    ['v1', 'orbinum-sk-v1:2700:0xabcdef0123456789abcdef0123456789abcdef01'],
+  ] as const)('pins the exact info string for %s', async (version, info) => {
+    const actual = await deriveMasterKeyBytes(SIG, 2700, ADDR, version);
+    const expected = hkdf(
+      sha256,
+      Uint8Array.from(Buffer.from(SIG.slice(2), 'hex')),
+      new Uint8Array(0),
+      new TextEncoder().encode(info),
+      32,
+    );
+    expect(actual).toEqual(expected);
+  });
+});
+
+describe('v1/v2 domain separation', () => {
+  const SIG = '0x' + 'ab'.repeat(65);
+  const CHAIN_ID = 2700;
+  const ADDR = '0x1111111111111111111111111111111111111111';
+
+  it('SECURITY: identical signature bytes yield disjoint v1 and v2 keys', async () => {
+    const v1 = await deriveSpendingKeyFromSignature(SIG, CHAIN_ID, ADDR, 'v1');
+    const v2 = await deriveSpendingKeyFromSignature(SIG, CHAIN_ID, ADDR, 'v2');
+    expect(v1).not.toBe(v2);
+  });
+
+  it('SECURITY: master bytes are disjoint too — the vault key must not carry over', async () => {
+    const v1 = await deriveMasterKeyBytes(SIG, CHAIN_ID, ADDR, 'v1');
+    const v2 = await deriveMasterKeyBytes(SIG, CHAIN_ID, ADDR, 'v2');
+    expect(v1).not.toEqual(v2);
+  });
+
+  it('defaults to v2 — no caller accidentally lands on the insecure identity', async () => {
+    const explicit = await deriveSpendingKeyFromSignature(SIG, CHAIN_ID, ADDR, 'v2');
+    const implicit = await deriveSpendingKeyFromSignature(SIG, CHAIN_ID, ADDR);
+    expect(implicit).toBe(explicit);
+  });
+
+  it('v1 still reproduces its historical key so existing notes stay sweepable', async () => {
+    const a = await deriveSpendingKeyFromSignature(SIG, CHAIN_ID, ADDR, 'v1');
+    const b = await deriveSpendingKeyFromSignature(SIG, CHAIN_ID, ADDR, 'v1');
+    expect(a).toBe(b);
+    expect(a).toBeGreaterThan(0n);
+    expect(a).toBeLessThan(BABYJUB_SUBORDER);
+  });
+
+  it('both versions stay within the circuit scalar range', async () => {
+    for (const v of ['v1', 'v2'] as const) {
+      const sk = await deriveSpendingKeyFromSignature(SIG, CHAIN_ID, ADDR, v);
+      expect(sk).toBeGreaterThanOrEqual(1n);
+      expect(sk).toBeLessThan(BABYJUB_SUBORDER);
+    }
+  });
+});
