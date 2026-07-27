@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-07-27
+
+### Removed
+
+- **BREAKING: v1 spending key derivation is gone.** `deriveSpendingKeyMessage`, the `KeyVersion` type and the `version` parameter on `deriveMasterKeyBytes` / `deriveSpendingKeyFromSignature` have all been removed. 0.19.0 kept v1 exported so existing notes could be swept into a v2 identity, but on testnet the trapped value is disposable and keeping the old builder alive kept its harvestable `personal_sign` payload reachable from any caller — the exact surface 0.19.0 set out to close. There is now one derivation path and no way to reach the old one.
+
+  **Migration**: nothing to do if you were already on the 0.19.0 defaults. Drop the fourth `version` argument if you passed it explicitly; passing `'v1'` has no replacement by design. Notes shielded under a v1 identity are not readable with a v2 key — users re-shield.
+
+  Regression tests assert the symbol is absent from both the module and the package root, that no builder emits the `orbinum-spending-key-v1` tag, and that derivation never produces the v1 HKDF domain.
+
 ## [0.19.0] - 2026-07-27
 
 ### Security

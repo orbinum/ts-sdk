@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
     deriveSpendingKeyTypedData,
     deriveSpendingKeyMessageV2,
-    deriveSpendingKeyMessage,
     SPENDING_KEY_VERIFYING_CONTRACT,
     SPENDING_KEY_WARNING,
 } from '../../src/privacy-keys/SpendingKeyRequest';
@@ -147,29 +146,29 @@ describe('deriveSpendingKeyMessageV2', () => {
     });
 });
 
-// ─── Legacy route (v1, sweep-only) ───────────────────────────────────────────
+// ─── v1 removal ──────────────────────────────────────────────────────────────
 
-describe('deriveSpendingKeyMessage (v1, deprecated)', () => {
-    it('still reproduces the historical string so v1 notes stay sweepable', () => {
-        expect(deriveSpendingKeyMessage(CHAIN_ID, ADDR)).toBe(
-            `orbinum-spending-key-v1\n${CHAIN_ID}\n${LOWER}`
+// v1 signed a fixed public string via personal_sign, so any dapp could request
+// it and reuse the deterministic signature to rebuild the user's keys. It was
+// REMOVED, not deprecated: no builder produces it and no caller can reach it.
+// These assertions fail if it is ever reintroduced by an import or a copy-paste.
+describe('v1 derivation is gone', () => {
+    it('SECURITY: the module exports no v1 builder', async () => {
+        const mod = await import('../../src/privacy-keys/SpendingKeyRequest');
+        expect('deriveSpendingKeyMessage' in mod).toBe(false);
+    });
+
+    it('SECURITY: the package root exports no v1 builder', async () => {
+        const mod = await import('../../src/index');
+        expect('deriveSpendingKeyMessage' in mod).toBe(false);
+    });
+
+    it('SECURITY: no builder emits the v1 domain tag', () => {
+        expect(deriveSpendingKeyMessageV2(CHAIN_ID, ADDR)).not.toContain(
+            'orbinum-spending-key-v1'
         );
-    });
-
-    // v1's defining flaw: a fixed public string with no warning and no domain, so
-    // a hostile origin can request it and reuse the deterministic signature. These
-    // assertions document that flaw rather than guard against it — v1 must NOT be
-    // "fixed" in place, because changing it would break sweeping.
-    it('carries no warning and no v2 domain tag', () => {
-        const msg = deriveSpendingKeyMessage(CHAIN_ID, ADDR);
-        expect(msg).not.toContain(SPENDING_KEY_WARNING);
-        expect(msg).not.toContain('⚠');
-        expect(msg).not.toContain('orbinum-spending-key-v2');
-    });
-
-    it('is distinct from the v2 message for the same inputs', () => {
-        expect(deriveSpendingKeyMessage(CHAIN_ID, ADDR)).not.toBe(
-            deriveSpendingKeyMessageV2(CHAIN_ID, ADDR)
+        expect(JSON.stringify(deriveSpendingKeyTypedData(CHAIN_ID, ADDR))).not.toContain(
+            'orbinum-spending-key-v1'
         );
     });
 });
