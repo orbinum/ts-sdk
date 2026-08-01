@@ -190,6 +190,11 @@ export function tryDecryptNoteVerbose(
             blinding: plaintext.blinding,
             spendingKey: effectiveSpendingKey,
             circuitVersion: plaintext.circuitVersion,
+            ...(Number.isSafeInteger(commitment.leafIndex) &&
+            commitment.leafIndex >= 0 &&
+            commitment.leafIndex < 2 ** 32
+                ? { leafIndex: commitment.leafIndex }
+                : {}),
             spent: false,
             spentAt: null,
             commitment: recomputed,

@@ -5,29 +5,89 @@ import type { TransferInputNote } from '../../proof-generator/transfer';
 const TRANSFER_TREE_DEPTH = 20;
 
 /**
+ * Leaves per forest tree. Pinned to the runtime's `MaxLeavesPerTree` (2^20),
+ * guarded on-chain by the pallet's `integrity_test` — it can never change on
+ * a live chain, so deriving tree membership locally is safe.
+ */
+const LEAVES_PER_TREE = 1 << TRANSFER_TREE_DEPTH;
+
+/**
+ * Forest tree a note belongs to.
+ *
+ * Falls back to tree 0 for a missing or malformed `leafIndex`. Both cases are
+ * expected rather than defensive noise:
+ *
+ *   - Notes persisted before the forest upgrade carry no index, and they all
+ *     predate the first seal, so tree 0 is the correct answer.
+ *   - The index originates in an indexer scan hint, which is untrusted. A
+ *     `NaN` reaching this function would make every same-tree comparison
+ *     false — no pair would ever be selectable and the whole balance would
+ *     look unspendable.
+ */
+export function treeIdOf(note: Pick<ZkNote, 'leafIndex'>): number {
+    const idx = note.leafIndex;
+    if (idx === undefined || !Number.isSafeInteger(idx) || idx < 0 || idx >= 2 ** 32) return 0;
+    return Math.floor(idx / LEAVES_PER_TREE);
+}
+
+/**
+ * Outcome of {@link selectNotes}.
+ *
+ *   - `[noteA, noteB | null]` — a spendable selection; a `null` second slot
+ *     means the transfer runs with a dummy input.
+ *   - `{ needsConsolidation: true }` — the balance covers the amount, but only
+ *     by pairing notes from different forest trees, which no single proof can
+ *     do. The caller should offer a consolidation, not an insufficient-funds
+ *     error.
+ *   - `null` — no combination covers the amount.
+ */
+export type CoinSelection = [ZkNote, ZkNote | null] | { needsConsolidation: true } | null;
+
+/**
  * Selects up to 2 unspent notes that together cover `needed` planck.
  *
- * Priority:
- *   1. A single note whose value >= needed  →  [note, null]  (second input will be a dummy)
- *   2. The smallest pair whose sum >= needed →  [noteA, noteB]
- *   3. No combination covers needed          →  null  (consolidation via merge required)
+ * Both inputs of a transfer are proven together against ONE circuit VK and ONE
+ * public `merkle_root`, so a pair must agree on two things: mixing circuit
+ * versions produces an invalid proof, and notes in different forest trees
+ * anchor to different roots that can never converge. A single note needs
+ * neither check.
  *
- * Both inputs of a transfer are proven together against ONE circuit VK, so a
- * pair MUST share a circuitVersion — mixing v1 and v2 would produce an invalid
- * proof. Priority 2 only pairs notes of the same version; a single note (P1) is
- * always one version so it needs no check.
+ * Resolution order:
+ *   1. One note that alone covers `needed` → `[note, null]`.
+ *   2. Smallest same-version, same-tree pair whose sum covers it → `[a, b]`.
+ *   3. A cross-tree pair would cover it → `{ needsConsolidation: true }`.
+ *   4. Nothing covers it → `null`.
  *
  * Only unspent notes with value > 0 are considered.
  */
-export function selectNotes(notes: ZkNote[], needed: bigint): [ZkNote, ZkNote | null] | null {
+export function selectNotes(notes: ZkNote[], needed: bigint): CoinSelection {
     const unspent = notes.filter((n) => !n.spent && n.value > 0n);
     const sorted = [...unspent].sort((a, b) => (a.value < b.value ? -1 : 1)); // ascending
 
-    // Priority 1: single note that alone covers the amount
+    // Step 1: single note that alone covers the amount.
     const single = sorted.find((n) => n.value >= needed);
     if (single) return [single, null];
 
-    // Priority 2: smallest qualifying pair, restricted to notes of the same version
+    // Step 2: smallest pair that shares both a circuit version and a tree.
+    for (let i = 0; i < sorted.length; i++) {
+        for (let j = i + 1; j < sorted.length; j++) {
+            const a = sorted[i];
+            const b = sorted[j];
+            if (
+                a !== undefined &&
+                b !== undefined &&
+                a.circuitVersion === b.circuitVersion &&
+                treeIdOf(a) === treeIdOf(b) &&
+                a.value + b.value >= needed
+            ) {
+                return [a, b];
+            }
+        }
+    }
+
+    // Step 3: no same-tree pair worked. If a cross-tree pair would have
+    // covered the amount, the funds exist but are stranded — say so instead
+    // of reporting them as missing.
     for (let i = 0; i < sorted.length; i++) {
         for (let j = i + 1; j < sorted.length; j++) {
             const a = sorted[i];
@@ -38,11 +98,12 @@ export function selectNotes(notes: ZkNote[], needed: bigint): [ZkNote, ZkNote | 
                 a.circuitVersion === b.circuitVersion &&
                 a.value + b.value >= needed
             ) {
-                return [a, b];
+                return { needsConsolidation: true };
             }
         }
     }
 
+    // Step 4: the balance genuinely does not cover the amount.
     return null;
 }
 

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-07-30
+
+### Added
+
+- **Forest-aware coin selection.** A transfer proves both of its inputs under a single public `merkle_root`, so a pair must now share a forest tree as well as a `circuitVersion`. Notes in different trees anchor to different roots and can never converge, no matter how many times the caller refetches — the previous code would burn its whole retry budget discovering that. `selectNotes` returns `{ needsConsolidation: true }` when a cross-tree pair *would* have covered the amount, so a caller can distinguish "your funds are stranded across trees" from "you don't have enough" instead of reporting the wrong one.
+
+- `treeIdOf(note)` — derives the forest tree from a note's leaf index. `LEAVES_PER_TREE` is pinned to 2^20 to match the runtime's `MaxLeavesPerTree`, which the pallet's `integrity_test` forbids from ever changing on a live chain. That on-chain guarantee is what makes deriving tree membership client-side safe, rather than a cached assumption that can silently go stale.
+
+- `ZkNote.leafIndex?` — the note's global Merkle position, populated by `NoteDecryptor` from the scan hint. Optional by design: a vault written before the forest existed needs no migration, and a note with no index necessarily predates the first seal, so tree 0 is the correct answer rather than a fallback.
+
+- `treeId` on `RpcV2MerkleProof` / `RawRpcV2MerkleProof`, mapped through `PrivacyModule`. Absent when talking to a pre-forest node, hence optional rather than defaulted.
+
+### Security
+
+- **A malformed `leafIndex` can no longer strand a wallet's funds.** Scan hints come from the indexer, which is a performance dependency and never a correctness one — but the leaf index was being copied into the vault unvalidated. A single hint carrying `NaN` was enough: `NaN !== NaN` makes every same-tree comparison false, so no pair passes selection and the entire balance becomes unspendable through the normal path. `NoteDecryptor` now persists the index only when it is a valid u32, and `treeIdOf` independently falls back to tree 0 for anything malformed — the second check covers vault entries written before the first one existed.
+
 ## [0.20.1] - 2026-07-27
 
 ### Fixed

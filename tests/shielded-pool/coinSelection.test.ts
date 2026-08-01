@@ -1,8 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { selectNotes, buildDummyTransferInput } from '../../src/shielded-pool/protocol/coinSelection';
+import { selectNotes, treeIdOf, buildDummyTransferInput } from '../../src/shielded-pool/protocol/coinSelection';
 import type { ZkNote } from '../../src/shielded-pool/protocol/types';
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
+// Narrows the CoinSelection union for legacy assertions that expect a pair.
+function asPair(r: ReturnType<typeof selectNotes>): [ZkNote, ZkNote | null] {
+    if (!Array.isArray(r)) throw new Error('expected a note pair');
+    return r;
+}
+
 
 function note(value: bigint, opts: Partial<ZkNote> = {}): ZkNote {
     return {
@@ -62,16 +68,16 @@ describe('selectNotes', () => {
         const n100 = note(100n);
         const result = selectNotes([n100], 100n);
         expect(result).not.toBeNull();
-        expect(result![0]).toBe(n100);
-        expect(result![1]).toBeNull();
+        expect(asPair(result)[0]).toBe(n100);
+        expect(asPair(result)[1]).toBeNull();
     });
 
     it('returns a single note that exceeds needed', () => {
         const n200 = note(200n);
         const result = selectNotes([note(50n), n200], 100n);
         expect(result).not.toBeNull();
-        expect(result![0]).toBe(n200);
-        expect(result![1]).toBeNull();
+        expect(asPair(result)[0]).toBe(n200);
+        expect(asPair(result)[1]).toBeNull();
     });
 
     it('prefers the smallest single note that covers needed (ascending sort)', () => {
@@ -80,13 +86,13 @@ describe('selectNotes', () => {
         const n100 = note(100n);
         const n150 = note(150n);
         const result = selectNotes([n150, n80, n100], 100n);
-        expect(result![0]).toBe(n100);
-        expect(result![1]).toBeNull();
+        expect(asPair(result)[0]).toBe(n100);
+        expect(asPair(result)[1]).toBeNull();
     });
 
     it('does not return the second slot when single note suffices', () => {
         const result = selectNotes([note(500n), note(300n)], 200n);
-        expect(result![1]).toBeNull();
+        expect(asPair(result)[1]).toBeNull();
     });
 
     // ── priority 2: pair ──────────────────────────────────────────────────────
@@ -96,14 +102,14 @@ describe('selectNotes', () => {
         const n50 = note(50n);
         const result = selectNotes([n60, n50], 100n);
         expect(result).not.toBeNull();
-        expect(result![1]).not.toBeNull();
+        expect(asPair(result)[1]).not.toBeNull();
     });
 
     it('pair sum equals needed exactly', () => {
         const n40 = note(40n);
         const n60 = note(60n);
         const result = selectNotes([n40, n60], 100n);
-        const [a, b] = result!;
+        const [a, b] = asPair(result);
         expect(a.value + b!.value).toBe(100n);
     });
 
@@ -111,7 +117,7 @@ describe('selectNotes', () => {
         const n70 = note(70n);
         const n80 = note(80n);
         const result = selectNotes([n70, n80], 100n);
-        const [a, b] = result!;
+        const [a, b] = asPair(result);
         expect(a.value + b!.value).toBeGreaterThanOrEqual(100n);
     });
 
@@ -123,8 +129,8 @@ describe('selectNotes', () => {
         const n70 = note(70n);
         const n80 = note(80n);
         const result = selectNotes([n80, n70, n30], 100n);
-        expect(result![0]).toBe(n30);
-        expect(result![1]).toBe(n70);
+        expect(asPair(result)[0]).toBe(n30);
+        expect(asPair(result)[1]).toBe(n70);
     });
 
     it('does not select same note twice for pair', () => {
@@ -149,8 +155,8 @@ describe('selectNotes', () => {
         // zero-value filtered; pair 60+40=100 covers needed
         const result = selectNotes([n0, n60, n40], 100n);
         expect(result).not.toBeNull();
-        expect(result![0].value).toBeGreaterThan(0n);
-        expect(result![1]!.value).toBeGreaterThan(0n);
+        expect(asPair(result)[0].value).toBeGreaterThan(0n);
+        expect(asPair(result)[1]!.value).toBeGreaterThan(0n);
     });
 
     // ── determinism / no mutation ─────────────────────────────────────────────
@@ -167,8 +173,8 @@ describe('selectNotes', () => {
         const notes = [note(30n), note(70n), note(150n)];
         const r1 = selectNotes(notes, 100n);
         const r2 = selectNotes(notes, 100n);
-        expect(r1![0]).toBe(r2![0]);
-        expect(r1![1]).toBe(r2![1]);
+        expect(asPair(r1)[0]).toBe(asPair(r2)[0]);
+        expect(asPair(r1)[1]).toBe(asPair(r2)[1]);
     });
 
     // ── version-aware pairing ─────────────────────────────────────────────────
@@ -189,8 +195,8 @@ describe('selectNotes', () => {
         const c = note(60n, { circuitVersion: 2 });
         const result = selectNotes([a, b, c], 100n);
         expect(result).not.toBeNull();
-        expect(result![0]!.circuitVersion).toBe(2);
-        expect(result![1]!.circuitVersion).toBe(2);
+        expect(asPair(result)[0]!.circuitVersion).toBe(2);
+        expect(asPair(result)[1]!.circuitVersion).toBe(2);
     });
 
     it('a single note of any version still wins over the version-pair rule', () => {
@@ -198,8 +204,8 @@ describe('selectNotes', () => {
         const single = note(120n, { circuitVersion: 2 });
         const other = note(90n, { circuitVersion: 1 });
         const result = selectNotes([other, single], 100n);
-        expect(result![0]).toBe(single);
-        expect(result![1]).toBeNull();
+        expect(asPair(result)[0]).toBe(single);
+        expect(asPair(result)[1]).toBeNull();
     });
 });
 
@@ -272,5 +278,58 @@ describe('buildDummyTransferInput', () => {
         const b = buildDummyTransferInput(0n);
         a.pathSiblings[0] = '0x' + 'ff'.repeat(32);
         expect(b.pathSiblings[0]).toBe('0x' + '00'.repeat(32));
+    });
+});
+
+describe('forest same-tree selection', () => {
+    const TREE = 1 << 20;
+    const note = (value: bigint, leafIndex?: number): ZkNote =>
+        ({ ...baseNote(value), leafIndex }) as ZkNote;
+    // Minimal valid note for selection purposes.
+    const baseNote = (value: bigint) =>
+        ({ value, spent: false, circuitVersion: 1 }) as unknown as ZkNote;
+
+    it('prefers a same-tree pair over a cross-tree one', () => {
+        const a = note(60n, 5);
+        const b = note(60n, TREE + 1); // tree 1
+        const c = note(50n, 7); // tree 0, smaller
+        const sel = selectNotes([a, b, c], 100n);
+        expect(Array.isArray(sel)).toBe(true);
+        const [x, y] = sel as [ZkNote, ZkNote | null];
+        expect(treeIdOf(x)).toBe(treeIdOf(y as ZkNote));
+    });
+
+    it('signals consolidation when only a cross-tree pair covers the amount', () => {
+        const a = note(60n, 5); // tree 0
+        const b = note(60n, TREE + 1); // tree 1
+        expect(selectNotes([a, b], 100n)).toEqual({ needsConsolidation: true });
+    });
+
+    it('treats notes without leafIndex as tree 0', () => {
+        const legacy = note(60n, undefined);
+        const t0 = note(60n, 3);
+        const sel = selectNotes([legacy, t0], 100n);
+        expect(Array.isArray(sel)).toBe(true);
+        expect(treeIdOf(legacy)).toBe(0);
+    });
+
+    it('malformed leafIndex (NaN, negative, float, huge) falls back to tree 0', () => {
+        for (const bad of [NaN, -1, 1.5, 2 ** 32, Infinity]) {
+            expect(treeIdOf({ leafIndex: bad })).toBe(0);
+        }
+        // A poisoned note must still pair with honest tree-0 notes.
+        const poisoned = note(60n, NaN);
+        const honest = note(60n, 3);
+        const sel = selectNotes([poisoned, honest], 100n);
+        expect(Array.isArray(sel)).toBe(true);
+    });
+
+    it('derives treeId correctly at the 2^20 boundary', () => {
+        expect(treeIdOf({ leafIndex: TREE - 1 })).toBe(0);
+        expect(treeIdOf({ leafIndex: TREE })).toBe(1);
+    });
+
+    it('still returns null when no combination covers the amount', () => {
+        expect(selectNotes([note(10n, 1), note(20n, TREE + 2)], 100n)).toBeNull();
     });
 });
