@@ -2,6 +2,7 @@ export type RpcV2MerkleProof = {
     path: string[];
     leafIndex: number;
     treeDepth: number;
+    treeId?: number | undefined;
 };
 
 export type PrivacyMerkleProof = RpcV2MerkleProof & { root: string };

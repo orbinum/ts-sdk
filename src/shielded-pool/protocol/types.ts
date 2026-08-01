@@ -175,6 +175,13 @@ export type ZkNote = {
     spendingKey: bigint;
     /** Circuit version this note was created under (see `CURRENT_CIRCUIT_VERSION`). Required. */
     circuitVersion: number;
+    /**
+     * Global Merkle leaf index, when known. Optional so pre-forest vaults
+     * need no migration: notes without it predate the first tree seal and
+     * belong to tree 0. Populated on shield and on scan; used only to derive
+     * the forest tree for same-tree coin selection (`treeIdOf`).
+     */
+    leafIndex?: number;
     /** Whether the note has been spent/nullified on-chain. */
     spent: boolean;
     /** Local timestamp when this note was marked spent, or null if still active/unknown. */

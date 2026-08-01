@@ -3,6 +3,7 @@ export type RawRpcV2MerkleProof = {
     path: string[];
     leaf_index: number;
     tree_depth: number;
+    tree_id?: number;
 };
 
 export type RawRpcV2NullifierStatus = {

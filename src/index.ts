@@ -70,6 +70,7 @@ export {
     deriveSelfEphSk,
     selfEphWindow,
     selectNotes,
+    treeIdOf,
     buildDummyTransferInput,
     createNoteDisclosureKey,
     decodeNoteDisclosureKey,
