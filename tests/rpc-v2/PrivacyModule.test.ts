@@ -38,6 +38,31 @@ describe('PrivacyModule.getMerkleProof', () => {
         expect(substrate.request).toHaveBeenCalledWith('privacy_getMerkleProof', [7]);
     });
 
+    it('mapea tree_id del nodo a treeId', async () => {
+        const substrate = makeSubstrate({
+            privacy_getMerkleProof: {
+                path: ['0xa'],
+                leaf_index: 7,
+                tree_depth: 20,
+                tree_id: 3,
+            },
+        });
+        const proof = await new PrivacyModule(substrate).getMerkleProof(7);
+        expect(proof.treeId).toBe(3);
+    });
+
+    it('deja treeId indefinido contra un nodo pre-forest', async () => {
+        const substrate = makeSubstrate({
+            privacy_getMerkleProof: {
+                path: ['0xa'],
+                leaf_index: 7,
+                tree_depth: 20,
+            },
+        });
+        const proof = await new PrivacyModule(substrate).getMerkleProof(7);
+        expect(proof.treeId).toBeUndefined();
+    });
+
     it('acepta commitment hex como parámetro', async () => {
         const substrate = makeSubstrate({
             privacy_getMerkleProof: { path: ['0xc'], leaf_index: 5, tree_depth: 32 },

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-08-01
+
+### Fixed
+
+- **`treeId` never reached callers.** 0.21.0 added the field to `RpcV2MerkleProof` and `RawRpcV2MerkleProof`, but `PrivacyModule` was left mapping the pre-forest fields only, so every proof came back with `treeId: undefined` no matter what the node reported. Consumers deriving the forest tree from a proof — the app's cross-tree transfer guard among them — silently fell back to their `leafIndex` heuristic instead of using the value the chain had already resolved.
+
 ## [0.21.0] - 2026-07-30
 
 ### Added

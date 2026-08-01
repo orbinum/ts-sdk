@@ -28,6 +28,7 @@ export class PrivacyModule {
             path: raw.path,
             leafIndex: raw.leaf_index,
             treeDepth: raw.tree_depth,
+            treeId: raw.tree_id,
         };
     }
 
@@ -48,6 +49,7 @@ export class PrivacyModule {
             path: raw.path,
             leafIndex: raw.leaf_index,
             treeDepth: raw.tree_depth,
+            treeId: raw.tree_id,
             root: raw.root,
         };
     }
