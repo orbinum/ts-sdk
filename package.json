@@ -1,6 +1,6 @@
 {
   "name": "@orbinum/sdk",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "description": "Official TypeScript SDK for Orbinum.",
   "author": "Orbinum",
   "license": "MIT",
@@ -60,7 +60,7 @@
     "@noble/ciphers": "2.2.0",
     "@noble/curves": "^2.2.0",
     "@noble/hashes": "2.2.0",
-    "@orbinum/proof-generator": "4.0.0",
+    "@orbinum/proof-generator": "5.0.0",
     "@polkadot-api/metadata-builders": "0.14.2",
     "@polkadot-api/substrate-bindings": "0.20.2",
     "@polkadot-api/tx-utils": "0.3.2",

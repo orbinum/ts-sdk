@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-08-03
+
+### Changed
+
+- **`@orbinum/proof-generator` 4.0.0 → 5.0.0.** That release drops `CircuitType.PrivateLink` and its id-5 entry, matching the circuit's retirement on chain in 0.22.0. Nothing in this package referenced it, so the surface here is unchanged — but the pin has to move or an install resolves a generator that still offers a circuit the runtime answers with `CircuitNotFound`.
+
 ## [0.22.0] - 2026-08-03
 
 ### Removed
