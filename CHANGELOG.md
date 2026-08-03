@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-08-03
+
+### Removed
+
+- **BREAKING — `AccountMappingModule`, `AccountMappingPrecompile` and everything around them.** The node dropped `pallet-account-mapping` and its precompile at `0x0800`; calls to either now fail on chain, so shipping the bindings would only let callers build transactions that revert.
+
+  Gone from the public API: `AccountMappingModule`, `AccountMappingPrecompile`, `client.accountMapping`, `client.precompiles.accountMapping`, `PRECOMPILE_ADDR.ACCOUNT_MAPPING`, `AM_SEL`, the `SignatureScheme` enum and `SLIP0044_NAMESPACE`, plus the types `ChainLink`, `PrivateLink`, `AccountMetadata`, `AliasInfo`, `AliasFullIdentity`, `ListingInfo`, `AccountListing`, `SupportedChain`, `ResolvedAlias`, `AddChainLinkParams`, `SetMetadataParams`, `PutOnSaleParams` and `DispatchAsLinkedParams`.
+
+  There is no replacement. Aliases, chain links and the marketplace have no equivalent; the proxy-dispatch routes (`dispatchAsLinkedAccount`, `dispatchAsPrivateLink`) were removed from the runtime rather than reimplemented.
+
+- **BREAKING — `CircuitId.PrivateLink` (5).** The circuit is unregistered on chain and its verification key purged, so proofs built against it fail with `CircuitNotFound`. `tests/zk-verifier/circuit-id.test.ts` now asserts the id cannot come back without a matching node-side circuit.
+
+### Changed
+
+- **EVM → Substrate address derivation is unaffected**, but its docs were wrong. `evmToImplicitSubstrate` and `evmToMappedAccountHex` described the `H160 ++ [0x00; 12]` rule as `pallet-account-mapping`'s "fallback when there is no explicit `map_account` entry". It was never a fallback in the sense that mattered here — the mapping is structural and lives in runtime code, so it is the only rule and always was for callers that never registered an explicit entry. Behaviour is identical; only the comments changed.
+
 ## [0.21.1] - 2026-08-01
 
 ### Fixed

@@ -76,44 +76,6 @@ export interface DecodedRemarkArgs {
     remark: string;
 }
 
-// ── pallet-account-mapping ─────────────────────────────────────────────────
-
-export interface DecodedRegisterAliasArgs {
-    alias: string;
-}
-
-export interface DecodedPutAliasForSaleArgs {
-    asking_price: string;
-    sale_type: string;
-    whitelist_count?: number;
-}
-
-export interface DecodedSetAccountMetadataArgs {
-    display_name: string;
-    bio: string;
-    avatar: string;
-}
-
-export interface DecodedAddChainLinkArgs {
-    chain_id: number | string;
-    target_address: string;
-    signature: string;
-}
-
-export interface DecodedRevealPrivateLinkArgs {
-    commitment: string;
-    address: string;
-    blinding: string;
-    signature: string;
-}
-
-export interface DecodedDispatchAsPrivateLinkArgs {
-    owner: string;
-    commitment: string;
-    zk_proof: string;
-    inner_call: string;
-}
-
 // ── pallet-evm / pallet-ethereum ───────────────────────────────────────────
 
 export interface DecodedEthereumTransactArgs {

@@ -40,7 +40,6 @@ const isValidator = await client.rpcV2.chain.isValidator('5GrwvaEF...');
 | `client.rpcV2` | Orbinum `rpc-v2` namespaces (`chain_*`, `privacy_*`) |
 | `client.rpcV2.chain` | Chain-level queries (`chain_isValidator`, etc.) |
 | `client.shieldedPool` | Shielded pool extrinsics |
-| `client.accountMapping` | Alias, chain-link, and identity operations |
 | `client.precompiles` | EVM precompile wrappers (`null` if `evmRpc` not set) |
 
 Each module can also be instantiated independently without `OrbinumClient`.

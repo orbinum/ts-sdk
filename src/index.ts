@@ -153,30 +153,9 @@ export type {
     ScanCommitment,
 } from './shielded-pool/protocol/types';
 
-// ─── Account mapping ─────────────────────────────────────────────────────────
-export { AccountMappingModule } from './account-mapping/index';
-export type {
-    AddChainLinkParams,
-    SetMetadataParams,
-    PutOnSaleParams,
-    DispatchAsLinkedParams,
-} from './account-mapping/index';
-export type {
-    ChainLink,
-    PrivateLink,
-    AccountMetadata,
-    AliasInfo,
-    AliasFullIdentity,
-    ListingInfo,
-    AccountListing,
-    SupportedChain,
-} from './account-mapping/types';
-export { SignatureScheme, SLIP0044_NAMESPACE } from './account-mapping/types';
-
 // ─── Precompiles ─────────────────────────────────────────────────────────────
 export {
     ShieldedPoolPrecompile,
-    AccountMappingPrecompile,
     CryptoPrecompiles,
     PRECOMPILE_ADDR,
     KNOWN_PRECOMPILES,
@@ -186,7 +165,6 @@ export {
 export type {
     EvmTxRequest,
     EvmSigner,
-    ResolvedAlias,
     KnownPrecompileInfo,
     DecodedPrecompile,
 } from './precompiles/index';
@@ -221,29 +199,6 @@ export type {
     ZkVerifierEvent,
 } from './zk-verifier/types/pallet-events';
 
-// pallet-account-mapping events
-export type {
-    AccountMappedEvent,
-    AccountUnmappedEvent,
-    AliasRegisteredEvent,
-    AliasReleasedEvent,
-    AliasTransferredEvent,
-    AliasListedForSaleEvent,
-    AliasSaleCancelledEvent,
-    AliasSoldEvent,
-    ChainLinkAddedEvent,
-    ChainLinkRemovedEvent,
-    MetadataUpdatedEvent,
-    SupportedChainAddedEvent,
-    SupportedChainRemovedEvent,
-    ProxyCallExecutedEvent,
-    PrivateChainLinkAddedEvent,
-    PrivateChainLinkRemovedEvent,
-    PrivateChainLinkRevealedEvent,
-    PrivateLinkDispatchExecutedEvent,
-    AccountMappingEvent,
-} from './account-mapping/types/pallet-events';
-
 // ─── Runtime extrinsic arg types ─────────────────────────────────────────────
 
 // pallet-shielded-pool
@@ -274,26 +229,6 @@ export type {
     ZkVerifierCall,
 } from './zk-verifier/types/pallet-extrinsics';
 export { CircuitId } from './zk-verifier/types/pallet-extrinsics';
-
-// pallet-account-mapping
-export type {
-    RegisterAliasArgs,
-    TransferAliasArgs,
-    PutAliasOnSaleArgs,
-    BuyAliasArgs,
-    AddChainLinkArgs,
-    RemoveChainLinkArgs,
-    SetAccountMetadataArgs,
-    AddSupportedChainArgs,
-    RemoveSupportedChainArgs,
-    DispatchAsLinkedAccountArgs,
-    RegisterPrivateLinkArgs,
-    RemovePrivateLinkArgs,
-    RevealPrivateLinkArgs,
-    DispatchAsPrivateLinkArgs,
-    AccountMappingCall,
-} from './account-mapping/types/pallet-extrinsics';
-// SignatureScheme already exported from './account-mapping/types' above
 
 // ─── Utilities ───────────────────────────────────────────────────────────────
 export { formatBalance, formatORB } from './utils/format';
@@ -346,12 +281,6 @@ export type {
     DecodedBatchArgs,
     DecodedSudoArgs,
     DecodedRemarkArgs,
-    DecodedRegisterAliasArgs,
-    DecodedPutAliasForSaleArgs,
-    DecodedSetAccountMetadataArgs,
-    DecodedAddChainLinkArgs,
-    DecodedRevealPrivateLinkArgs,
-    DecodedDispatchAsPrivateLinkArgs,
     DecodedEthereumTransactArgs,
     DecodedEvmCallArgs,
 } from './extrinsic/decoded-args';
@@ -365,11 +294,6 @@ export type {
     TransferEventData,
     EndowedEventData,
     ReservedEventData,
-    AliasRegisteredData,
-    AliasTransferredData,
-    AliasOnSaleData,
-    AliasSoldData,
-    AccountMappedData,
     EvmExitReason,
     EvmExecutedData,
     EthereumExecutedData,

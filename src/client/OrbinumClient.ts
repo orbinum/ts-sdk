@@ -2,14 +2,12 @@ import { SubstrateClient } from '../substrate/SubstrateClient';
 import { EvmClient } from '../evm/EvmClient';
 import { EvmExplorer } from '../evm-explorer/EvmExplorer';
 import { ShieldedPoolModule } from '../shielded-pool/pallet/ShieldedPoolModule';
-import { AccountMappingModule } from '../account-mapping/AccountMappingModule';
 import { ChainModule } from '../rpc-v2/ChainModule';
 import { PrivacyModule } from '../rpc-v2/PrivacyModule';
 import { ZkVerifierModule } from '../zk-verifier/ZkVerifierModule';
 import { CircuitVersionResolver } from '../shielded-pool/CircuitVersionResolver';
 import { RelayerStatusModule } from '../relayer/RelayerStatusModule';
 import { ShieldedPoolPrecompile } from '../precompiles/ShieldedPoolPrecompile';
-import { AccountMappingPrecompile } from '../precompiles/AccountMappingPrecompile';
 import { CryptoPrecompiles } from '../precompiles/CryptoPrecompiles';
 import type { OrbinumClientConfig } from './types';
 
@@ -56,8 +54,6 @@ export class OrbinumClient {
     readonly evmExplorer: EvmExplorer | null;
     /** Shielded-pool extrinsics and Merkle tree queries (`shield`, `unshield`, `privateTransfer`, …). */
     readonly shieldedPool: ShieldedPoolModule;
-    /** Account-mapping extrinsics: aliases, chain links, metadata, marketplace, and identity. */
-    readonly accountMapping: AccountMappingModule;
     /** Typed access to `privacy_*` custom RPC endpoints. */
     readonly privacy: PrivacyModule;
     /** Typed access to general chain state via `chain_*` custom RPC endpoints. */
@@ -78,8 +74,6 @@ export class OrbinumClient {
     readonly precompiles: {
         /** `ShieldedPoolPrecompile` at `0x0801`: shield / unshield / transfer via EVM wallet. */
         shieldedPool: ShieldedPoolPrecompile;
-        /** `AccountMappingPrecompile` at `0x0800`: identity management via EVM wallet. */
-        accountMapping: AccountMappingPrecompile;
         /** Built-in cryptographic precompiles: ECRecover, Keccak-256, Curve25519. */
         crypto: CryptoPrecompiles;
     } | null;
@@ -94,7 +88,6 @@ export class OrbinumClient {
         this.evm = evm;
         this.evmExplorer = evm ? new EvmExplorer(evm) : null;
         this.shieldedPool = new ShieldedPoolModule(substrate);
-        this.accountMapping = new AccountMappingModule(substrate);
         this.privacy = new PrivacyModule(substrate);
         this.chain = new ChainModule(substrate);
         this.zkVerifier = new ZkVerifierModule(substrate);
@@ -103,7 +96,6 @@ export class OrbinumClient {
         this.precompiles = evm
             ? {
                   shieldedPool: new ShieldedPoolPrecompile(evm),
-                  accountMapping: new AccountMappingPrecompile(evm),
                   crypto: new CryptoPrecompiles(evm),
               }
             : null;

@@ -3,8 +3,7 @@
  *
  * These interfaces represent the JSON-decoded form of on-chain events as
  * they are received via RPC or indexer.  They cover all pallets relevant
- * to the Orbinum explorer: shielded-pool, balances, system, ethereum, evm,
- * and account-mapping.
+ * to the Orbinum explorer: shielded-pool, balances, system, ethereum and evm.
  *
  * Note: EventRecord itself is exported from @orbinum/sdk via substrate/types.
  */
@@ -57,36 +56,6 @@ export interface EndowedEventData {
 export interface ReservedEventData {
     account: string;
     amount: string;
-}
-
-// ── pallet-account-mapping ─────────────────────────────────────────────────
-
-export interface AliasRegisteredData {
-    who: string;
-    alias: string;
-}
-
-export interface AliasTransferredData {
-    from: string;
-    to: string;
-    alias: string;
-}
-
-export interface AliasOnSaleData {
-    alias: string;
-    price: string;
-}
-
-export interface AliasSoldData {
-    from: string;
-    to: string;
-    alias: string;
-    price: string;
-}
-
-export interface AccountMappedData {
-    account: string;
-    address: string;
 }
 
 // ── pallet-evm / pallet-ethereum ───────────────────────────────────────────

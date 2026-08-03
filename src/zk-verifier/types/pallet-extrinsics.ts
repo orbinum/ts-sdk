@@ -25,13 +25,11 @@ export type CircuitId = (typeof CircuitId)[keyof typeof CircuitId];
  * |--------------|-------|---------------------------------|
  * | Transfer     | 1     | 2-in-2-out private transfer     |
  * | Unshield     | 2     | Withdrawal from the pool        |
- * | PrivateLink  | 5     | Private chain-link proof        |
  * | ValueProof   | 6     | Note value binding (fee-claim)  |
  */
 export const CircuitId = {
     Transfer: 1,
     Unshield: 2,
-    PrivateLink: 5,
     ValueProof: 6,
 } as const;
 
@@ -97,7 +95,6 @@ export type VerifyProofArgs = {
      * - Transfer:    [merkle_root, nullifier_0, nullifier_1, commitment_0, commitment_1]
      * - Unshield:    [merkle_root, nullifier, amount_fe, recipient_hash, asset_id_fe]
      * - ValueProof:  [commitment, value, asset_id, owner_hash]
-     * - PrivateLink: [commitment, call_hash_fe]
      */
     publicInputs: number[][];
 };
