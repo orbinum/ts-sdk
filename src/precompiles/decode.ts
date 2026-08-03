@@ -8,7 +8,7 @@
 import { toHex } from '../utils/hex';
 import { KNOWN_PRECOMPILES } from './addresses';
 import { fromHex } from '../utils/hex';
-import { decodeUint, decodeString } from './abi';
+import { decodeUint } from './abi';
 
 export type DecodedPrecompile = {
     fnSig: string;
@@ -29,18 +29,6 @@ export function decodePrecompileCalldata(address: string, input: string): Decode
     const selector = input.slice(2, 10).toLowerCase(); // strip 0x
     const fnSig = info.functions[selector];
     if (!fnSig) return null;
-
-    // registerAlias(string)
-    if (fnSig.startsWith('registerAlias')) {
-        try {
-            const data = fromHex(input.slice(10));
-            // ABI: offset (32 bytes) + length (32 bytes) + utf-8 data
-            const alias = decodeString(data, 0);
-            return { fnSig, args: { alias } };
-        } catch {
-            return { fnSig, args: {} };
-        }
-    }
 
     // shield(uint32,bytes32,bytes)  — payable, amount = msg.value (NOT in calldata)
     // ABI head after selector:

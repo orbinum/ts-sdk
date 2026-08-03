@@ -11,7 +11,13 @@ describe('CircuitId (SDK ↔ node)', () => {
   it('matches the node circuit ids exactly', () => {
     expect(CircuitId.Transfer).toBe(1);
     expect(CircuitId.Unshield).toBe(2);
-    expect(CircuitId.PrivateLink).toBe(5);
     expect(CircuitId.ValueProof).toBe(6);
+  });
+
+  // Circuit 5 (private_link) was retired along with pallet-account-mapping.
+  // Reintroducing it here without a matching node-side circuit would let the
+  // SDK build proofs the runtime cannot verify.
+  it('no longer exposes the retired private-link circuit', () => {
+    expect(Object.values(CircuitId)).not.toContain(5);
   });
 });

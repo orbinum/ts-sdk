@@ -164,7 +164,6 @@ describe('OrbinumClient.connect', () => {
 
         expect(client.precompiles).not.toBeNull();
         expect(client.precompiles?.shieldedPool).toBeDefined();
-        expect(client.precompiles?.accountMapping).toBeDefined();
         expect(client.precompiles?.crypto).toBeDefined();
     });
 });
@@ -190,11 +189,6 @@ describe('OrbinumClient modules', () => {
     it('exposes shieldedPool module', async () => {
         const client = await makeConnectedClient();
         expect(client.shieldedPool).toBeDefined();
-    });
-
-    it('exposes accountMapping module', async () => {
-        const client = await makeConnectedClient();
-        expect(client.accountMapping).toBeDefined();
     });
 
     it('exposes privacy module', async () => {

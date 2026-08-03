@@ -94,7 +94,7 @@ export class SubstrateClient {
 
     /**
      * Performs a raw JSON-RPC request. Use this for custom Orbinum RPCs
-     * (shieldedPool_*, accountMapping_*, privacy_*, etc.).
+     * (shieldedPool_*, privacy_*, etc.).
      */
     async request<T>(method: string, params: unknown[] = []): Promise<T> {
         return this._papi._request<T, unknown[]>(method, params);

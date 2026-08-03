@@ -1,14 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { decodePrecompileCalldata } from '../../src/precompiles/decode';
 import { ShieldedPoolPrecompile } from '../../src/precompiles/ShieldedPoolPrecompile';
-import { AccountMappingPrecompile } from '../../src/precompiles/AccountMappingPrecompile';
 import { PRECOMPILE_ADDR } from '../../src/precompiles/addresses';
 import type { EvmClient } from '../../src/evm/EvmClient';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
 const SP_ADDR = PRECOMPILE_ADDR.SHIELDED_POOL;
-const AM_ADDR = PRECOMPILE_ADDR.ACCOUNT_MAPPING;
 
 const COMMITMENT = '0x' + 'aa'.repeat(32);
 const NULLIFIER = '0x' + 'bb'.repeat(32);
@@ -227,39 +225,5 @@ describe('decodePrecompileCalldata — privateTransfer', () => {
         const calldata = sp.buildPrivateTransferCalldata(BASE_TRANSFER);
         const result = decodePrecompileCalldata(SP_ADDR, calldata);
         expect(result?.args['fee']).toBe(0n);
-    });
-});
-
-// ─── registerAlias(string) — round-trip ──────────────────────────────────────
-
-describe('decodePrecompileCalldata — registerAlias', () => {
-    const am = new AccountMappingPrecompile(mockEvm());
-
-    it('decodes fnSig correctly', () => {
-        const calldata = am.buildRegisterAliasCalldata('alice');
-        const result = decodePrecompileCalldata(AM_ADDR, calldata);
-        expect(result?.fnSig).toBe('registerAlias(string)');
-    });
-
-    it('round-trips ASCII alias', () => {
-        const calldata = am.buildRegisterAliasCalldata('alice');
-        const result = decodePrecompileCalldata(AM_ADDR, calldata);
-        expect(result?.args['alias']).toBe('alice');
-    });
-
-    it('round-trips alias with hyphens', () => {
-        const calldata = am.buildRegisterAliasCalldata('my-cool-alias');
-        const result = decodePrecompileCalldata(AM_ADDR, calldata);
-        expect(result?.args['alias']).toBe('my-cool-alias');
-    });
-
-    it('returns empty string alias when data has only the selector (zero-length ABI body)', () => {
-        // Input is exactly the 4-byte selector with no ABI body — all-zeros decode → length 0 → ""
-        const calldata = '0x2f8839c3'; // REGISTER_ALIAS selector, no args
-        const result = decodePrecompileCalldata(AM_ADDR, calldata);
-        expect(result).not.toBeNull();
-        expect(result?.fnSig).toBe('registerAlias(string)');
-        // decodeString with empty data returns '' without throwing
-        expect(result?.args['alias']).toBe('');
     });
 });

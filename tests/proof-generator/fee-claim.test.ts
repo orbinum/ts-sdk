@@ -8,7 +8,6 @@ vi.mock('@orbinum/proof-generator', () => ({
         Unshield: 'unshield',
         Transfer: 'transfer',
         ValueProof: 'value_proof',
-        PrivateLink: 'private_link',
     },
     generateProof: vi.fn(),
     WebArtifactProvider: vi.fn().mockImplementation(function (this: object) { return this; }),

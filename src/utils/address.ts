@@ -38,8 +38,9 @@ export function evmAddressToAccountId(evmAddr: string): Uint8Array {
  * Derives the implicit Substrate AccountId32 for an EVM address using the
  * EeSuffixAddressMapping rule: AccountId32 = H160 ++ [0x00; 12].
  *
- * This is the same rule applied by pallet-account-mapping's fallback when
- * there is no explicit `map_account` entry. Returns 0x-prefixed 64-char hex.
+ * This is the only mapping the runtime applies — it is structural, not a
+ * lookup, so every EVM address has exactly one Substrate account. Returns
+ * 0x-prefixed 64-char hex.
  *
  * @param evmAddr  0x-prefixed 20-byte EVM address.
  */
@@ -49,8 +50,8 @@ export function evmToImplicitSubstrate(evmAddr: string): string {
 }
 
 /**
- * Converts an EVM H160 address to the 32-byte AccountId32 hex used by
- * pallet-account-mapping (EeSuffixAddressMapping: H160 ++ [0x00; 12]).
+ * Converts an EVM H160 address to the 32-byte AccountId32 hex the runtime
+ * derives from it (EeSuffixAddressMapping: H160 ++ [0x00; 12]).
  * Returns null for invalid or non-EVM input.
  *
  * @param address  0x-prefixed EVM H160 address (or bare 40-char hex).

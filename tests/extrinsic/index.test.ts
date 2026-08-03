@@ -186,53 +186,6 @@ describe('mapExtrinsicArgs — ethereum', () => {
     });
 });
 
-// ─── mapExtrinsicArgs — accountMapping ───────────────────────────────────────
-
-describe('mapExtrinsicArgs — accountMapping', () => {
-    it('maps registerAlias (positional)', () => {
-        const result = mapExtrinsicArgs('accountMapping', 'registerAlias', positional('alice'));
-        expect(result).toEqual({ alias: 'alice' });
-    });
-
-    it('maps transferAlias (positional)', () => {
-        const result = mapExtrinsicArgs('accountMapping', 'transfer_alias', positional('0xNewOwner'));
-        expect(result).toEqual({ new_owner: '0xNewOwner' });
-    });
-
-    it('maps addChainLink with three positional args', () => {
-        const result = mapExtrinsicArgs(
-            'accountMapping',
-            'add_chain_link',
-            positional(60, '0xaddr', '0xsig'),
-        );
-        expect(result).toEqual({ chain_id: 60, address: '0xaddr', signature: '0xsig' });
-    });
-
-    it('maps setAccountMetadata (positional)', () => {
-        const result = mapExtrinsicArgs(
-            'accountMapping',
-            'setAccountMetadata',
-            positional('Alice', 'Bio text', 'https://avatar.url'),
-        );
-        expect(result).toEqual({
-            display_name: 'Alice',
-            bio: 'Bio text',
-            avatar: 'https://avatar.url',
-        });
-    });
-
-    it('maps dispatchAsLinkedAccount (positional)', () => {
-        const result = mapExtrinsicArgs(
-            'accountMapping',
-            'dispatchAsLinkedAccount',
-            positional('0xOwner', 60, '0xAddr', '0xSig', { section: 'balances', method: 'transfer' }),
-        );
-        expect(result['owner']).toBe('0xOwner');
-        expect(result['chain_id']).toBe(60);
-        expect(result['call']).toBeDefined();
-    });
-});
-
 // ─── mapExtrinsicArgs — zkVerifier ────────────────────────────────────────────
 
 describe('mapExtrinsicArgs — zkVerifier', () => {
@@ -332,38 +285,6 @@ describe('mapZkEventData — shielded', () => {
     it('maps merkleRootUpdated event (positional keys)', () => {
         const result = mapZkEventData('merkleRootUpdated', positional('0xold', '0xnew', 100));
         expect(result).toEqual({ old_root: '0xold', new_root: '0xnew', size: 100 });
-    });
-});
-
-// ─── mapZkEventData — account-mapping events ─────────────────────────────────
-
-describe('mapZkEventData — account-mapping', () => {
-    it('maps accountMapped (positional)', () => {
-        const result = mapZkEventData('accountMapped', positional('0xaccount', '0xaddress'));
-        expect(result).toEqual({ account: '0xaccount', address: '0xaddress' });
-    });
-
-    it('maps aliasRegistered (semantic keys)', () => {
-        const result = mapZkEventData(
-            'aliasRegistered',
-            named({ account: '0xAcc', alias: 'alice', evm_address: '0xEvm' }),
-        );
-        expect(result).toEqual({ account: '0xAcc', alias: 'alice', evm_address: '0xEvm' });
-    });
-
-    it('maps aliasSold (positional)', () => {
-        const result = mapZkEventData('aliasSold', positional('0xSeller', '0xBuyer', 'alice', '10000'));
-        expect(result).toEqual({
-            seller: '0xSeller',
-            buyer: '0xBuyer',
-            alias: 'alice',
-            price: '10000',
-        });
-    });
-
-    it('maps metadataUpdated', () => {
-        const result = mapZkEventData('metadataUpdated', named({ account: '0xAcc' }));
-        expect(result).toEqual({ account: '0xAcc' });
     });
 });
 

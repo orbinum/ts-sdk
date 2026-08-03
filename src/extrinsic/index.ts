@@ -278,85 +278,6 @@ export function mapExtrinsicArgs(
         }
     }
 
-    if (s === 'accountmapping') {
-        const m_norm = m.replace(/_/g, '');
-        if (m_norm === 'registeralias') {
-            return { alias: get(0, 'alias') };
-        }
-        if (m_norm === 'transferalias') {
-            return { new_owner: get(0, 'new_owner') };
-        }
-        if (m_norm === 'putaliasonsale') {
-            return {
-                price: get(0, 'price'),
-                allowed_buyers: get(1, 'allowed_buyers'),
-            };
-        }
-        if (m_norm === 'buyalias') {
-            return { alias: get(0, 'alias') };
-        }
-        if (m_norm === 'addchainlink') {
-            return {
-                chain_id: get(0, 'chain_id'),
-                address: get(1, 'address'),
-                signature: get(2, 'signature'),
-            };
-        }
-        if (m_norm === 'removechainlink') {
-            return { chain_id: get(0, 'chain_id') };
-        }
-        if (m_norm === 'setaccountmetadata') {
-            return {
-                display_name: get(0, 'display_name'),
-                bio: get(1, 'bio'),
-                avatar: get(2, 'avatar'),
-            };
-        }
-        if (m_norm === 'addsupportedchain') {
-            return {
-                chain_id: get(0, 'chain_id'),
-                scheme: get(1, 'scheme'),
-            };
-        }
-        if (m_norm === 'removesupportedchain') {
-            return { chain_id: get(0, 'chain_id') };
-        }
-        if (m_norm === 'dispatchaslinkedaccount') {
-            return {
-                owner: get(0, 'owner'),
-                chain_id: get(1, 'chain_id'),
-                address: get(2, 'address'),
-                signature: get(3, 'signature'),
-                call: get(4, 'call'),
-            };
-        }
-        if (m_norm === 'registerprivatelink') {
-            return {
-                chain_id: get(0, 'chain_id'),
-                commitment: get(1, 'commitment'),
-            };
-        }
-        if (m_norm === 'removeprivatelink') {
-            return { commitment: get(0, 'commitment') };
-        }
-        if (m_norm === 'revealprivatelink') {
-            return {
-                commitment: get(0, 'commitment'),
-                address: get(1, 'address'),
-                blinding: get(2, 'blinding'),
-                signature: get(3, 'signature'),
-            };
-        }
-        if (m_norm === 'dispatchasprivatelink') {
-            return {
-                owner: get(0, 'owner'),
-                commitment: get(1, 'commitment'),
-                zk_proof: get(2, 'zk_proof'),
-                call: get(3, 'call'),
-            };
-        }
-    }
-
     if (s === 'zkverifier') {
         const m_norm = m.replace(/_/g, '');
         if (m_norm === 'batchregisterverificationkeys') {
@@ -406,9 +327,9 @@ export function mapExtrinsicArgs(
 
 /**
  * Maps raw event data fields (which may use positional keys) to semantic names
- * for shielded-pool, account-mapping, zk-verifier, evm, ethereum and system events.
+ * for shielded-pool, zk-verifier, evm, ethereum and system events.
  *
- * @param method - Event name (e.g. `'shielded'`, `'aliasRegistered'`).
+ * @param method - Event name (e.g. `'shielded'`, `'unshielded'`).
  * @param data   - Raw event data fields.
  * @returns Remapped data with semantic keys, or the original object if unknown.
  */
@@ -482,124 +403,6 @@ export function mapZkEventData(
 
     if (m_norm === 'assetunverified') {
         return { asset_id: get(0, 'asset_id') };
-    }
-
-    // ── account-mapping events ───────────────────────────────────────────────
-
-    if (m_norm === 'accountmapped' || m_norm === 'accountunmapped') {
-        return {
-            account: get(0, 'account'),
-            address: get(1, 'address'),
-        };
-    }
-
-    if (m_norm === 'aliasregistered') {
-        return {
-            account: get(0, 'account'),
-            alias: get(1, 'alias'),
-            evm_address: get(2, 'evm_address'),
-        };
-    }
-
-    if (m_norm === 'aliasreleased') {
-        return {
-            account: get(0, 'account'),
-            alias: get(1, 'alias'),
-        };
-    }
-
-    if (m_norm === 'aliastransferred') {
-        return {
-            from: get(0, 'from'),
-            to: get(1, 'to'),
-            alias: get(2, 'alias'),
-        };
-    }
-
-    if (m_norm === 'aliaslistedforsale') {
-        return {
-            seller: get(0, 'seller'),
-            alias: get(1, 'alias'),
-            price: get(2, 'price'),
-            private: get(3, 'private'),
-        };
-    }
-
-    if (m_norm === 'aliassalecancelled') {
-        return {
-            seller: get(0, 'seller'),
-            alias: get(1, 'alias'),
-        };
-    }
-
-    if (m_norm === 'aliassold') {
-        return {
-            seller: get(0, 'seller'),
-            buyer: get(1, 'buyer'),
-            alias: get(2, 'alias'),
-            price: get(3, 'price'),
-        };
-    }
-
-    if (m_norm === 'chainlinkadded') {
-        return {
-            account: get(0, 'account'),
-            chain_id: get(1, 'chain_id'),
-            address: get(2, 'address'),
-        };
-    }
-
-    if (m_norm === 'chainlinkremoved') {
-        return {
-            account: get(0, 'account'),
-            chain_id: get(1, 'chain_id'),
-        };
-    }
-
-    if (m_norm === 'metadataupdated') {
-        return { account: get(0, 'account') };
-    }
-
-    if (m_norm === 'supportedchainadded') {
-        return {
-            chain_id: get(0, 'chain_id'),
-            scheme: get(1, 'scheme'),
-        };
-    }
-
-    if (m_norm === 'supportedchainremoved') {
-        return { chain_id: get(0, 'chain_id') };
-    }
-
-    if (m_norm === 'proxycallexecuted') {
-        return {
-            owner: get(0, 'owner'),
-            chain_id: get(1, 'chain_id'),
-            address: get(2, 'address'),
-        };
-    }
-
-    if (m_norm === 'privatechainlinkadded' || m_norm === 'privatechainlinkremoved') {
-        return {
-            account: get(0, 'account'),
-            chain_id: get(1, 'chain_id'),
-            commitment: get(2, 'commitment'),
-        };
-    }
-
-    if (m_norm === 'privatechainlinkrevealed') {
-        return {
-            account: get(0, 'account'),
-            chain_id: get(1, 'chain_id'),
-            address: get(2, 'address'),
-        };
-    }
-
-    if (m_norm === 'privatelinkdispatchexecuted') {
-        return {
-            owner: get(0, 'owner'),
-            commitment: get(1, 'commitment'),
-        };
     }
 
     // ── zk-verifier events ───────────────────────────────────────────────────

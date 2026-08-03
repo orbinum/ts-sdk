@@ -684,9 +684,9 @@ describe('SubstrateClient._toEventRecords', () => {
   });
 
   it('lowercases the first char of event.type to form section', () => {
-    const raw = [makeRawEvent('ApplyExtrinsic', 0, 'AccountMapping', 'AliasRegistered', {})];
+    const raw = [makeRawEvent('ApplyExtrinsic', 0, 'ShieldedPool', 'Shielded', {})];
     const rec = toEventRecords(raw)[0]!;
-    expect(rec.event.section).toBe('accountMapping');
+    expect(rec.event.section).toBe('shieldedPool');
   });
 
   it('preserves the method name as-is', () => {
