@@ -2,11 +2,24 @@
  * bjj-fast — BabyJubJub scalar multiplication on @noble/curves.
  *
  * @zk-kit/baby-jubjub's mulPointEscalar is a plain double-and-add over raw
- * bigints (~1ms per mul in Node, several ms in a browser tab). The wallet
- * scan performs one variable-point mul PER POOL HINT, which made the EC math
- * ~90% of a full rescan. noble's multiplyUnsafe on the same curve is ~17×
- * faster (measured 0.056ms vs 0.94ms per mul), and its generator multiply
- * uses precomputed tables (~11× faster).
+ * bigints. The wallet scan performs one variable-point mul PER POOL HINT,
+ * which makes the EC math the dominant cost of a full rescan; noble is
+ * roughly an order of magnitude faster on the same curve.
+ *
+ * Cost is dominated by the SCALAR's bit length, so figures measured with a
+ * small scalar do not transfer. With a full-width scalar (a 247-bit ivsk, the
+ * scan's actual case), measured on an M-series laptop under Node 22:
+ *
+ *   fastMulPoint, fresh point   ~1500 µs   ← the per-hint scan cost
+ *   fastMulPoint, warm table     ~150 µs   ← same point reused (windows)
+ *   fastMulBase                  ~180 µs   ← generator table, built once
+ *   zk-kit mulPointEscalar     ~23000 µs
+ *
+ * The 10× gap between a fresh and a reused point is noble's wNAF table, built
+ * lazily on a point's first multiplication. It cannot help the per-hint path
+ * (the ephPk differs every hint, so the table would be built and thrown away
+ * — measured 26× SLOWER that way), but it is why precomputed windows
+ * (selfEph, pairwise) are worth building once and reusing.
  *
  * Scope: multiplication ONLY. Point packing stays on @zk-kit (its packed
  * format is the on-chain memo format and noble's toBytes is NOT compatible).
@@ -35,7 +48,7 @@ const BjjPoint = edwards({
 /** Affine point as zk-kit represents it. */
 export type AffinePoint = [bigint, bigint];
 
-/** Generator (Base8) multiplication — precomputed-table path (~0.09ms). */
+/** Generator (Base8) multiplication — precomputed-table path. */
 export function fastMulBase(scalar: bigint): AffinePoint {
     const s = scalar % N;
     if (s === 0n) return [0n, 1n];
@@ -43,7 +56,7 @@ export function fastMulBase(scalar: bigint): AffinePoint {
     return [x, y];
 }
 
-/** Variable-point multiplication — one-shot unsafe path (~0.06ms). */
+/** Variable-point multiplication — one-shot unsafe path. */
 export function fastMulPoint(point: AffinePoint, scalar: bigint): AffinePoint {
     const s = scalar % N;
     if (s === 0n) return [0n, 1n];

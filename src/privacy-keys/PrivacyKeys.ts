@@ -32,7 +32,8 @@
 
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
-import { mulPointEscalar, Base8, packPoint } from '@zk-kit/baby-jubjub';
+import { packPoint } from '@zk-kit/baby-jubjub';
+import { fastMulBase } from '../utils/bjj-fast';
 import { bigintTo32Le } from '../utils/bytes';
 import { fromHex, toHex } from '../utils/hex';
 import { BABYJUB_SUBORDER } from '../utils/crypto-constants';
@@ -156,7 +157,7 @@ export function deriveViewingSecretKey(spendingKey: bigint): Uint8Array {
  * Derive the packed BabyJubJub viewing public key (ivk) from ivsk bytes.
  *
  *   ivsk_scalar = BigInt(ivsk_bytes_BE) % BABYJUB_SUBORDER  (clamped to [1, ∞))
- *   ivk_point   = mulPointEscalar(Base8, ivsk_scalar)       → [Ax, Ay]
+ *   ivk_point   = fastMulBase(ivsk_scalar)                  → [Ax, Ay]
  *   result      = bigintTo32Le(packPoint([Ax, Ay]))          → 32-byte Uint8Array (LE)
  *
  * The packed bigint is stored in little-endian so it is consistent with the
@@ -167,7 +168,7 @@ export function deriveViewingSecretKey(spendingKey: bigint): Uint8Array {
  */
 export function deriveViewingPublicKey(ivsk: Uint8Array): Uint8Array {
     const ivskScalar = BigInt(toHex(ivsk)) % BABYJUB_SUBORDER || 1n;
-    const ivkPoint = mulPointEscalar(Base8, ivskScalar);
+    const ivkPoint = fastMulBase(ivskScalar);
     const packed = packPoint(ivkPoint) as bigint;
     return bigintTo32Le(packed);
 }
@@ -180,7 +181,7 @@ export function deriveViewingPublicKey(ivsk: Uint8Array): Uint8Array {
  */
 export function deriveOwnerPk(spendingKey: bigint): bigint {
     try {
-        const pubPoint = mulPointEscalar(Base8, spendingKey);
+        const pubPoint = fastMulBase(spendingKey);
         return pubPoint[0];
     } catch {
         return 0n;
