@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-08-06
+
+### Added
+
+- **Pairwise ephemeral keys — a note from a known counterparty costs a hash lookup instead of an elliptic-curve multiplication.** `derivePairwiseSharedSecret`, `derivePairwiseEphSk` and `pairwiseEphWindow`, mirroring the existing `selfEph` module.
+
+  A wallet scan is O(pool): every note in the network costs one ECDH, and the answer is "not mine" 99.99% of the time. `selfEph` already removed that cost for the wallet's own notes by deriving their ephemeral deterministically. This does the same for notes *between two parties who know each other*:
+
+  ```
+  sharedSecret = ECDH(myViewingSk, theirViewingPk)     (symmetric)
+  ephSk_i      = SHA256("orbinum-pairwise-eph-v1" ‖ ss ‖ u32le(i))
+  ```
+
+  The sender publishes the derived ephemeral in the field it already publishes — the memo's last 32 bytes — so the receiver, who can compute the same value, recognises the note by looking it up in a precomputed window. **No protocol change, no new field, no migration**: the wire format is untouched and a wallet that knows nothing about this still recovers the note the slow way.
+
+  Measured: window lookup **0.10 µs** against **895 µs** for the ECDH it replaces. Building a window costs ~905 µs per entry, paid once per counterparty and reused across the whole scan — at a 1M-note pool that amortises to 0.16 µs/hint.
+
+  **Scope, stated plainly**: this helps only where a shared secret exists, i.e. where the receiver has the sender's privacy address. A wallet restoring from seed with no address book still pays the full O(pool) scan, and a stranger's first payment is unaffected. It converts the steady-state case, not the worst case.
+
+  **Viewing keys are used rather than spending keys** deliberately. The pair secret is held by both sides, so it will exist on two devices and in whatever backup either party keeps; deriving it from spending keys would make a compromise of one party's stored secrets bear on the other's ability to spend. With viewing keys the worst case is disclosure of which notes those two parties exchanged — visibility a viewing key already confers — and nothing about authority to spend.
+
+  **Counter reuse is the one way this loses privacy**: republishing an index republishes the same ephemeral, publicly linking the two notes as sharing a sender-receiver pair. `pairwiseEphWindow` is a pure function of (secret, range) so the caller owns that state, exactly as with `selfEph`. Callers must persist the counter and never reuse it.
+
+  Matching is intended to happen **client-side**. Asking a server for a specific ephemeral would tell it which notes are yours, which is what a download-everything scan feed exists to prevent.
+
 ## [0.24.0] - 2026-08-06
 
 ### Changed

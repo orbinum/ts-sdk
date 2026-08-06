@@ -69,6 +69,9 @@ export {
     deriveViewTag,
     deriveSelfEphSk,
     selfEphWindow,
+    derivePairwiseSharedSecret,
+    derivePairwiseEphSk,
+    pairwiseEphWindow,
     selectNotes,
     treeIdOf,
     buildDummyTransferInput,
@@ -81,6 +84,7 @@ export type {
     ResolvedSpendVersion,
     TryDecryptOptions,
     SelfEphWindowEntry,
+    PairwiseEphWindowEntry,
 } from './shielded-pool/index';
 export { CURRENT_CIRCUIT_VERSION } from './shielded-pool/protocol/types';
 export { BN254_R, BABYJUB_SUBORDER } from './utils/crypto-constants';
