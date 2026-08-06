@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-08-06
+
+### Changed
+
+- **`deriveViewingPublicKey` and `deriveOwnerPk` are ~95× faster.** Both still ran on `@zk-kit/baby-jubjub`'s `mulPointEscalar` — a plain double-and-add over raw bigints — while the rest of the shielded-pool code had long since moved to the noble-backed `fastMulBase`. Measured on an M-series laptop under Node 22: **56 ms → 0.59 ms** per generator multiplication, with byte-identical output.
+
+  Both functions produce on-chain formats (the packed ivk a sender encrypts to, and the `ownerPk` a commitment binds), so the port is pinned by an equivalence suite rather than trusted: `tests/utils/bjj-fast.test.ts` now asserts the derived values match the old implementation across a spending-key sweep and the edge scalars (1, suborder−1, over-suborder). A drift here would not throw — it would silently produce keys that decrypt nothing and notes that can never be spent.
+
+  Every caller benefits without changing anything: wallet startup through `PrivacyKeyManager`, private transfers, unshields, and per-note vault validation.
+
+- **`bjj-fast`'s documented timings were wrong and are now corrected.** The module claimed "0.056 ms vs 0.94 ms per mul". Scalar multiplication cost is dominated by the scalar's **bit length**, and those figures came from a small scalar — they do not transfer to the real case. With a full-width 247-bit viewing key, the numbers are roughly an order of magnitude higher; the header now carries the measured table and states the dependency explicitly, so the next reader does not plan against a figure that cannot be reproduced.
+
+### Added
+
+- **`@orbinum/sdk/bench`** — a separate entrypoint exposing deterministic fixtures (`benchWallet`, `plantSchedule`, `generateHintAt`, `buildManifest`, `SeededBytes`) that generate synthetic scan hints with **real** encrypted memos from a seed. They exist so a wallet benchmark and an indexer seeder, in different repositories, can build byte-identical datasets for scale testing.
+
+  Deliberately **not** re-exported from the package root: these are test fixtures, not wallet API, and bundling them cost every consumer ~21 KB of generator code for something no application calls. The main bundle shrinks from 163.65 KB to 142.87 KB (ESM) as a result. No stability guarantee applies to this subpath — the shape of a generated hint may change whenever a benchmark needs it to.
+
 ## [0.23.0] - 2026-08-03
 
 ### Changed
