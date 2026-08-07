@@ -11,6 +11,12 @@ export type { NoteDisclosure } from './NoteDisclosure';
 export { selectNotes, buildDummyTransferInput } from './coinSelection';
 export { serializeMemo, deriveEncryptionKey, deriveViewTag } from './memo';
 export { deriveSelfEphSk, selfEphWindow, type SelfEphWindowEntry } from './selfEph';
+export {
+    derivePairwiseSharedSecret,
+    derivePairwiseEphSk,
+    pairwiseEphWindow,
+    type PairwiseEphWindowEntry,
+} from './pairwiseEph';
 export type {
     MerkleTreeInfo,
     ScanCommitment,
