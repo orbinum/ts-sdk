@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.1] - 2026-08-07
+
+### Fixed
+
+- **Proving no longer runs out of memory on phones.** A user on the Orbinum testnet reported an unshield failing with:
+
+  ```
+  Failed to execute 'postMessage' on 'Worker': Data cannot be cloned, out of memory.
+  ```
+
+  The same build proves fine on desktop, which is what makes this a platform limit rather than a logic bug. `ffjavascript` spawns one Web Worker per logical core, each carrying its own `WebAssembly.Memory`; a mobile browser's per-tab budget cannot hold them, and the transfer of the WASM buffer fails before proving starts.
+
+  `@orbinum/proof-generator` 5.1.0 detects low-memory and mobile devices and proves on a single thread there. Bumping the dependency is what carries the fix — no call site in the SDK has to change for a phone to start working.
+
+### Added
+
+- `ProofOptions`, the shared option shape for `generateTransferProof`, `generateUnshieldProof` and `generateFeeClaimProof`. Same three fields as before plus `singleThread?: boolean`.
+
+  **Leave `singleThread` unset.** Absent means "decide from the device", which is what the fix depends on; an explicit `false` turns the heuristic off on exactly the phones it exists for. Pass it only when the host knows better than the heuristic — a desktop app certain of its environment, or a benchmark pinning one mode. The proof is byte-identical either way; only the wall-clock changes.
+
+- `shouldProveSingleThreaded`, re-exported from `@orbinum/proof-generator`, for callers that want to show a "this will take longer" hint before proving.
+
 ## [0.25.0] - 2026-08-06
 
 ### Added

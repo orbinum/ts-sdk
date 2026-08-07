@@ -131,10 +131,12 @@ export {
     generateFeeClaimProof,
     CircuitType,
     WebArtifactProvider,
+    shouldProveSingleThreaded,
 } from './proof-generator';
 export type {
     ArtifactProvider,
     ProofResult,
+    ProofOptions,
     UnshieldProofInputs,
     TransferInputNote,
     TransferOutputNote,

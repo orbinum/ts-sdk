@@ -7,6 +7,7 @@ import {
 } from '@orbinum/proof-generator';
 import { leHexToBigint } from '../utils/bytes';
 import { merkleProofToCircuit } from './merkle';
+import { toGenerateOptions, type ProofOptions } from './options';
 
 export { WebArtifactProvider };
 export type { ArtifactProvider, ProofResult };
@@ -53,7 +54,7 @@ export interface PrivateTransferProofInputs {
  */
 export async function generateTransferProof(
     params: PrivateTransferProofInputs,
-    options: { provider?: ArtifactProvider; verbose?: boolean } = {}
+    options: ProofOptions = {}
 ): Promise<ProofResult> {
     const root = leHexToBigint(params.merkleRoot).toString();
     const [i0, i1] = params.inputs;
@@ -82,7 +83,6 @@ export async function generateTransferProof(
     };
 
     const provider = options.provider ?? new WebArtifactProvider();
-    const opts: { provider: ArtifactProvider; verbose?: boolean } = { provider };
-    if (options.verbose !== undefined) opts.verbose = options.verbose;
+    const opts = toGenerateOptions(provider, options);
     return generateProof(CircuitType.Transfer, circuitInputs, opts);
 }
