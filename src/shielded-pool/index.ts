@@ -2,6 +2,12 @@ export { NoteBuilder } from './protocol/NoteBuilder';
 export { EncryptedMemo, ENCRYPTED_MEMO_SIZE } from './protocol/EncryptedMemo';
 export { serializeMemo, deriveViewTag } from './protocol/memo';
 export { deriveSelfEphSk, selfEphWindow, type SelfEphWindowEntry } from './protocol/selfEph';
+export {
+    derivePairwiseSharedSecret,
+    derivePairwiseEphSk,
+    pairwiseEphWindow,
+    type PairwiseEphWindowEntry,
+} from './protocol/pairwiseEph';
 export { ShieldedPoolModule } from './pallet/ShieldedPoolModule';
 export type {
     DecryptedMemo,
