@@ -11,3 +11,5 @@ export type { TransferInputNote, TransferOutputNote, PrivateTransferProofInputs 
 
 export { generateFeeClaimProof } from './fee-claim';
 export type { FeeClaimProofInputs, FeeClaimProofOutput } from './fee-claim';
+export type { ProofOptions } from './options';
+export { shouldProveSingleThreaded } from '@orbinum/proof-generator';

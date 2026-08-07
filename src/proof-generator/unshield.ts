@@ -10,6 +10,7 @@ import { mulPointEscalar, Base8 } from '@zk-kit/baby-jubjub';
 import { poseidon4 } from 'poseidon-lite';
 import { leHexToBigint, bytesToBigintLE } from '../utils/bytes';
 import { merkleProofToCircuit } from './merkle';
+import { toGenerateOptions, type ProofOptions } from './options';
 
 export { CircuitType, WebArtifactProvider };
 export type { ArtifactProvider, ProofResult };
@@ -89,7 +90,7 @@ export interface UnshieldProofResult extends ProofResult {
  */
 export async function generateUnshieldProof(
     inputs: UnshieldProofInputs,
-    options: { provider?: ArtifactProvider; verbose?: boolean } = {}
+    options: ProofOptions = {}
 ): Promise<UnshieldProofResult> {
     const { elements, indices } = merkleProofToCircuit(inputs.pathSiblings, inputs.leafIndex);
 
@@ -139,8 +140,7 @@ export async function generateUnshieldProof(
     };
 
     const provider = options.provider ?? new WebArtifactProvider();
-    const opts: { provider: ArtifactProvider; verbose?: boolean } = { provider };
-    if (options.verbose !== undefined) opts.verbose = options.verbose;
+    const opts = toGenerateOptions(provider, options);
     const proofResult = await generateProof(CircuitType.Unshield, circuitInputs, opts);
     return { ...proofResult, changeCommitment, changeValue, changeBlinding, changeOwnerPubkey };
 }

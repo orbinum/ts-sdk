@@ -5,6 +5,7 @@ import {
     type ArtifactProvider,
 } from '@orbinum/proof-generator';
 import { bigintTo32Le } from '../utils/bytes';
+import { toGenerateOptions, type ProofOptions } from './options';
 
 export { WebArtifactProvider };
 export type { ArtifactProvider };
@@ -61,7 +62,7 @@ export interface FeeClaimProofOutput {
  */
 export async function generateFeeClaimProof(
     inputs: FeeClaimProofInputs,
-    options: { provider?: ArtifactProvider; verbose?: boolean } = {}
+    options: ProofOptions = {}
 ): Promise<FeeClaimProofOutput> {
     if (inputs.amount <= 0n) {
         throw new Error('Fee claim amount must be greater than zero.');
@@ -76,8 +77,7 @@ export async function generateFeeClaimProof(
     };
 
     const provider = options.provider ?? new WebArtifactProvider();
-    const opts: { provider: ArtifactProvider; verbose?: boolean } = { provider };
-    if (options.verbose !== undefined) opts.verbose = options.verbose;
+    const opts = toGenerateOptions(provider, options);
 
     const proofResult = await generateProof(CircuitType.ValueProof, circuitInputs, opts);
 

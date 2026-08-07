@@ -18,8 +18,8 @@ importers:
         specifier: 2.2.0
         version: 2.2.0
       '@orbinum/proof-generator':
-        specifier: 5.0.0
-        version: 5.0.0
+        specifier: 5.1.0
+        version: 5.1.0
       '@polkadot-api/metadata-builders':
         specifier: 0.14.2
         version: 0.14.2
@@ -454,8 +454,8 @@ packages:
     resolution: {integrity: sha512-1I8/wMkCKn5zpS4qVoaXnUfNiuHoo7Ym8hlG6avaijGtITLY6BzLEcwjBjVHZ2vpI+CjL557ORfyjuGrFDzJSw==}
     engines: {node: '>=18.0.0'}
 
-  '@orbinum/proof-generator@5.0.0':
-    resolution: {integrity: sha512-0GfuGPedeCaEgiWOuaNwMZqTqKIIbk9dpu51N6gPY4Ul/xnwHfRdzTa9oz3kk2G6ANI0xPhbI5l5a1lBklv1aA==}
+  '@orbinum/proof-generator@5.1.0':
+    resolution: {integrity: sha512-he74KRX/QkN5+1CTtxN2A0xzt80J+lcjasjL/GJxuj7YqCUKt1M8SSQFdQJig1F8ONJHJB9ipuvWkG7v/DlGFA==}
     engines: {node: '>=22.0.0'}
 
   '@oxc-project/types@0.142.0':
@@ -2650,7 +2650,7 @@ snapshots:
 
   '@orbinum/groth16-proofs@3.0.0': {}
 
-  '@orbinum/proof-generator@5.0.0':
+  '@orbinum/proof-generator@5.1.0':
     dependencies:
       '@orbinum/circuits': 0.9.0
       '@orbinum/groth16-proofs': 3.0.0
