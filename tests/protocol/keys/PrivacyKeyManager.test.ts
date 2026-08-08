@@ -257,15 +257,21 @@ describe('pkm.encodePrivacyAddress', () => {
         expect(() => pkm.encodePrivacyAddress()).toThrow(/no key loaded/i);
     });
 
-    it('returns a string starting with "orbpriv1:"', async () => {
+    it('returns a string starting with "orbpriv2:"', async () => {
         await pkm.load(TEST_SK, MASTER_BYTES);
-        expect(pkm.encodePrivacyAddress()).toMatch(/^orbpriv1:/);
+        expect(pkm.encodePrivacyAddress()).toMatch(/^orbpriv2:/);
     });
 
-    it('has exactly 3 colon-separated parts', async () => {
+    it('has exactly 4 colon-separated parts (adds a checksum)', async () => {
         await pkm.load(TEST_SK, MASTER_BYTES);
         const parts = pkm.encodePrivacyAddress().split(':');
-        expect(parts).toHaveLength(3);
+        expect(parts).toHaveLength(4);
+    });
+
+    it('checksum part is 8 lowercase hex chars', async () => {
+        await pkm.load(TEST_SK, MASTER_BYTES);
+        const [, , , checksum] = pkm.encodePrivacyAddress().split(':');
+        expect(checksum).toMatch(/^[0-9a-f]{8}$/);
     });
 
     it('ownerPk part is a 0x-prefixed 64-nibble hex string', async () => {
@@ -357,9 +363,39 @@ describe('PrivacyKeyManager.decodePrivacyAddress', () => {
         expect(PrivacyKeyManager.decodePrivacyAddress('orbpriv1:0xaa:')).toBeNull();
     });
 
-    it('returns ownerPkHex and viewingPublicKeyHex for a valid address', () => {
+    it('returns ownerPkHex and viewingPublicKeyHex for a valid legacy orbpriv1 address', () => {
+        // orbpriv1 has no checksum — still read for backwards compat.
         const result = PrivacyKeyManager.decodePrivacyAddress('orbpriv1:0xabcd:0xef01');
         expect(result).toEqual({ ownerPkHex: '0xabcd', viewingPublicKeyHex: '0xef01' });
+    });
+
+    it('accepts a well-formed orbpriv2 address (checksum matches)', async () => {
+        const pkm2 = new PrivacyKeyManager();
+        await pkm2.load(TEST_SK, MASTER_BYTES);
+        const addr = pkm2.encodePrivacyAddress();
+        expect(addr).toMatch(/^orbpriv2:/);
+        const result = PrivacyKeyManager.decodePrivacyAddress(addr);
+        expect(BigInt(result!.ownerPkHex)).toBe(pkm2.getOwnerPk());
+    });
+
+    it('rejects an orbpriv2 address with a corrupted body (checksum fails)', async () => {
+        const pkm2 = new PrivacyKeyManager();
+        await pkm2.load(TEST_SK, MASTER_BYTES);
+        const [, ownerPkHex, ivkHex, checksum] = pkm2.encodePrivacyAddress().split(':');
+        // Flip one nibble of the ownerPk — checksum no longer matches.
+        const flipped = ownerPkHex!.slice(0, -1) + (ownerPkHex!.at(-1) === '0' ? '1' : '0');
+        const corrupted = `orbpriv2:${flipped}:${ivkHex}:${checksum}`;
+        expect(PrivacyKeyManager.decodePrivacyAddress(corrupted)).toBeNull();
+    });
+
+    it('rejects an orbpriv2 address with a wrong checksum', () => {
+        expect(
+            PrivacyKeyManager.decodePrivacyAddress('orbpriv2:0xabcd:0xef01:deadbeef')
+        ).toBeNull();
+    });
+
+    it('rejects an orbpriv2 address missing the checksum part (only 3 parts)', () => {
+        expect(PrivacyKeyManager.decodePrivacyAddress('orbpriv2:0xabcd:0xef01')).toBeNull();
     });
 
     it('decoded values are exactly the parts after the prefix', async () => {
