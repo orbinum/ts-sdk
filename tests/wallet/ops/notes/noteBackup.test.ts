@@ -46,13 +46,16 @@ describe('encodeNoteBackup (closed format)', () => {
         const entry = backup.notes[0]!;
         expect(entry.commitmentHex).toBe(sentNote.commitmentHex);
         expect(entry.encryptedMemo).toMatch(/^0x[0-9a-f]+$/);
-        // No secret-key field in the serialized form — only public data.
+        // No secret-key field in the serialized form — only public data + local
+        // status flags (spent/spentAt are not secrets).
         const json = JSON.stringify(backup).toLowerCase();
         expect(json).not.toContain('spendingkey');
         expect(json).not.toContain('"sk"');
         expect(json).not.toContain('blinding');
-        // The only fields present are the closed-format ones.
-        expect(Object.keys(entry).sort()).toEqual(['commitmentHex', 'encryptedMemo'].sort());
+        // The entry carries the closed-format fields plus the local spent status.
+        expect(Object.keys(entry).sort()).toEqual(
+            ['commitmentHex', 'encryptedMemo', 'spent', 'spentAt'].sort()
+        );
     });
 
     it('is deterministic with an injected clock', () => {
@@ -110,6 +113,26 @@ describe('importNotesFromBackup (ownership by decryption)', () => {
         expect(note.spendingKey).not.toBe(RECIPIENT_SK);
         // Its nullifier is the one that spendingKey produces over this commitment.
         expect(note.ownerPk).toBe(sentNote.ownerPk);
+    });
+
+    it('preserves spent status across export → import', () => {
+        // A spent note and an unspent note in one backup must come back separated.
+        const spentNote = { ...sentNote, spent: true, spentAt: 1234 };
+        const entries = decodeNoteBackup(
+            JSON.stringify(encodeNoteBackup([spentNote], { now: () => 1 }))
+        );
+        const [imported] = importNotesFromBackup(entries, recipientKeys);
+        expect(imported!.spent).toBe(true);
+        expect(imported!.spentAt).toBe(1234);
+    });
+
+    it('imports an unspent note as available (spent=false)', () => {
+        const entries = decodeNoteBackup(
+            JSON.stringify(encodeNoteBackup([{ ...sentNote, spent: false }], { now: () => 1 }))
+        );
+        const [imported] = importNotesFromBackup(entries, recipientKeys);
+        expect(imported!.spent).toBe(false);
+        expect(imported!.spentAt).toBeNull();
     });
 
     it("drops a note that is not the importer's (wrong keys → no decrypt)", () => {

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-08-08
+
+### Fixed
+
+- **Note backups now carry spent status.** `encodeNoteBackup` records each note's
+  `spent`/`spentAt`, and `importNotesFromBackup` applies them, so a restored vault
+  separates available from spent notes instead of importing everything as
+  available. The flags are local status, not secrets — no spending key travels.
+  The `NoteBackupEntry` type gains optional `spent`/`spentAt` fields; older
+  backups without them import as unspent.
+
 ## [1.1.0] - 2026-08-08
 
 **Closed note backups — move notes between devices without re-scanning.** A
