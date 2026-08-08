@@ -1,6 +1,6 @@
 {
   "name": "@orbinum/sdk",
-  "version": "0.25.1",
+  "version": "1.0.0",
   "description": "Official TypeScript SDK for Orbinum.",
   "author": "Orbinum",
   "license": "MIT",
@@ -10,15 +10,27 @@
   "files": [
     "dist"
   ],
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
-    }
+    },
+    "./storage/indexeddb": {
+      "types": "./dist/adapters/indexeddb/index.d.ts",
+      "import": "./dist/adapters/indexeddb/index.mjs",
+      "require": "./dist/adapters/indexeddb/index.js"
+    },
+    "./worker": {
+      "types": "./dist/wallet/worker/index.d.ts",
+      "import": "./dist/wallet/worker/index.mjs",
+      "require": "./dist/wallet/worker/index.js"
+    },
+    "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "tsup src/index.ts --format esm,cjs --dts",
+    "build": "tsup src/index.ts src/adapters/indexeddb/index.ts src/wallet/worker/index.ts --format esm,cjs --dts",
     "typecheck": "tsc --noEmit",
     "typecheck:all": "tsc --project tsconfig.test.json --noEmit",
     "test": "vitest run",
@@ -27,7 +39,8 @@
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
     "check": "npm run typecheck:all && npm run lint && npm run format:check && npm run build && npm run test",
-    "clean": "rm -rf dist node_modules package-lock.json yarn.lock pnpm-lock.yaml"
+    "clean": "rm -rf dist node_modules package-lock.json yarn.lock pnpm-lock.yaml",
+    "verify:example": "bash scripts/verify-example.sh"
   },
   "repository": {
     "type": "git",
@@ -47,7 +60,9 @@
   "homepage": "https://github.com/orbinum/ts-sdk#readme",
   "devDependencies": {
     "@eslint/js": "10.0.1",
+    "@polkadot/util-crypto": "14.0.3",
     "@types/node": "25.8.0",
+    "polkadot-api": "2.1.3",
     "eslint": "10.4.0",
     "prettier": "3.8.3",
     "ts-node": "10.9.2",
@@ -64,11 +79,13 @@
     "@polkadot-api/metadata-builders": "0.14.2",
     "@polkadot-api/substrate-bindings": "0.20.2",
     "@polkadot-api/tx-utils": "0.3.2",
-    "@polkadot/util-crypto": "14.0.3",
     "@scure/base": "2.2.0",
     "@zk-kit/baby-jubjub": "1.0.3",
-    "polkadot-api": "2.1.3",
     "poseidon-lite": "0.3.0"
+  },
+  "peerDependencies": {
+    "@polkadot/util-crypto": "^14.0.0",
+    "polkadot-api": "^2.1.3"
   },
   "packageManager": "pnpm@10.32.1+sha512.a706938f0e89ac1456b6563eab4edf1d1faf3368d1191fc5c59790e96dc918e4456ab2e67d613de1043d2e8c81f87303e6b40d4ffeca9df15ef1ad567348f2be"
 }

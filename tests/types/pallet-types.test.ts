@@ -9,7 +9,7 @@ import type {
     RawTransferInput,
     RawTransferOutput,
     PrivateTransferArgs,
-} from '../../src/shielded-pool/pallet/extrinsics';
+} from '../../src/chain/pallet/shielded-pool/extrinsics';
 import type {
     ShieldedEvent,
     NullifiersSpentEvent,
@@ -17,7 +17,7 @@ import type {
     UnshieldedEvent,
     MerkleRootUpdatedEvent,
     ShieldedPoolEvent,
-} from '../../src/shielded-pool/pallet/events';
+} from '../../src/chain/pallet/shielded-pool/events';
 
 // ─── pallet-args structural tests ────────────────────────────────────────────
 

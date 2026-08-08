@@ -48,6 +48,9 @@ jobs:
       - name: Build
         run: pnpm build
 
+      - name: Verify published entry points (node-wallet example)
+        run: pnpm verify:example
+
       - name: Upload dist artifacts
         uses: actions/upload-artifact@v4
         with:

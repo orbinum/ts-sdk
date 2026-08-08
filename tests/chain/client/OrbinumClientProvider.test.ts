@@ -1,0 +1,574 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { OrbinumClientProvider } from '../../../src/chain/client/OrbinumClientProvider';
+import { OrbinumClient } from '../../../src/chain/client/OrbinumClient';
+import type { ConnectionStatus } from '../../../src/chain/client/OrbinumClientProvider';
+
+// ─── Module mocks ─────────────────────────────────────────────────────────────
+
+vi.mock('../../../src/chain/client/OrbinumClient', () => ({
+    OrbinumClient: {
+        connect: vi.fn(),
+    },
+}));
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function makeOrbinumClient(requestResult: unknown = { peers: 1 }): OrbinumClient {
+    return {
+        substrate: {
+            request: vi.fn().mockResolvedValue(requestResult),
+        },
+        evm: null,
+        destroy: vi.fn(),
+    } as unknown as OrbinumClient;
+}
+
+function makeProvider(
+    overrides: Partial<ConstructorParameters<typeof OrbinumClientProvider>[0]> = {}
+): OrbinumClientProvider {
+    return new OrbinumClientProvider({
+        substrateWs: 'ws://localhost:9944',
+        connectTimeoutMs: 100,
+        heartbeatIntervalMs: 999_999, // very large so heartbeat never fires in tests
+        heartbeatTimeoutMs: 50,
+        reconnectBaseMs: 999_999, // very large so reconnect doesn't auto-fire
+        reconnectMaxMs: 999_999,
+        ...overrides,
+    });
+}
+
+beforeEach(() => {
+    vi.clearAllMocks();
+});
+
+// ─── Initial status ───────────────────────────────────────────────────────────
+
+describe('OrbinumClientProvider — initial state', () => {
+    it('starts in "idle" status', () => {
+        const provider = makeProvider();
+        expect(provider.status).toBe<ConnectionStatus>('idle');
+    });
+
+    it('getOrbinumClient throws when idle', async () => {
+        const provider = makeProvider();
+        await expect(provider.getOrbinumClient()).rejects.toThrow("status 'idle'");
+    });
+
+    it('tryGetOrbinumClient returns null when idle', async () => {
+        const provider = makeProvider();
+        const result = await provider.tryGetOrbinumClient();
+        expect(result).toBeNull();
+    });
+});
+
+// ─── connect() ────────────────────────────────────────────────────────────────
+
+describe('OrbinumClientProvider.connect', () => {
+    it('transitions to "connecting" and then "connected" on success', async () => {
+        const orbClient = makeOrbinumClient();
+        vi.mocked(OrbinumClient.connect).mockResolvedValue(orbClient);
+
+        const provider = makeProvider();
+        provider.connect();
+
+        expect(provider.status).toBe<ConnectionStatus>('connecting');
+
+        // Wait for the microtask queue to drain (the promise resolves synchronously in mock)
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(provider.status).toBe<ConnectionStatus>('connected');
+    });
+
+    it('calling connect() twice (while connecting) is a no-op', async () => {
+        const orbClient = makeOrbinumClient();
+        vi.mocked(OrbinumClient.connect).mockResolvedValue(orbClient);
+
+        const provider = makeProvider();
+        provider.connect();
+        provider.connect(); // second call ignored
+
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(vi.mocked(OrbinumClient.connect)).toHaveBeenCalledTimes(1);
+    });
+
+    it('transitions through "disconnected" then "reconnecting" when OrbinumClient.connect rejects', async () => {
+        vi.mocked(OrbinumClient.connect).mockRejectedValue(new Error('unreachable'));
+
+        const statuses: ConnectionStatus[] = [];
+        const provider = makeProvider();
+        provider.onStatusChange((ev) => statuses.push(ev.status));
+        provider.connect();
+
+        await new Promise((r) => setTimeout(r, 10));
+
+        expect(statuses).toContain('disconnected');
+        // Provider schedules a reconnect attempt after disconnect
+        expect(statuses).toContain('reconnecting');
+    });
+
+    it('includes error message in the status event on failure', async () => {
+        vi.mocked(OrbinumClient.connect).mockRejectedValue(new Error('node down'));
+
+        const statuses: Array<{ status: ConnectionStatus; error?: string }> = [];
+        const provider = makeProvider();
+        provider.onStatusChange((ev) => statuses.push(ev));
+        provider.connect();
+
+        await new Promise((r) => setTimeout(r, 10));
+
+        const disconnectedEv = statuses.find((s) => s.status === 'disconnected');
+        expect(disconnectedEv?.error).toBe('node down');
+    });
+
+    it('transitions to "disconnected" then "reconnecting" when connection times out', async () => {
+        // connect() never resolves — simulating a hung connection
+        vi.mocked(OrbinumClient.connect).mockReturnValue(new Promise(() => {}));
+
+        const statuses: ConnectionStatus[] = [];
+        const provider = makeProvider({ connectTimeoutMs: 20 });
+        provider.onStatusChange((ev) => statuses.push(ev.status));
+        provider.connect();
+
+        await new Promise((r) => setTimeout(r, 50));
+
+        // After timeout: disconnected, then reconnecting
+        expect(statuses).toContain('disconnected');
+        expect(statuses).toContain('reconnecting');
+    });
+});
+
+// ─── getOrbinumClient ─────────────────────────────────────────────────────────
+
+describe('OrbinumClientProvider.getOrbinumClient', () => {
+    it('returns the connected client', async () => {
+        const orbClient = makeOrbinumClient();
+        vi.mocked(OrbinumClient.connect).mockResolvedValue(orbClient);
+
+        const provider = makeProvider();
+        provider.connect();
+
+        await Promise.resolve();
+        await Promise.resolve();
+
+        const result = await provider.getOrbinumClient();
+        expect(result).toBe(orbClient);
+    });
+
+    it('awaits the connecting promise if still connecting', async () => {
+        const orbClient = makeOrbinumClient();
+        vi.mocked(OrbinumClient.connect).mockResolvedValue(orbClient);
+
+        const provider = makeProvider();
+        provider.connect();
+
+        // getOrbinumClient while still "connecting" should still return the client
+        const resultPromise = provider.getOrbinumClient();
+
+        await Promise.resolve();
+        await Promise.resolve();
+
+        const result = await resultPromise;
+        expect(result).toBe(orbClient);
+    });
+});
+
+// ─── onStatusChange ───────────────────────────────────────────────────────────
+
+describe('OrbinumClientProvider.onStatusChange', () => {
+    it('notifies listener on each status transition', async () => {
+        const orbClient = makeOrbinumClient();
+        vi.mocked(OrbinumClient.connect).mockResolvedValue(orbClient);
+
+        const statuses: ConnectionStatus[] = [];
+        const provider = makeProvider();
+        provider.onStatusChange((ev) => statuses.push(ev.status));
+        provider.connect();
+
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(statuses).toContain('connecting');
+        expect(statuses).toContain('connected');
+    });
+
+    it('returned unsubscribe function stops further events', async () => {
+        const orbClient = makeOrbinumClient();
+        vi.mocked(OrbinumClient.connect).mockResolvedValue(orbClient);
+
+        const statuses: ConnectionStatus[] = [];
+        const provider = makeProvider();
+        const unsub = provider.onStatusChange((ev) => statuses.push(ev.status));
+
+        unsub(); // unsubscribe before connecting
+        provider.connect();
+
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(statuses).toHaveLength(0);
+    });
+
+    it('listener errors do not break the provider', async () => {
+        const orbClient = makeOrbinumClient();
+        vi.mocked(OrbinumClient.connect).mockResolvedValue(orbClient);
+
+        const provider = makeProvider();
+        provider.onStatusChange(() => {
+            throw new Error('listener error');
+        });
+        provider.connect();
+
+        // Should not throw
+        await Promise.resolve();
+        await Promise.resolve();
+
+        expect(provider.status).toBe<ConnectionStatus>('connected');
+    });
+});
+
+// ─── reset() ─────────────────────────────────────────────────────────────────
+
+describe('OrbinumClientProvider.reset', () => {
+    async function connectProvider(): Promise<{
+        provider: OrbinumClientProvider;
+        client: OrbinumClient;
+    }> {
+        const orbClient = makeOrbinumClient();
+        vi.mocked(OrbinumClient.connect).mockResolvedValue(orbClient);
+        const provider = makeProvider();
+        provider.connect();
+        await Promise.resolve();
+        await Promise.resolve();
+        return { provider, client: orbClient };
+    }
+
+    it('stops heartbeat and resets to "idle"', async () => {
+        const { provider } = await connectProvider();
+        provider.reset();
+        expect(provider.status).toBe<ConnectionStatus>('idle');
+    });
+
+    it('calls destroy on the active client', async () => {
+        const { provider, client } = await connectProvider();
+        provider.reset();
+        expect(client.destroy).toHaveBeenCalledOnce();
+    });
+});
+
+// ─── rpcSend / evmRpc helpers ─────────────────────────────────────────────────
+
+describe('OrbinumClientProvider.rpcSend', () => {
+    it('delegates to substrate.request', async () => {
+        const orbClient = makeOrbinumClient('orb-node');
+        vi.mocked(OrbinumClient.connect).mockResolvedValue(orbClient);
+
+        const provider = makeProvider();
+        provider.connect();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        const result = await provider.rpcSend<string>('system_name', []);
+
+        expect(result).toBe('orb-node');
+        expect(orbClient.substrate.request).toHaveBeenCalledWith('system_name', []);
+    });
+});
+
+describe('OrbinumClientProvider.evmRpc', () => {
+    it('throws when EVM is not configured', async () => {
+        const orbClient = makeOrbinumClient();
+        vi.mocked(OrbinumClient.connect).mockResolvedValue(orbClient);
+
+        const provider = makeProvider();
+        provider.connect();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        await expect(provider.evmRpc('eth_chainId', [])).rejects.toThrow('EVM RPC not configured');
+    });
+
+    it('delegates to evm.request when EVM is configured', async () => {
+        const evmMock = { request: vi.fn().mockResolvedValue('0x15') };
+        const orbClient = {
+            ...makeOrbinumClient(),
+            evm: evmMock,
+        } as unknown as OrbinumClient;
+        vi.mocked(OrbinumClient.connect).mockResolvedValue(orbClient);
+
+        const provider = makeProvider();
+        provider.connect();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        const result = await provider.evmRpc<string>('eth_chainId', []);
+
+        expect(result).toBe('0x15');
+        expect(evmMock.request).toHaveBeenCalledWith('eth_chainId', []);
+    });
+});
+
+describe('OrbinumClientProvider.evmRpcBatch', () => {
+    it('throws when EVM is not configured', async () => {
+        const orbClient = makeOrbinumClient();
+        vi.mocked(OrbinumClient.connect).mockResolvedValue(orbClient);
+
+        const provider = makeProvider();
+        provider.connect();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        await expect(provider.evmRpcBatch([{ method: 'eth_chainId' }])).rejects.toThrow(
+            'EVM RPC not configured'
+        );
+    });
+
+    it('delegates batch to evm.batchRequest', async () => {
+        const evmMock = { batchRequest: vi.fn().mockResolvedValue(['0x15', '0x1']) };
+        const orbClient = {
+            ...makeOrbinumClient(),
+            evm: evmMock,
+        } as unknown as OrbinumClient;
+        vi.mocked(OrbinumClient.connect).mockResolvedValue(orbClient);
+
+        const provider = makeProvider();
+        provider.connect();
+        await Promise.resolve();
+        await Promise.resolve();
+
+        const result = await provider.evmRpcBatch([
+            { method: 'eth_chainId' },
+            { method: 'eth_blockNumber' },
+        ]);
+
+        expect(result).toEqual(['0x15', '0x1']);
+        expect(evmMock.batchRequest).toHaveBeenCalledWith([
+            { method: 'eth_chainId' },
+            { method: 'eth_blockNumber' },
+        ]);
+    });
+});
+
+// ─── Reconnect backoff on flapping ──────────────────────────────────────────────
+
+describe('OrbinumClientProvider — flapping backoff', () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    // A node that connects then immediately drops, repeatedly, must NOT reset the
+    // backoff on each brief connect — otherwise it reconnects every reconnectBaseMs
+    // forever. The backoff should keep growing until the connection stays live for
+    // stableAfterMs. We observe this through the scheduled reconnect delay growing
+    // across flaps (measured via setTimeout call args).
+    it('does not reset backoff on a connect shorter than stableAfterMs', async () => {
+        const orbClient = makeOrbinumClient({ peers: 1 });
+        vi.mocked(OrbinumClient.connect).mockResolvedValue(orbClient);
+
+        const provider = makeProvider({
+            reconnectBaseMs: 1_000,
+            reconnectMaxMs: 60_000,
+            stableAfterMs: 10_000,
+            heartbeatIntervalMs: 500,
+            heartbeatTimeoutMs: 100,
+        });
+
+        const setTimeoutSpy = vi.spyOn(globalThis, 'setTimeout');
+        const reconnectDelays: number[] = [];
+        // Capture only the reconnect delays: they use the base/backoff range,
+        // distinct from the heartbeat interval (500) and stable timer (10_000).
+        const record = () => {
+            for (const call of setTimeoutSpy.mock.calls) {
+                const d = call[1] as number;
+                if (d >= 500 && d !== 500 && d !== 10_000) reconnectDelays.push(d);
+            }
+            setTimeoutSpy.mockClear();
+        };
+
+        provider.connect();
+        await vi.advanceTimersByTimeAsync(1); // resolve connect
+        expect(provider.status).toBe<ConnectionStatus>('connected');
+
+        // Flap 3 times, each connect lasting < stableAfterMs (drop after ~600ms via
+        // a failing heartbeat). Make the node fail probes now.
+        (orbClient.substrate.request as ReturnType<typeof vi.fn>).mockRejectedValue(
+            new Error('down')
+        );
+
+        for (let i = 0; i < 3; i++) {
+            record();
+            await vi.advanceTimersByTimeAsync(600); // heartbeat fires, probe fails → disconnected → scheduleReconnect
+            record();
+            // Let the reconnect timer fire and reconnect succeed again (flap back up).
+            (orbClient.substrate.request as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+                peers: 1,
+            });
+            await vi.advanceTimersByTimeAsync(60_000);
+        }
+
+        record();
+        // The captured reconnect delays should be non-decreasing (backoff grows),
+        // NOT pinned at the base delay — proving the flap didn't reset it.
+        expect(reconnectDelays.length).toBeGreaterThan(0);
+        const maxDelay = Math.max(...reconnectDelays);
+        // With reset-on-connect (the bug), every delay would be ~base (≤1000).
+        // With the fix, later delays exceed the base as the backoff grows.
+        expect(maxDelay).toBeGreaterThan(1_000);
+
+        provider.reset();
+        setTimeoutSpy.mockRestore();
+    });
+});
+
+// ─── Connect-timeout cleanup ──────────────────────────────────────────────────
+
+describe('OrbinumClientProvider — connect timeout cleanup', () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it('passes its connectTimeoutMs down to OrbinumClient.connect', async () => {
+        vi.mocked(OrbinumClient.connect).mockResolvedValue(makeOrbinumClient());
+        const provider = makeProvider({ connectTimeoutMs: 123 });
+        provider.connect();
+
+        expect(OrbinumClient.connect).toHaveBeenCalledWith(
+            expect.objectContaining({ connectTimeoutMs: 123 })
+        );
+
+        await vi.advanceTimersByTimeAsync(1);
+        provider.reset();
+    });
+
+    it('destroys a client that resolves after the outer timeout', async () => {
+        const lateClient = makeOrbinumClient();
+        vi.mocked(OrbinumClient.connect).mockImplementation(
+            () => new Promise((resolve) => setTimeout(() => resolve(lateClient), 200))
+        );
+        const provider = makeProvider({ connectTimeoutMs: 100 });
+        provider.connect();
+
+        // Outer race times out first: the attempt fails and a reconnect is scheduled.
+        await vi.advanceTimersByTimeAsync(150);
+        expect(provider.status).toBe<ConnectionStatus>('reconnecting');
+        expect(lateClient.destroy).not.toHaveBeenCalled();
+
+        // The in-flight connect resolves late — the orphan must be destroyed,
+        // otherwise it lives on unowned with papi reconnecting it forever.
+        await vi.advanceTimersByTimeAsync(100);
+        expect(lateClient.destroy).toHaveBeenCalledTimes(1);
+
+        provider.reset();
+    });
+
+    it('does not destroy anything when the inner connect rejects after the outer timeout', async () => {
+        vi.mocked(OrbinumClient.connect).mockImplementation(
+            () =>
+                new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error('inner timeout')), 200)
+                )
+        );
+        const provider = makeProvider({ connectTimeoutMs: 100 });
+        provider.connect();
+
+        await vi.advanceTimersByTimeAsync(300);
+        // No unhandled rejection, provider keeps its reconnecting lifecycle.
+        expect(provider.status).toBe<ConnectionStatus>('reconnecting');
+
+        provider.reset();
+    });
+});
+
+// ─── Heartbeat probe-failure tolerance ────────────────────────────────────────
+
+describe('OrbinumClientProvider — heartbeat probe tolerance', () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    const HEARTBEAT_MS = 500;
+
+    async function connectProvider(orbClient: OrbinumClient): Promise<OrbinumClientProvider> {
+        vi.mocked(OrbinumClient.connect).mockResolvedValue(orbClient);
+        const provider = makeProvider({
+            heartbeatIntervalMs: HEARTBEAT_MS,
+            heartbeatTimeoutMs: 100,
+        });
+        provider.connect();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(provider.status).toBe<ConnectionStatus>('connected');
+        return provider;
+    }
+
+    it('a single failed probe does NOT tear down the client', async () => {
+        const orbClient = makeOrbinumClient();
+        const provider = await connectProvider(orbClient);
+
+        // One failed probe, then healthy again.
+        (orbClient.substrate.request as ReturnType<typeof vi.fn>)
+            .mockRejectedValueOnce(new Error('blip'))
+            .mockResolvedValue({ peers: 1 });
+
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_MS + 10);
+        expect(provider.status).toBe<ConnectionStatus>('connected');
+        expect(orbClient.destroy).not.toHaveBeenCalled();
+
+        // Recovery resets the failure counter: another single blip later still survives.
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_MS);
+        (orbClient.substrate.request as ReturnType<typeof vi.fn>)
+            .mockRejectedValueOnce(new Error('blip'))
+            .mockResolvedValue({ peers: 1 });
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_MS);
+        expect(provider.status).toBe<ConnectionStatus>('connected');
+
+        provider.reset();
+    });
+
+    it('tears down after 2 consecutive failed probes with no tx in flight', async () => {
+        const orbClient = makeOrbinumClient();
+        const provider = await connectProvider(orbClient);
+
+        (orbClient.substrate.request as ReturnType<typeof vi.fn>).mockRejectedValue(
+            new Error('down')
+        );
+
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_MS * 2 + 10);
+        expect(provider.status).not.toBe<ConnectionStatus>('connected');
+        expect(orbClient.destroy).toHaveBeenCalledTimes(1);
+
+        provider.reset();
+    });
+
+    it('tolerates up to 5 failed probes while a tx awaits finalization', async () => {
+        const orbClient = makeOrbinumClient();
+        (orbClient.substrate as unknown as { hasInflightTx: boolean }).hasInflightTx = true;
+        const provider = await connectProvider(orbClient);
+
+        (orbClient.substrate.request as ReturnType<typeof vi.fn>).mockRejectedValue(
+            new Error('node busy verifying zk proof')
+        );
+
+        // 5 failed probes: still connected — the in-flight tx keeps the client alive.
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_MS * 5 + 10);
+        expect(provider.status).toBe<ConnectionStatus>('connected');
+        expect(orbClient.destroy).not.toHaveBeenCalled();
+
+        // 6th consecutive failure: even an in-flight tx can't hold a dead node.
+        await vi.advanceTimersByTimeAsync(HEARTBEAT_MS);
+        expect(provider.status).not.toBe<ConnectionStatus>('connected');
+        expect(orbClient.destroy).toHaveBeenCalledTimes(1);
+
+        provider.reset();
+    });
+});
