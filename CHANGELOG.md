@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-08-08
+
+**Privacy addresses gain a checksum (`orbpriv2`).** A privacy address travels by
+copy/paste and QR; `orbpriv1` had no integrity check, so a single corrupted
+character still parsed — and a payment built on a mangled `ownerPk` lands in a
+note nobody can ever spend. This release adds a checksummed format so a
+corrupted address fails to decode instead of silently burning funds.
+
+This is the first step ("Fase 0") of the receive-side roadmap in
+[`docs/notes/build-on-orbinum.md`](./docs/notes/build-on-orbinum.md): a
+verifiable address is the data contract every later piece (on-chain registry,
+resolver, indexer) reads and writes.
+
+### Added
+
+- `orbpriv2:{ownerPk}:{ivk}:{checksum}` — the checksum is the first 4 bytes of
+  `sha256("orbpriv2:{ownerPk}:{ivk}")`, as 8 lowercase hex chars.
+  `PrivacyKeyManager.encodePrivacyAddress()` now emits this format.
+
+### Changed
+
+- `PrivacyKeyManager.decodePrivacyAddress()` verifies the checksum for
+  `orbpriv2` inputs (a mismatch returns `null`) and **still reads legacy
+  `orbpriv1`** addresses so anything shared before this release keeps resolving.
+
+### Safety
+
+- **No effect on existing notes or keys.** The address codec is not used
+  anywhere in note discovery, spending, key derivation, or the vault — it only
+  encodes the two public values (`ownerPk`, `ivk`) a sender needs. Field
+  semantics are unchanged (`ownerPk` is still the BJJ x-coordinate scalar, `ivk`
+  the packed LE point), so commitments, nullifiers and the circuit are
+  untouched. Notes received on 1.0.0 remain fully spendable.
+- Forward-compat caveat: an `orbpriv2` address is not readable by 1.0.0. This
+  only matters when a 1.0.1 user shares their address with someone still on
+  1.0.0 for a _new_ payment; it resolves once both update.
+
 ## [1.0.0] - 2026-08-07
 
 **The SDK becomes the complete wallet.** Before this release it published

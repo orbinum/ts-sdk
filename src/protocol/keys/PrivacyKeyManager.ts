@@ -23,10 +23,27 @@
  * ensures the vault key remains stable if the circuit modulus ever changes.
  */
 
+import { sha256 } from '@noble/hashes/sha2.js';
 import { deriveViewingSecretKey, deriveViewingPublicKey, deriveOwnerPk } from './PrivacyKeys';
 import { toHex, scalarToHex } from '../../foundation/encoding/hex';
 import { bigintTo32Le } from '../../foundation/encoding/bytes';
 import { BABYJUB_SUBORDER } from '../../foundation/crypto/constants';
+
+// ─── Privacy address checksum ──────────────────────────────────────────────────
+// A privacy address travels by copy/paste and QR. `orbpriv1` had no integrity
+// check, so a single corrupted character still parsed — and a payment built on a
+// mangled ownerPk lands in a note nobody can ever spend. `orbpriv2` appends a
+// checksum: the first 4 bytes of sha256 over the "orbpriv2:{ownerPk}:{ivk}" body,
+// as 8 lowercase hex chars. One flipped character fails to parse instead of
+// silently burning funds. The field semantics are unchanged from v1 — ownerPk is
+// still the BJJ x-coordinate scalar, ivk still the packed LE point — so notes and
+// the circuit are untouched.
+
+function privacyAddressChecksum(ownerPkHex: string, ivkHex: string): string {
+    const body = `orbpriv2:${ownerPkHex}:${ivkHex}`;
+    const digest = sha256(new TextEncoder().encode(body));
+    return toHex(digest.slice(0, 4)).slice(2); // drop the "0x" prefix
+}
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
@@ -162,11 +179,14 @@ export class PrivacyKeyManager {
      * Exports a shareable privacy address encoding the owner public key and
      * viewing PUBLIC key of the currently loaded identity.
      *
-     * Format: `orbpriv1:{ownerPk_hex}:{viewingPublicKey_hex}`
+     * Format: `orbpriv2:{ownerPk_hex}:{viewingPublicKey_hex}:{checksum}`
      *
      * The recipient uses this address so the sender can:
      *  1. Embed `ownerPk` in the note commitment (Poseidon4 input).
      *  2. Encrypt the memo via ECDH with the recipient's `viewingPublicKey`.
+     *
+     * The trailing checksum (see `privacyAddressChecksum`) makes a corrupted
+     * paste fail to decode rather than pay into an unspendable note.
      *
      * SECURITY: Only the viewing PUBLIC key is embedded — the viewing secret key
      * (used for decryption) is never exported. Holders of this address cannot
@@ -179,25 +199,43 @@ export class PrivacyKeyManager {
         const ivkPacked = this.getViewingPublicKeyPacked();
         const ownerPkHex = scalarToHex(ownerPk);
         const ivkHex = toHex(ivkPacked);
-        return `orbpriv1:${ownerPkHex}:${ivkHex}`;
+        const checksum = privacyAddressChecksum(ownerPkHex, ivkHex);
+        return `orbpriv2:${ownerPkHex}:${ivkHex}:${checksum}`;
     }
 
     /**
-     * Decode a privacy address of the form `orbpriv1:{ownerPk_hex}:{viewingPublicKey_hex}`.
-     * Returns `{ ownerPkHex, viewingPublicKeyHex }` on success, or `null` if the input
-     * does not match the expected format.
+     * Decode a privacy address into `{ ownerPkHex, viewingPublicKeyHex }`, or
+     * `null` if it does not parse.
+     *
+     * Accepts both:
+     *  - `orbpriv2:{ownerPk}:{ivk}:{checksum}` — checksum verified; a mismatch
+     *    (corrupted paste) returns null.
+     *  - `orbpriv1:{ownerPk}:{ivk}` — legacy, no checksum. Still read so addresses
+     *    shared before v2 keep resolving; only v2 is emitted.
      */
     static decodePrivacyAddress(
         address: string
     ): { ownerPkHex: string; viewingPublicKeyHex: string } | null {
-        if (!address.startsWith('orbpriv1:')) return null;
         const parts = address.split(':');
-        // Expected: ["orbpriv1", ownerPkHex, viewingPublicKeyHex]
-        if (parts.length !== 3) return null;
-        const ownerPkHex = parts[1];
-        const viewingPublicKeyHex = parts[2];
-        if (!ownerPkHex || !viewingPublicKeyHex) return null;
-        return { ownerPkHex, viewingPublicKeyHex };
+
+        if (parts[0] === 'orbpriv2') {
+            // ["orbpriv2", ownerPkHex, ivkHex, checksum]
+            if (parts.length !== 4) return null;
+            const [, ownerPkHex, viewingPublicKeyHex, checksum] = parts;
+            if (!ownerPkHex || !viewingPublicKeyHex || !checksum) return null;
+            if (privacyAddressChecksum(ownerPkHex, viewingPublicKeyHex) !== checksum) return null;
+            return { ownerPkHex, viewingPublicKeyHex };
+        }
+
+        if (parts[0] === 'orbpriv1') {
+            // ["orbpriv1", ownerPkHex, ivkHex] — legacy, unchecked.
+            if (parts.length !== 3) return null;
+            const [, ownerPkHex, viewingPublicKeyHex] = parts;
+            if (!ownerPkHex || !viewingPublicKeyHex) return null;
+            return { ownerPkHex, viewingPublicKeyHex };
+        }
+
+        return null;
     }
 
     /**
