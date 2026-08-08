@@ -1,6 +1,6 @@
 /**
- * decryptHintBatch × self-note discovery — integration against the REAL
- * @orbinum/sdk (file-linked): a cold restore recognizes deterministic
+ * decryptHintBatch × self-note discovery — integration against the SDK
+ * barrel (src/index): a cold restore recognizes deterministic
  * self-notes by ephPk lookup, foreign notes stay on the normal path, and the
  * flag off (incremental ticks) keeps everything on the legacy path.
  */
@@ -12,8 +12,8 @@ import {
     deriveViewingPublicKey,
     deriveOwnerPk,
     toHex,
-} from '@orbinum/sdk';
-import { decryptHintBatch } from '../../../../src/index';
+    decryptHintBatch,
+} from '../../../../src/index';
 
 const SPENDING_KEY = 12345678901234567890n;
 const ivsk = deriveViewingSecretKey(SPENDING_KEY);

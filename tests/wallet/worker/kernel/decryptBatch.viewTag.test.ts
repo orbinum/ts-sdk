@@ -1,6 +1,6 @@
 /**
- * decryptHintBatch × view tags — integration against the REAL @orbinum/sdk
- * (file-linked 0.15.0): own note found through the filter, foreign note
+ * decryptHintBatch × view tags — integration against the SDK barrel
+ * (src/index): own note found through the filter, foreign note
  * skipped without AEAD work, activation boundary respected, filter off by
  * default. Complements the mocked unit tests in decryptBatch.test.ts.
  */
@@ -11,9 +11,9 @@ import {
     deriveViewingPublicKey,
     deriveOwnerPk,
     toHex,
-} from '@orbinum/sdk';
-import type { ScanCommitment } from '@orbinum/sdk';
-import { decryptHintBatch } from '../../../../src/index';
+    decryptHintBatch,
+} from '../../../../src/index';
+import type { ScanCommitment } from '../../../../src/index';
 
 const SPENDING_KEY = 12345678901234567890n;
 const ivsk = deriveViewingSecretKey(SPENDING_KEY);
