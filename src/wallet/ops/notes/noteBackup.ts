@@ -42,6 +42,15 @@ export interface NoteBackupEntry {
     encryptedMemo: string;
     /** Merkle leaf index, when known. Informational — spends re-fetch the proof. */
     leafIndex?: number;
+    /**
+     * Whether the note was already spent when exported. A local status flag (not
+     * a key or secret), carried so a restored vault separates available from spent
+     * without a chain round-trip. A host may still reconcile against the chain
+     * afterward — this is a fast, possibly-stale hint, not the source of truth.
+     */
+    spent?: boolean;
+    /** Local timestamp the note was marked spent, when known. */
+    spentAt?: number | null;
 }
 
 export interface NoteBackup {
@@ -66,6 +75,8 @@ function noteToBackupEntry(note: ZkNote): NoteBackupEntry {
         commitmentHex: note.commitmentHex,
         encryptedMemo: toHex(Uint8Array.from(note.memo)),
         ...(note.leafIndex !== undefined ? { leafIndex: note.leafIndex } : {}),
+        spent: note.spent,
+        spentAt: note.spentAt,
     };
 }
 
@@ -118,6 +129,10 @@ export function decodeNoteBackup(json: string | object): NoteBackupEntry[] {
  * Ownership is proven by decryption — an entry whose memo does not open under
  * these keys is silently skipped (it is not this user's note). No chain access:
  * only the backup's own memos are tried.
+ *
+ * The decrypted note is reconstructed as unspent; the entry's `spent`/`spentAt`
+ * flags are then applied so a restored vault separates available from spent. A
+ * host may reconcile against the chain afterward if the backup could be stale.
  */
 export function importNotesFromBackup(
     entries: NoteBackupEntry[],
@@ -136,7 +151,13 @@ export function importNotesFromBackup(
             keys.spendingKey,
             keys.ownerPk
         );
-        if (note) out.push(note);
+        if (note) {
+            out.push({
+                ...note,
+                spent: entry.spent ?? false,
+                spentAt: entry.spentAt ?? null,
+            });
+        }
     }
     return out;
 }
