@@ -7,27 +7,318 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-07
+
+**The SDK becomes the complete wallet.** Before this release it published
+cryptography and chain access; a third party wanting private notes had to
+reimplement roughly 5,200 lines of vault, scanner and spend logic — including
+the parts where getting it wrong costs privacy or funds. Now the package owns
+all of it, and a host supplies only UI, transport and platform adapters.
+
+Everything breaking is here, on purpose. A package meant to be built on cannot
+break on minor bumps, so the whole reorganisation lands at once and what follows
+is additive.
+
+The four capabilities a wallet could not previously get from this package:
+
+|                   | What a consumer had to write                                    | What they call now                                    |
+| ----------------- | --------------------------------------------------------------- | ----------------------------------------------------- |
+| **Store notes**   | encrypted IndexedDB layer, atomic counters                      | `VaultStore`                                          |
+| **Find notes**    | O(pool) scan, spent-set intersection, cursors                   | `runScan`                                             |
+| **Spend notes**   | merkle-root reconciliation, cross-tree guard, change derivation | `transferNotes` / `unshieldNote`                      |
+| **Stay portable** | —                                                               | one build, no browser API outside the adapter subpath |
+
+`examples/node-wallet` runs the whole flow in CI against the packed tarball,
+importing only published subpaths — which is the only honest proof the package
+is self-contained.
+
+### Changed
+
+- **BREAKING — `polkadot-api` and `@polkadot/util-crypto` are now peer dependencies.**
+  Add them alongside the SDK:
+
+    ```bash
+    pnpm add @orbinum/sdk polkadot-api @polkadot/util-crypto
+    ```
+
+    They are singletons in practice. As hard dependencies, an application that
+    already used `polkadot-api` ended up with a second copy — a second connection
+    and a second view of chain state. The host owns the version now.
+
+- **The README's quick start no longer describes an API that does not exist.**
+  It documented `client.rpcV2.privacy.getMerkleRoot()` and
+  `client.rpcV2.chain.isValidator()`; there is no `rpcV2` property. The real
+  accessors are `client.privacy` and `client.chain`. Every symbol in the README
+  is now checked against the exports.
+
+- **BREAKING — `src/` is organised in four layers, and the root barrel follows
+  them.** Twenty flat directories became five, each depending only downward:
+
+    ```
+    foundation/  encoding, crypto, formatting     no dependencies of its own
+    protocol/    what a note IS                   pure and offline, no chain
+    chain/       talking to a node                needs a connection
+    wallet/      using notes                      needs both
+    adapters/    platform implementations
+    ```
+
+    Nine of the twenty old directories were chain transport — `client`, `evm`,
+    `evm-explorer`, `extrinsic`, `precompiles`, `relayer`, `rpc-v2`, `substrate`,
+    `zk-verifier` — sitting beside `vault` and `scanner` with nothing to say which
+    layer was which. They are now `chain/`.
+
+    **The published subpath names do not change.** `@orbinum/sdk/worker` and
+    `@orbinum/sdk/storage/indexeddb` are what they always were; only the source
+    they are built from moved. A consumer importing from the root or either
+    subpath needs no change — the exported surface is identical, asserted against
+    a snapshot taken before the move.
+
+    The root barrel went from 578 lines of 94 loose statements to 81 organised by
+    layer. `export *` was deliberately NOT used throughout: it leaked 37 internals
+    into the public API — the precompile ABI encoder, `resetVaultToEmpty`,
+    `fastMulBase` — so the layers with internal detail are exported by name.
+
+- **Fixed a dependency cycle between two published subpaths.** `worker` imported
+  `scanAbortError` from `scanner`, and `scanner` imported the pool from `worker`.
+  Eight lines of function, but a cycle between subpaths survives only as long as
+  the bundler deduplicates it. `abort` now lives in `foundation/errors/`, which
+  neither layer owns.
+
+### Added
+
+- **`runScan` — finding your own notes without telling anyone which they are.**
+
+    A scan is O(pool): every note on the network costs one elliptic-curve
+    multiplication, and the answer is "not mine" almost always. Three routes cut
+    that, and all three are now in the package: deterministic self- and
+    pairwise-ephemerals turn the check into a hash lookup — 0.10 µs against the
+    895 µs ECDH it replaces — and view tags reject most of the remainder before
+    any curve work at all.
+
+    **`NullifierSource` has no per-nullifier lookup, and that omission is the
+    design.** The wallet downloads the spent set and intersects locally, so every
+    request the server sees is identical regardless of which notes the caller
+    holds. Asking "is nullifier X spent?" is the obvious API and it tells the
+    server exactly what you own — a third party writing this themselves would get
+    it wrong by default.
+
+- **`transferNotes`, `unshieldNote`, `claimFees` — spending, minus the
+  transport.** Each takes a `submit` callback; the host owns the chain client
+  and the signer. What the SDK owns is the part that fails silently when
+  guessed:
+    - **Merkle-root reconciliation.** The circuit proves both inputs under ONE
+      root, but each RPC fetch resolves under its own best block. A commitment
+      landing between the two leaves the proofs on different roots and witness
+      generation dies on an assert. The loop refetches until they agree — after
+      ruling out inputs from different forest trees, whose roots can never agree.
+    - **Change-note key derivation.** The change goes back to the sender under a
+      viewing key derived from the INPUT's spending key, so a rescan under the
+      same identity reopens it. Its `counterpartyPk` records the recipient's
+      ONE-TIME stealth key, never their stable identifier.
+    - **Little-endian commitment encoding.** `buildShieldParams` gets this right;
+      the obvious big-endian guess is accepted by the chain and produces a note
+      nobody — not the sender, not a rescan, not the recipient — can ever find.
+
+- **`planTransfer` / `planUnshield` / `spendableBalance`** — the arithmetic a UI
+  needs before it can enable a button, including the circuit rules a host would
+  otherwise half-enforce per screen. `planUnshield` encodes that the unshield
+  circuit proves exactly ONE input, so a balance spread across two notes cannot
+  cover an amount either alone can't.
+
+- **`OrbinumWallet`** — the assembled facade. Roughly twenty lines to a working
+  private wallet, with the pieces still usable directly when a host needs a
+  different shape.
+
+- **Identity persistence: `cacheSession`, `restoreSession`, device keys.**
+  Without this a user signs on every launch, and on Substrate that is worse than
+  friction: **sr25519 signatures are randomised**, so a second signature over
+  the same message derives a DIFFERENT key and a different vault. The cache is
+  what makes an identity stable across restarts.
+
+    Encrypted at rest under a device key that is non-extractable where the
+    platform allows it, and scoped per `(chainId, account)` because the chain is
+    part of the derivation.
+
+- **`palletErrorKind` / `classifyChainError`** — what a wallet should DO about a
+  chain failure: retry, resync, purge, or give up. The words shown to a person
+  stay with the host; the reaction does not.
+
+    The taxonomy separates `UnknownMerkleRoot` from a genuine ghost note, which
+    had been conflated. Both are proof-versus-tree failures, but a ghost note is
+    gone for good and gets purged, while a stale root means the note IS on chain
+    and a rescan fixes it. Purging on the latter deletes live, spendable notes.
+
+- **Chain constants a wallet cannot derive**: `MIN_GASLESS_FEE` (the runtime's
+  `MinGaslessFee` — `planTransfer` requires a `fee` and a host had no basis to
+  pick one), `NATIVE_ASSET_ID`, `isNativeAsset`, `TRANSFER_INPUTS/OUTPUTS`.
+
+- **Note transfer between a user's own devices** — `orbinum://notes/v1/` pages,
+  encoded for QR. Hand-rolled base64url rather than `btoa`, because React Native
+  has neither it nor Buffer, and a wire format a mobile client cannot decode is
+  not a wire format.
+
+- **`parseAmount` / `formatAmountPlain`** — display ↔ planck. The SDK had
+  planck→display and not the inverse, which is the direction that decides how
+  much money a spend moves.
+
+- **`VaultStorage` — the persistence contract a wallet runs on.** `src/vault/types.ts`
+  had promised this in a comment ("any backend — IndexedDB, SQLite, remote — must
+  produce/consume this shape") without ever declaring it. Now it is a type, split
+  by responsibility so an implementation can grow one concern at a time:
+  `NoteStorage` (config + notes), `NullifierCache`, `TxHistoryStore`.
+
+    `updateConfig` is part of the contract rather than sugar over get + put, and
+    that is a protocol requirement: two callers doing a read-modify-write
+    separately both read the same `selfEphCounter`, derive the same ephemeral
+    index, and publish the same ephPk. A backend that cannot make it atomic cannot
+    host a vault.
+
+- **`@orbinum/sdk/worker` — the trial-decryption kernel and its worker pool.**
+  `decryptHintBatch` is where a wallet scan spends its time: one elliptic-curve
+  multiplication per note in the pool, with three routes orders of magnitude
+  apart (precomputed-window hash lookup, view-tag filter, full decryption).
+
+    Its own entry point so a worker bundle carries the decryption path and nothing
+    else — measured at 644 KB in the reference app, with zero references to the
+    chain client.
+
+    The worker is not shipped, and cannot be: `new Worker(new URL(..., import.meta.url))`
+    is rewritten by a bundler at build time and would resolve differently under
+    Vite, webpack and Node. `createDecryptPool` therefore takes the factory as a
+    required argument — pass `null` to run the same kernel on the calling thread,
+    which is correct everywhere and the only option outside a browser.
+
+- **`WalletSession` + `createWalletSession()` + `requireSessionKeys()`** — the
+  keys that exist only while a vault is open, as a two-field interface a host
+  can satisfy over its own state container.
+
+    It holds keys and nothing else. An application's session state usually tracks
+    the decrypted notes too, because its UI re-renders off them — but that is
+    reactivity, and pulling it in would drag a framework's update semantics into
+    the SDK. `requireSessionKeys` is the one definition of "unlocked": a half-open
+    session throws `VaultLockedError` rather than handing back a null key.
+
+- **`MemoryVaultStorage`** — a working backend for consumers with no persistence
+  (a server rebuilding state per request, a test harness), and the second
+  implementation the conformance suite runs against. A contract verified by one
+  implementation only describes that implementation.
+
+- **`SubstrateClient.adopt(papi, httpUrl?)` — use a chain connection the caller
+  already has.** `connect()` builds its provider internally, so an application
+  with its own connection manager ended up with two WebSockets and two views of
+  chain state. `OrbinumClient.connect()` accepts the same thing:
+
+    ```ts
+    const client = await OrbinumClient.connect({ papi: myExistingClient });
+    ```
+
+    An adopted client is **not owned**: `destroy()` leaves it running, because the
+    rest of the application is still using it. `connect()` is unchanged and still
+    closes what it opened. `batchRequest` needs an HTTP endpoint that cannot be
+    derived from an arbitrary transport, so it throws with a specific message
+    unless one is passed.
+
+- **Subpath exports** — `@orbinum/sdk/storage/indexeddb` and
+  `@orbinum/sdk/worker`, declared and built but intentionally empty.
+
+    They are reserved now because adding a subpath _after_ code has shipped from
+    the root entry is a breaking change, and both will hold environment-specific
+    code: browser persistence and the worker-side decrypt kernel. Reserving them
+    up front is what lets the wallet layer arrive as additive minors, and keeps a
+    Node consumer from carrying IndexedDB code it can never run.
+
+- `"sideEffects": false`, so a consumer that never imports the browser adapter
+  can tree-shake it away.
+- `./package.json` in the exports map, for tooling that reads the manifest.
+- `tests/packaging.test.ts` — asserts every declared subpath has a source entry,
+  is built, and exposes types/import/require, and that the peers are declared as
+  peers rather than dependencies. These break only for consumers; a `link:`-ed
+  checkout resolves `src/` directly and sails past all of them.
+
+### Fixed
+
+Moving the wallet into the package meant auditing it as library code rather than
+as one application's internals. Every fix below is covered by a test that fails
+when the fix is reverted.
+
+**Privacy**
+
+- **Ephemeral index reuse through a stale config snapshot.** Two callers doing a
+  read-modify-write on `selfEphCounter` separately both read the same value,
+  derived the same ephemeral index, and published the same `ephPk` — publicly
+  linking two notes. Irreparable once on chain. `updateConfig` is now atomic and
+  part of the storage contract.
+- **ECDH shared secrets outliving `lock()`.** The precomputed discovery window
+  holds secret material derived from the viewing key and is cached at module
+  scope; it survived a vault lock until `clearKnownEphWindow` was called.
+
+**Funds**
+
+- **A successful transfer or unshield never marking its inputs spent.** The
+  balance kept counting money the chain had taken, and the next spend died on a
+  duplicate nullifier. The reference app compensated for this locally, which is
+  what hid it.
+- **Nullifier hex case making spent notes look spendable.** Normalised at
+  ingestion, both on the tail and chunk paths.
+- **A stale merkle root purging a live note** — see `classifyChainError` above.
+- **A scan that outlived an account switch writing into the wrong vault.** The
+  scan reads its keys once but persists through storage the host re-points on a
+  switch, so it decrypted with one account's keys and saved into another's. The
+  pipeline now has a checkpoint before its first write.
+- **`randomBlinding` returning zero.** Any non-zero multiple of `BN254_R`
+  reduced to 0; the guard checked before reducing rather than after.
+
+**Availability**
+
+- **One corrupt record wiping an entire vault.** Unlock now keeps every note
+  that decrypts and only fails when NOTHING does.
+- **An empty feed purging every note.** The purge is gated on having actually
+  scanned hints, not on the feed being empty.
+- **A poisoned scan cursor blinding a wallet permanently.**
+- **A partial unlock leaving the wallet reporting `unlocked: true` with no
+  notes.** Unlock is now atomic: a failure re-locks.
+- **Zero-entropy signatures deriving a reproducible spending key.** A signer
+  returning constant bytes now throws instead of producing a key anyone could
+  reconstruct.
+
+**Portability**
+
+- **`btoa`/`atob` in the vault's encryption path.** React Native has neither, so
+  the first note a mobile wallet tried to save threw `ReferenceError` and the
+  vault never opened. Replaced with a hand-rolled implementation whose output is
+  byte-identical to `btoa` across all 256 byte values — existing vaults still
+  open, which is asserted rather than assumed.
+- **`window` read unguarded by the extension-discovery helpers.** React Native,
+  Node, Cloudflare Workers and an extension's own service worker all lack it.
+  `hasInjectedExtensions()` gives a checkable answer; `getInjectedExtensions()`
+  returns an empty list off-page instead of throwing.
+- **`MessageEvent` / `ErrorEvent` in the published root `.d.ts`.** Both are
+  `lib.dom`; a React Native consumer compiling with `lib: esnext` and no
+  `@types/node` could not typecheck an import it never asked for.
+- **`DOMException` constructed unconditionally** on the abort path.
+
+Known limitation, stated rather than hidden: `poseidon-lite` decodes its round
+constants with `atob` at module load, so a React Native host must polyfill it
+before importing the SDK. The README lists the two globals a mobile runtime
+needs.
+
 ## [0.25.1] - 2026-08-07
 
 ### Fixed
 
-- **Proving no longer runs out of memory on phones.** A user on the Orbinum testnet reported an unshield failing with:
+- **Proving on mobile** — bumps `@orbinum/proof-generator` to `5.1.0` and threads its new `singleThread` option through the three proof entry points.
 
-  ```
-  Failed to execute 'postMessage' on 'Worker': Data cannot be cloned, out of memory.
-  ```
+    A user on Android reported `Unshield failed: Failed to execute 'postMessage' on 'Worker': Data cannot be cloned, out of memory.` snarkjs parallelises curve arithmetic through `ffjavascript`, which spawns one Web Worker per logical core, each carrying its own `WebAssembly.Memory`. On a phone that is roughly eight heaps against a per-tab budget a fraction of a desktop's, and transferring the WASM buffer fails outright. The same build proves fine on desktop — a platform limit, not a logic bug.
 
-  The same build proves fine on desktop, which is what makes this a platform limit rather than a logic bug. `ffjavascript` spawns one Web Worker per logical core, each carrying its own `WebAssembly.Memory`; a mobile browser's per-tab budget cannot hold them, and the transfer of the WASM buffer fails before proving starts.
-
-  `@orbinum/proof-generator` 5.1.0 detects low-memory and mobile devices and proves on a single thread there. Bumping the dependency is what carries the fix — no call site in the SDK has to change for a phone to start working.
+    Nothing in the SDK needs configuring: `generateProof` is called without `singleThread`, so `@orbinum/proof-generator` decides from the device (`navigator.deviceMemory` at or below 4 GiB, or a mobile user agent). The proof is byte-identical either way, only slower.
 
 ### Added
 
-- `ProofOptions`, the shared option shape for `generateTransferProof`, `generateUnshieldProof` and `generateFeeClaimProof`. Same three fields as before plus `singleThread?: boolean`.
+- **`ProofOptions`** (`src/proof-generator/options.ts`): one declaration for the options every proof entry point accepts, replacing the same inline shape written three times. Gains `singleThread`, for a host that knows better than the device heuristic — a desktop app certain of its environment, or a benchmark pinning one mode.
 
-  **Leave `singleThread` unset.** Absent means "decide from the device", which is what the fix depends on; an explicit `false` turns the heuristic off on exactly the phones it exists for. Pass it only when the host knows better than the heuristic — a desktop app certain of its environment, or a benchmark pinning one mode. The proof is byte-identical either way; only the wall-clock changes.
+    `toGenerateOptions` omits an unset flag rather than forwarding `undefined`, because the package reads an ABSENT `singleThread` as "decide for me" and an explicit `false` as "use threads". Passing `undefined` would disable the heuristic on exactly the phones it exists for.
 
-- `shouldProveSingleThreaded`, re-exported from `@orbinum/proof-generator`, for callers that want to show a "this will take longer" hint before proving.
+- **`shouldProveSingleThreaded`**: re-exported from `@orbinum/proof-generator`, so a host can ask the same question the SDK does before deciding.
 
 ## [0.25.0] - 2026-08-06
 
@@ -35,24 +326,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Pairwise ephemeral keys — a note from a known counterparty costs a hash lookup instead of an elliptic-curve multiplication.** `derivePairwiseSharedSecret`, `derivePairwiseEphSk` and `pairwiseEphWindow`, mirroring the existing `selfEph` module.
 
-  A wallet scan is O(pool): every note in the network costs one ECDH, and the answer is "not mine" 99.99% of the time. `selfEph` already removed that cost for the wallet's own notes by deriving their ephemeral deterministically. This does the same for notes *between two parties who know each other*:
+    A wallet scan is O(pool): every note in the network costs one ECDH, and the answer is "not mine" 99.99% of the time. `selfEph` already removed that cost for the wallet's own notes by deriving their ephemeral deterministically. This does the same for notes _between two parties who know each other_:
 
-  ```
-  sharedSecret = ECDH(myViewingSk, theirViewingPk)     (symmetric)
-  ephSk_i      = SHA256("orbinum-pairwise-eph-v1" ‖ ss ‖ u32le(i))
-  ```
+    ```
+    sharedSecret = ECDH(myViewingSk, theirViewingPk)     (symmetric)
+    ephSk_i      = SHA256("orbinum-pairwise-eph-v1" ‖ ss ‖ u32le(i))
+    ```
 
-  The sender publishes the derived ephemeral in the field it already publishes — the memo's last 32 bytes — so the receiver, who can compute the same value, recognises the note by looking it up in a precomputed window. **No protocol change, no new field, no migration**: the wire format is untouched and a wallet that knows nothing about this still recovers the note the slow way.
+    The sender publishes the derived ephemeral in the field it already publishes — the memo's last 32 bytes — so the receiver, who can compute the same value, recognises the note by looking it up in a precomputed window. **No protocol change, no new field, no migration**: the wire format is untouched and a wallet that knows nothing about this still recovers the note the slow way.
 
-  Measured: window lookup **0.10 µs** against **895 µs** for the ECDH it replaces. Building a window costs ~905 µs per entry, paid once per counterparty and reused across the whole scan — at a 1M-note pool that amortises to 0.16 µs/hint.
+    Measured: window lookup **0.10 µs** against **895 µs** for the ECDH it replaces. Building a window costs ~905 µs per entry, paid once per counterparty and reused across the whole scan — at a 1M-note pool that amortises to 0.16 µs/hint.
 
-  **Scope, stated plainly**: this helps only where a shared secret exists, i.e. where the receiver has the sender's privacy address. A wallet restoring from seed with no address book still pays the full O(pool) scan, and a stranger's first payment is unaffected. It converts the steady-state case, not the worst case.
+    **Scope, stated plainly**: this helps only where a shared secret exists, i.e. where the receiver has the sender's privacy address. A wallet restoring from seed with no address book still pays the full O(pool) scan, and a stranger's first payment is unaffected. It converts the steady-state case, not the worst case.
 
-  **Viewing keys are used rather than spending keys** deliberately. The pair secret is held by both sides, so it will exist on two devices and in whatever backup either party keeps; deriving it from spending keys would make a compromise of one party's stored secrets bear on the other's ability to spend. With viewing keys the worst case is disclosure of which notes those two parties exchanged — visibility a viewing key already confers — and nothing about authority to spend.
+    **Viewing keys are used rather than spending keys** deliberately. The pair secret is held by both sides, so it will exist on two devices and in whatever backup either party keeps; deriving it from spending keys would make a compromise of one party's stored secrets bear on the other's ability to spend. With viewing keys the worst case is disclosure of which notes those two parties exchanged — visibility a viewing key already confers — and nothing about authority to spend.
 
-  **Counter reuse is the one way this loses privacy**: republishing an index republishes the same ephemeral, publicly linking the two notes as sharing a sender-receiver pair. `pairwiseEphWindow` is a pure function of (secret, range) so the caller owns that state, exactly as with `selfEph`. Callers must persist the counter and never reuse it.
+    **Counter reuse is the one way this loses privacy**: republishing an index republishes the same ephemeral, publicly linking the two notes as sharing a sender-receiver pair. `pairwiseEphWindow` is a pure function of (secret, range) so the caller owns that state, exactly as with `selfEph`. Callers must persist the counter and never reuse it.
 
-  Matching is intended to happen **client-side**. Asking a server for a specific ephemeral would tell it which notes are yours, which is what a download-everything scan feed exists to prevent.
+    Matching is intended to happen **client-side**. Asking a server for a specific ephemeral would tell it which notes are yours, which is what a download-everything scan feed exists to prevent.
 
 ## [0.24.0] - 2026-08-06
 
@@ -60,9 +351,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`deriveViewingPublicKey` and `deriveOwnerPk` are ~95× faster.** Both still ran on `@zk-kit/baby-jubjub`'s `mulPointEscalar` — a plain double-and-add over raw bigints — while the rest of the shielded-pool code had long since moved to the noble-backed `fastMulBase`. Measured on an M-series laptop under Node 22: **56 ms → 0.59 ms** per generator multiplication, with byte-identical output.
 
-  Both functions produce on-chain formats (the packed ivk a sender encrypts to, and the `ownerPk` a commitment binds), so the port is pinned by an equivalence suite rather than trusted: `tests/utils/bjj-fast.test.ts` now asserts the derived values match the old implementation across a spending-key sweep and the edge scalars (1, suborder−1, over-suborder). A drift here would not throw — it would silently produce keys that decrypt nothing and notes that can never be spent.
+    Both functions produce on-chain formats (the packed ivk a sender encrypts to, and the `ownerPk` a commitment binds), so the port is pinned by an equivalence suite rather than trusted: `tests/utils/bjj-fast.test.ts` now asserts the derived values match the old implementation across a spending-key sweep and the edge scalars (1, suborder−1, over-suborder). A drift here would not throw — it would silently produce keys that decrypt nothing and notes that can never be spent.
 
-  Every caller benefits without changing anything: wallet startup through `PrivacyKeyManager`, private transfers, unshields, and per-note vault validation.
+    Every caller benefits without changing anything: wallet startup through `PrivacyKeyManager`, private transfers, unshields, and per-note vault validation.
 
 - **`bjj-fast`'s documented timings were wrong and are now corrected.** The module claimed "0.056 ms vs 0.94 ms per mul". Scalar multiplication cost is dominated by the scalar's **bit length**, and those figures came from a small scalar — they do not transfer to the real case. With a full-width 247-bit viewing key, the numbers are roughly an order of magnitude higher; the header now carries the measured table and states the dependency explicitly, so the next reader does not plan against a figure that cannot be reproduced.
 
@@ -70,7 +361,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`@orbinum/sdk/bench`** — a separate entrypoint exposing deterministic fixtures (`benchWallet`, `plantSchedule`, `generateHintAt`, `buildManifest`, `SeededBytes`) that generate synthetic scan hints with **real** encrypted memos from a seed. They exist so a wallet benchmark and an indexer seeder, in different repositories, can build byte-identical datasets for scale testing.
 
-  Deliberately **not** re-exported from the package root: these are test fixtures, not wallet API, and bundling them cost every consumer ~21 KB of generator code for something no application calls. The main bundle shrinks from 163.65 KB to 142.87 KB (ESM) as a result. No stability guarantee applies to this subpath — the shape of a generated hint may change whenever a benchmark needs it to.
+    Deliberately **not** re-exported from the package root: these are test fixtures, not wallet API, and bundling them cost every consumer ~21 KB of generator code for something no application calls. The main bundle shrinks from 163.65 KB to 142.87 KB (ESM) as a result. No stability guarantee applies to this subpath — the shape of a generated hint may change whenever a benchmark needs it to.
 
 ## [0.23.0] - 2026-08-03
 
@@ -84,9 +375,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **BREAKING — `AccountMappingModule`, `AccountMappingPrecompile` and everything around them.** The node dropped `pallet-account-mapping` and its precompile at `0x0800`; calls to either now fail on chain, so shipping the bindings would only let callers build transactions that revert.
 
-  Gone from the public API: `AccountMappingModule`, `AccountMappingPrecompile`, `client.accountMapping`, `client.precompiles.accountMapping`, `PRECOMPILE_ADDR.ACCOUNT_MAPPING`, `AM_SEL`, the `SignatureScheme` enum and `SLIP0044_NAMESPACE`, plus the types `ChainLink`, `PrivateLink`, `AccountMetadata`, `AliasInfo`, `AliasFullIdentity`, `ListingInfo`, `AccountListing`, `SupportedChain`, `ResolvedAlias`, `AddChainLinkParams`, `SetMetadataParams`, `PutOnSaleParams` and `DispatchAsLinkedParams`.
+    Gone from the public API: `AccountMappingModule`, `AccountMappingPrecompile`, `client.accountMapping`, `client.precompiles.accountMapping`, `PRECOMPILE_ADDR.ACCOUNT_MAPPING`, `AM_SEL`, the `SignatureScheme` enum and `SLIP0044_NAMESPACE`, plus the types `ChainLink`, `PrivateLink`, `AccountMetadata`, `AliasInfo`, `AliasFullIdentity`, `ListingInfo`, `AccountListing`, `SupportedChain`, `ResolvedAlias`, `AddChainLinkParams`, `SetMetadataParams`, `PutOnSaleParams` and `DispatchAsLinkedParams`.
 
-  There is no replacement. Aliases, chain links and the marketplace have no equivalent; the proxy-dispatch routes (`dispatchAsLinkedAccount`, `dispatchAsPrivateLink`) were removed from the runtime rather than reimplemented.
+    There is no replacement. Aliases, chain links and the marketplace have no equivalent; the proxy-dispatch routes (`dispatchAsLinkedAccount`, `dispatchAsPrivateLink`) were removed from the runtime rather than reimplemented.
 
 - **BREAKING — `CircuitId.PrivateLink` (5).** The circuit is unregistered on chain and its verification key purged, so proofs built against it fail with `CircuitNotFound`. `tests/zk-verifier/circuit-id.test.ts` now asserts the id cannot come back without a matching node-side circuit.
 
@@ -104,7 +395,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Forest-aware coin selection.** A transfer proves both of its inputs under a single public `merkle_root`, so a pair must now share a forest tree as well as a `circuitVersion`. Notes in different trees anchor to different roots and can never converge, no matter how many times the caller refetches — the previous code would burn its whole retry budget discovering that. `selectNotes` returns `{ needsConsolidation: true }` when a cross-tree pair *would* have covered the amount, so a caller can distinguish "your funds are stranded across trees" from "you don't have enough" instead of reporting the wrong one.
+- **Forest-aware coin selection.** A transfer proves both of its inputs under a single public `merkle_root`, so a pair must now share a forest tree as well as a `circuitVersion`. Notes in different trees anchor to different roots and can never converge, no matter how many times the caller refetches — the previous code would burn its whole retry budget discovering that. `selectNotes` returns `{ needsConsolidation: true }` when a cross-tree pair _would_ have covered the amount, so a caller can distinguish "your funds are stranded across trees" from "you don't have enough" instead of reporting the wrong one.
 
 - `treeIdOf(note)` — derives the forest tree from a note's leaf index. `LEAVES_PER_TREE` is pinned to 2^20 to match the runtime's `MaxLeavesPerTree`, which the pallet's `integrity_test` forbids from ever changing on a live chain. That on-chain guarantee is what makes deriving tree membership client-side safe, rather than a cached assumption that can silently go stale.
 
@@ -120,7 +411,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **An SS58 address no longer rotates the spending key when its network prefix changes.** The address string is load-bearing twice — it goes into the signed payload *and* into the HKDF `info` — and SS58 encodes the same public key differently per prefix (`5Grwva…` under the generic prefix 42, `kcuMUg…` under 2700). A wallet listing an account under one prefix today and another tomorrow (a wallet setting, a chain-metadata update) therefore derived a **different** spending key for the same account, and the user opened the app to an empty vault with no error: a fresh, valid, empty identity rather than a failure. `canonicalAccountId` now reduces SS58 to the underlying 32-byte public key before it reaches either the message builder or the KDF, so every prefix of one account maps to one identity. EVM addresses pass through lowercased and unchanged. Regression tests pin that the derived key and the signed Substrate message are identical across prefixes 0, 42 and 2700, and that distinct accounts stay distinct.
+- **An SS58 address no longer rotates the spending key when its network prefix changes.** The address string is load-bearing twice — it goes into the signed payload _and_ into the HKDF `info` — and SS58 encodes the same public key differently per prefix (`5Grwva…` under the generic prefix 42, `kcuMUg…` under 2700). A wallet listing an account under one prefix today and another tomorrow (a wallet setting, a chain-metadata update) therefore derived a **different** spending key for the same account, and the user opened the app to an empty vault with no error: a fresh, valid, empty identity rather than a failure. `canonicalAccountId` now reduces SS58 to the underlying 32-byte public key before it reaches either the message builder or the KDF, so every prefix of one account maps to one identity. EVM addresses pass through lowercased and unchanged. Regression tests pin that the derived key and the signed Substrate message are identical across prefixes 0, 42 and 2700, and that distinct accounts stay distinct.
 
 ### Added
 
@@ -132,9 +423,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **BREAKING: v1 spending key derivation is gone.** `deriveSpendingKeyMessage`, the `KeyVersion` type and the `version` parameter on `deriveMasterKeyBytes` / `deriveSpendingKeyFromSignature` have all been removed. 0.19.0 kept v1 exported so existing notes could be swept into a v2 identity, but on testnet the trapped value is disposable and keeping the old builder alive kept its harvestable `personal_sign` payload reachable from any caller — the exact surface 0.19.0 set out to close. There is now one derivation path and no way to reach the old one.
 
-  **Migration**: nothing to do if you were already on the 0.19.0 defaults. Drop the fourth `version` argument if you passed it explicitly; passing `'v1'` has no replacement by design. Notes shielded under a v1 identity are not readable with a v2 key — users re-shield.
+    **Migration**: nothing to do if you were already on the 0.19.0 defaults. Drop the fourth `version` argument if you passed it explicitly; passing `'v1'` has no replacement by design. Notes shielded under a v1 identity are not readable with a v2 key — users re-shield.
 
-  Regression tests assert the symbol is absent from both the module and the package root, that no builder emits the `orbinum-spending-key-v1` tag, and that derivation never produces the v1 HKDF domain.
+    Regression tests assert the symbol is absent from both the module and the package root, that no builder emits the `orbinum-spending-key-v1` tag, and that derivation never produces the v1 HKDF domain.
 
 ## [0.19.0] - 2026-07-27
 
@@ -179,7 +470,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `computeNoteCommitment(value, assetId, ownerPk, blinding)` — computes a note commitment (`Poseidon4`), mirroring `NoteCommitment` in `note.circom`. Exported so wallets can verify a stored note against its on-chain commitment *before* proving. The ZK circuits ignore the ownerPk supplied by the caller and rebuild the commitment from `BabyPbk(spending_key).Ax`; if a stored note's spendingKey, value, assetId or blinding drift from what was committed on-chain, witness generation fails on the Merkle constraint with an opaque `Assert Failed` (e.g. `Unshield_164 line: 82`) after seconds of proving. Recomputing the commitment with `deriveOwnerPk(spendingKey)` and comparing it against the note's `commitmentHex` detects the drift up front — wrong session key (non-deterministic signers: smart/MPC wallets), a mis-recovered stealth key, or a corrupted vault note. Covered by tests pinning it byte-identical to `NoteBuilder`'s commitment, including the re-derived-ownerPk path and the LE `commitmentHex` round-trip.
+- `computeNoteCommitment(value, assetId, ownerPk, blinding)` — computes a note commitment (`Poseidon4`), mirroring `NoteCommitment` in `note.circom`. Exported so wallets can verify a stored note against its on-chain commitment _before_ proving. The ZK circuits ignore the ownerPk supplied by the caller and rebuild the commitment from `BabyPbk(spending_key).Ax`; if a stored note's spendingKey, value, assetId or blinding drift from what was committed on-chain, witness generation fails on the Merkle constraint with an opaque `Assert Failed` (e.g. `Unshield_164 line: 82`) after seconds of proving. Recomputing the commitment with `deriveOwnerPk(spendingKey)` and comparing it against the note's `commitmentHex` detects the drift up front — wrong session key (non-deterministic signers: smart/MPC wallets), a mis-recovered stealth key, or a corrupted vault note. Covered by tests pinning it byte-identical to `NoteBuilder`'s commitment, including the re-derived-ownerPk path and the LE `commitmentHex` round-trip.
 
 ## [0.16.0] - 2026-07-20
 
@@ -227,9 +518,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed (BREAKING)
 
 - **`IndexerClient` and all indexer types are no longer part of the SDK.** The public SDK must not know the shape of the private indexer's REST API — it now ships only crypto/chain (`substrate`, `evm`, `evmExplorer`, `shieldedPool`, `privacy`, `zkVerifier`, `proof-generator`, `vault`, `precompiles`). Consumers that talked to the indexer must supply their own HTTP client.
-  - Removed exports: `IndexerClient`, `normalizeBaseUrl`, and the types `IndexerClientConfig`, `PaginatedResult`, `IndexedBlock`, `IndexedExtrinsic`, `IndexedEvmTx`, `IndexedSession`, `IndexedValidator`, `IndexerStats`, `IndexerActivity`, `ActivityBucket`, `ShieldedAddressEvent`, `ShieldedCommitment`, `SpentNullifier`, `NullifierChunkInfo`, `NullifierManifest`, `NullifierTail`, `PrivateTransferTimestamp`, `Unshield`, `MerkleRoot`, `NullifierStatusResult`, `StealthScanHint`, `Relayer`, `RelayFeeEvent`, `RelayFeeSummaryEntry`, `RegisteredAsset`.
-  - `OrbinumClient` no longer has an `indexer` field; `OrbinumClientConfig` / `OrbinumClientProviderConfig` no longer accept `indexerUrl`.
-  - **No impact on the shielded-pool crypto**: `IndexerClient` was a leaf — note decryption (`tryDecryptNote`), nullifier derivation, memo encrypt/decrypt, vault, proof generation, and Merkle-proof / nullifier-status (via Substrate RPC) never depended on it. Callers fetch indexer data themselves and feed plain records into the SDK crypto as before.
+    - Removed exports: `IndexerClient`, `normalizeBaseUrl`, and the types `IndexerClientConfig`, `PaginatedResult`, `IndexedBlock`, `IndexedExtrinsic`, `IndexedEvmTx`, `IndexedSession`, `IndexedValidator`, `IndexerStats`, `IndexerActivity`, `ActivityBucket`, `ShieldedAddressEvent`, `ShieldedCommitment`, `SpentNullifier`, `NullifierChunkInfo`, `NullifierManifest`, `NullifierTail`, `PrivateTransferTimestamp`, `Unshield`, `MerkleRoot`, `NullifierStatusResult`, `StealthScanHint`, `Relayer`, `RelayFeeEvent`, `RelayFeeSummaryEntry`, `RegisteredAsset`.
+    - `OrbinumClient` no longer has an `indexer` field; `OrbinumClientConfig` / `OrbinumClientProviderConfig` no longer accept `indexerUrl`.
+    - **No impact on the shielded-pool crypto**: `IndexerClient` was a leaf — note decryption (`tryDecryptNote`), nullifier derivation, memo encrypt/decrypt, vault, proof generation, and Merkle-proof / nullifier-status (via Substrate RPC) never depended on it. Callers fetch indexer data themselves and feed plain records into the SDK crypto as before.
 
 ## [0.12.0] - 2026-07-10
 
@@ -258,8 +549,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **`IndexerClient` now enforces HTTPS on its `baseUrl`.** The indexer carries the wallet's queries, so a plain-`http://` remote endpoint would send them in cleartext. The constructor validates the transport: `https://` is always allowed, `http://` only for loopback hosts (`localhost`, `127.0.0.1`, `[::1]`); any other value — or a non-URL string — throws (fail-closed). Trailing-slash normalization is unchanged.
-  - **Breaking:** constructing an `IndexerClient` with a plain-http remote `baseUrl` now throws instead of silently sending cleartext requests. Local development against `http://localhost` is unaffected.
-  - New export: `normalizeBaseUrl(baseUrl)` — the validator, usable standalone.
+    - **Breaking:** constructing an `IndexerClient` with a plain-http remote `baseUrl` now throws instead of silently sending cleartext requests. Local development against `http://localhost` is unaffected.
+    - New export: `normalizeBaseUrl(baseUrl)` — the validator, usable standalone.
 
 ---
 
@@ -268,11 +559,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Incremental nullifier-set transfer (sealed chunks, PIR-A preserving).** New `IndexerClient` methods for the reader's chunked nullifier endpoints — the wallet persists the set locally and re-downloads only new chunks + the tail per rescan, instead of the full set:
-  - `getNullifierManifest(): Promise<NullifierManifest | null>` — universal chunk index (identical for every caller); returns `null` on 404 so callers can fall back to `getAllSpentNullifiers` against older readers.
-  - `getNullifierChunk(idx, digest): Promise<string[]>` — one immutable sealed chunk (ascending, lowercased). The digest lives in the URL: a corrected chunk is a different URL, safe to cache forever.
-  - `getNullifierTail(): Promise<NullifierTail>` — the mutable remainder after the last sealed chunk; `afterChunks` detects a chunk sealed mid-sync.
-  - New types: `NullifierManifest`, `NullifierChunkInfo`, `NullifierTail`.
-  - No client-supplied position parameter exists anywhere in the flow — no wallet ever expresses interest in a specific nullifier or range (PIR-A preserved).
+    - `getNullifierManifest(): Promise<NullifierManifest | null>` — universal chunk index (identical for every caller); returns `null` on 404 so callers can fall back to `getAllSpentNullifiers` against older readers.
+    - `getNullifierChunk(idx, digest): Promise<string[]>` — one immutable sealed chunk (ascending, lowercased). The digest lives in the URL: a corrected chunk is a different URL, safe to cache forever.
+    - `getNullifierTail(): Promise<NullifierTail>` — the mutable remainder after the last sealed chunk; `afterChunks` detects a chunk sealed mid-sync.
+    - New types: `NullifierManifest`, `NullifierChunkInfo`, `NullifierTail`.
+    - No client-supplied position parameter exists anywhere in the flow — no wallet ever expresses interest in a specific nullifier or range (PIR-A preserved).
 - `getAllSpentNullifiers` stays as the fallback path; its docstring now points new integrations at the chunk flow.
 
 ---
@@ -282,10 +573,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Vault note records now blind their on-chain identifiers at rest.** Previously `EncryptedNoteRecord` stored `commitmentHex`, `nullifierHex` and `assetId` in **plaintext** (for filtering without unlock), so a storage dump (disk image, DevTools, synced data) let anyone link the wallet to its on-chain notes/nullifiers. They are now stored as **blind tags** — `HMAC-SHA-256(blindKey, value)` under a vault blind key derived from the same master bytes (`deriveVaultBlindKey`). Equality lookups still work (compare tags); a dump reveals no linkable identifiers. `spent`/`spentAt` stay plaintext (local flags, no chain linkage).
-  - `encryptNote(key, note)` → `encryptNote(key, blindKey, note)`.
-  - `EncryptedNoteRecord` fields `commitmentHex`/`nullifierHex`/`assetId` → `commitmentTag`/`nullifierTag`/`assetTag`.
-  - New exports: `deriveVaultBlindKey(masterBytes)`, `blindTag(blindKey, value)`, `noteBlindTag(blindKey, hex)`.
-  - `decryptNoteRecord` recovers identifiers from the ciphertext (the tags are one-way), so the ZkNote round-trips unchanged.
+    - `encryptNote(key, note)` → `encryptNote(key, blindKey, note)`.
+    - `EncryptedNoteRecord` fields `commitmentHex`/`nullifierHex`/`assetId` → `commitmentTag`/`nullifierTag`/`assetTag`.
+    - New exports: `deriveVaultBlindKey(masterBytes)`, `blindTag(blindKey, value)`, `noteBlindTag(blindKey, hex)`.
+    - `decryptNoteRecord` recovers identifiers from the ciphertext (the tags are one-way), so the ZkNote round-trips unchanged.
 
 ---
 
@@ -382,15 +673,15 @@ Privacy alignment with Zcash's visibility model: the shielded pool's boundary is
 ### Added
 
 - **`IndexedValidator`** — new type representing a validator node indexed from `pallet-validator-set` events:
-  - `account: string` — SS58 validator address.
-  - `status: 'pending' | 'approved' | 'rejected' | 'removed'` — lifecycle status.
-  - `bondAmount: string | null` — reserved bond amount as decimal string.
-  - `requestedAtBlock`, `approvedAtBlock`, `removedAtBlock: number | null` — block numbers for each lifecycle transition.
-  - `timestampMs: number | null`.
+    - `account: string` — SS58 validator address.
+    - `status: 'pending' | 'approved' | 'rejected' | 'removed'` — lifecycle status.
+    - `bondAmount: string | null` — reserved bond amount as decimal string.
+    - `requestedAtBlock`, `approvedAtBlock`, `removedAtBlock: number | null` — block numbers for each lifecycle transition.
+    - `timestampMs: number | null`.
 - **`IndexedSession`** — new type representing a session rotation indexed from `pallet-session NewSession` events:
-  - `sessionIndex: number` — monotonically increasing session counter.
-  - `blockNumber: number` — block at which the session started.
-  - `timestampMs: number | null`.
+    - `sessionIndex: number` — monotonically increasing session counter.
+    - `blockNumber: number` — block at which the session started.
+    - `timestampMs: number | null`.
 - **`IndexerClient.getValidators(params?)`** — paginated list of validators. Optional `status` filter (`'pending' | 'approved' | 'rejected' | 'removed'`). Calls `GET /validators`.
 - **`IndexerClient.getValidator(account)`** — single validator by account address. Returns `null` on 404. Calls `GET /validators/:account`.
 - **`IndexerClient.getSessions(params?)`** — paginated list of session rotations ordered most-recent first. Calls `GET /sessions`.
@@ -403,8 +694,8 @@ Privacy alignment with Zcash's visibility model: the shielded pool's boundary is
 ### Added
 
 - **`PrivateTransferTimestamp`** — two new optional fields for local transfer reconstruction:
-  - `matchedNullifiers?: string[]` — subset of the queried nullifiers that were spent in this specific extrinsic. Returned by `getTransfersByNullifiers()`. Use to identify which input vault notes belong to each outgoing transfer.
-  - `matchedCommitments?: string[]` — subset of the queried commitments that were inserted in this specific extrinsic. Returned by `getTransfersByCommitments()`. Use to identify the change note (and thus amount and recipient) per transfer.
+    - `matchedNullifiers?: string[]` — subset of the queried nullifiers that were spent in this specific extrinsic. Returned by `getTransfersByNullifiers()`. Use to identify which input vault notes belong to each outgoing transfer.
+    - `matchedCommitments?: string[]` — subset of the queried commitments that were inserted in this specific extrinsic. Returned by `getTransfersByCommitments()`. Use to identify the change note (and thus amount and recipient) per transfer.
 
 ### Changed
 
@@ -417,8 +708,8 @@ Privacy alignment with Zcash's visibility model: the shielded pool's boundary is
 
 ### Fixed
 
-- **`ShieldedPoolModule`** — eliminado `Binary.fromHex()` en campos de tamaño fijo `[u8;32]` (`merkle_root`, `nullifier`, `change_commitment`, `commitments`, `nullifiers`). El codec `SizedBytes(N)` de PAPI espera una cadena hex directamente; envolver con `Binary.fromHex()` devuelve un `Uint8Array` que falla el check de compatibilidad de tipo, generando el error *"Incompatible runtime entry Tx(ShieldedPool.unshield)"*.
-- **`SubstrateClient.submitUnsignedAndWatch`** — cambiada la firma de `(bareTxHex: string)` a `(bareTx: Uint8Array)` y eliminada la llamada `Binary.fromHex()`. `getBareTx()` de PAPI devuelve `Promise<Uint8Array>`, no un hex string; la conversión corrupta los bytes y el nodo rechazaba la tx con *"ExtrinsicFormat 0 not valid"*.
+- **`ShieldedPoolModule`** — eliminado `Binary.fromHex()` en campos de tamaño fijo `[u8;32]` (`merkle_root`, `nullifier`, `change_commitment`, `commitments`, `nullifiers`). El codec `SizedBytes(N)` de PAPI espera una cadena hex directamente; envolver con `Binary.fromHex()` devuelve un `Uint8Array` que falla el check de compatibilidad de tipo, generando el error _"Incompatible runtime entry Tx(ShieldedPool.unshield)"_.
+- **`SubstrateClient.submitUnsignedAndWatch`** — cambiada la firma de `(bareTxHex: string)` a `(bareTx: Uint8Array)` y eliminada la llamada `Binary.fromHex()`. `getBareTx()` de PAPI devuelve `Promise<Uint8Array>`, no un hex string; la conversión corrupta los bytes y el nodo rechazaba la tx con _"ExtrinsicFormat 0 not valid"_.
 - **`submitBareTx` / `callUnsafeTx`** — tipos de retorno de `getBareTx()` actualizados a `Promise<Uint8Array>` para alinearlos con los tipos reales de PAPI 2.x.
 - **`EvmExplorer.getAddressInfo`** — rango de bloques para `eth_getLogs` reducido de 5 000 a 1 000 para respetar el límite `--max-block-range` por defecto del nodo stable2512.
 
@@ -437,19 +728,19 @@ Privacy alignment with Zcash's visibility model: the shielded pool's boundary is
 ### Added
 
 - **`rpc-v2/ChainModule`** — new module for general chain state queries under the `chain_*` RPC namespace:
-  - `isValidator(ss58Address)`: returns `true` if the given SS58 account is an active Aura block author. Calls the new `chain_isValidator` node endpoint which reads `pallet_aura::Authorities` directly from storage.
-  - Exported from `rpc-v2` and accessible as `client.chain` on `OrbinumClient`.
+    - `isValidator(ss58Address)`: returns `true` if the given SS58 account is an active Aura block author. Calls the new `chain_isValidator` node endpoint which reads `pallet_aura::Authorities` directly from storage.
+    - Exported from `rpc-v2` and accessible as `client.chain` on `OrbinumClient`.
 
 ### Changed
 
 - **`OrbinumClient`** — exposes a new `readonly chain: ChainModule` property.
 - **`rpc-v2/RpcV2Module`** — aggregates `chain: ChainModule` alongside the existing `privacy: PrivacyModule`.
 - **Dependencies** — major version bumps across all runtime and dev dependencies:
-  - `polkadot-api` `1.23.x` → `2.1.3` (breaking — see migration notes below).
-  - `@polkadot-api/metadata-builders`, `@polkadot-api/substrate-bindings`, `@polkadot-api/utils` updated to match papi 2.x.
-  - `typescript` `5.9.x` → `6.0.3`.
-  - `vitest` `3.x` → `4.1.6`.
-  - `@noble/curves`, `@noble/hashes`, `@scure/base` updated to latest stable.
+    - `polkadot-api` `1.23.x` → `2.1.3` (breaking — see migration notes below).
+    - `@polkadot-api/metadata-builders`, `@polkadot-api/substrate-bindings`, `@polkadot-api/utils` updated to match papi 2.x.
+    - `typescript` `5.9.x` → `6.0.3`.
+    - `vitest` `3.x` → `4.1.6`.
+    - `@noble/curves`, `@noble/hashes`, `@scure/base` updated to latest stable.
 
 #### polkadot-api 2.x migration notes
 
@@ -468,41 +759,41 @@ Privacy alignment with Zcash's visibility model: the shielded pool's boundary is
 ### Added
 
 - **`shielded-pool/protocol/NoteDisclosure`** — off-chain note disclosure utilities:
-  - `createNoteDisclosureKey(note)`: serialises the plaintext preimage of a `ZkNote` into a compact shareable string with prefix `orbdisc:<base64url(JSON)>`. Reveals `value`, `assetId`, `ownerPk` (BJJ Ax), and `blinding` — never `spendingKey`, `nullifier`, or any viewing secret.
-  - `decodeNoteDisclosureKey(key)`: parses and cryptographically verifies a disclosure key by recomputing `Poseidon4(value, assetId, ownerPk, blinding)` and comparing it against the embedded commitment hex. Returns `NoteDisclosureKey | null`; `null` on any parse or verification failure.
-  - Type `NoteDisclosureKey`: `{ version: 1, commitment, value, assetId, ownerPk, blinding }` (all fields as `bigint`).
-  - Exported from `shielded-pool/protocol`.
+    - `createNoteDisclosureKey(note)`: serialises the plaintext preimage of a `ZkNote` into a compact shareable string with prefix `orbdisc:<base64url(JSON)>`. Reveals `value`, `assetId`, `ownerPk` (BJJ Ax), and `blinding` — never `spendingKey`, `nullifier`, or any viewing secret.
+    - `decodeNoteDisclosureKey(key)`: parses and cryptographically verifies a disclosure key by recomputing `Poseidon4(value, assetId, ownerPk, blinding)` and comparing it against the embedded commitment hex. Returns `NoteDisclosureKey | null`; `null` on any parse or verification failure.
+    - Type `NoteDisclosureKey`: `{ version: 1, commitment, value, assetId, ownerPk, blinding }` (all fields as `bigint`).
+    - Exported from `shielded-pool/protocol`.
 
 - **`IndexerClient`** — new relayer and registered-asset endpoints:
-  - `getRelayers(params?)`: paginated list of relayers; optional filters `page`, `limit`, `active`.
-  - `getRelayer(evmAddress)`: single relayer by EVM address, or `null` if not found.
-  - `getRelayFees(params?)`: paginated relay fee events; optional filters `relayer`, `type` (`'accumulated' | 'consumed'`).
-  - `getRelayFeesSummary(relayer)`: aggregated relay fee balances per asset for a given relayer account (`accumulated`, `consumed`, `pending` as bigint-safe strings).
-  - `getRegisteredAssets(params?)`: paginated list of assets registered via `register_asset`.
-  - `getRegisteredAsset(assetId)`: single registered asset by ID, or `null` if not found.
-  - New types: `Relayer`, `RelayFeeEvent`, `RelayFeeSummaryEntry`, `RegisteredAsset`.
-  - `ShieldedCommitment.source` field: `'shield' | 'transfer' | 'unshield'` — indicates the on-chain origin of a commitment.
+    - `getRelayers(params?)`: paginated list of relayers; optional filters `page`, `limit`, `active`.
+    - `getRelayer(evmAddress)`: single relayer by EVM address, or `null` if not found.
+    - `getRelayFees(params?)`: paginated relay fee events; optional filters `relayer`, `type` (`'accumulated' | 'consumed'`).
+    - `getRelayFeesSummary(relayer)`: aggregated relay fee balances per asset for a given relayer account (`accumulated`, `consumed`, `pending` as bigint-safe strings).
+    - `getRegisteredAssets(params?)`: paginated list of assets registered via `register_asset`.
+    - `getRegisteredAsset(assetId)`: single registered asset by ID, or `null` if not found.
+    - New types: `Relayer`, `RelayFeeEvent`, `RelayFeeSummaryEntry`, `RegisteredAsset`.
+    - `ShieldedCommitment.source` field: `'shield' | 'transfer' | 'unshield'` — indicates the on-chain origin of a commitment.
 
 - **`precompiles/ShieldedPoolPrecompile`** — claim shielded fees support:
-  - `buildClaimShieldedFeesCalldata(params)`: ABI-encodes a `claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes)` call. Validates: `proof` non-empty, `publicSignals` exactly 76 bytes, `encryptedMemo` exactly 176 bytes.
-  - `claimShieldedFees(params, signer)`: sends the encoded calldata to the `SHIELDED_POOL` precompile address.
-  - `estimateClaimShieldedFeesGas(params, from)`: estimates EVM gas for a `claimShieldedFees` call.
-  - `SP_SEL.CLAIM_SHIELDED_FEES` selector `0x42e1e74c` added to `precompiles/addresses`.
-  - `precompiles/decode`: calldata decoder now recognises and partially decodes `claimShieldedFees` calls, returning `commitment`, `amount`, and `assetId`.
-  - `ClaimShieldedFeesParams` exported from `precompiles/types`.
+    - `buildClaimShieldedFeesCalldata(params)`: ABI-encodes a `claimShieldedFees(bytes32,uint256,uint32,bytes,bytes,bytes)` call. Validates: `proof` non-empty, `publicSignals` exactly 76 bytes, `encryptedMemo` exactly 176 bytes.
+    - `claimShieldedFees(params, signer)`: sends the encoded calldata to the `SHIELDED_POOL` precompile address.
+    - `estimateClaimShieldedFeesGas(params, from)`: estimates EVM gas for a `claimShieldedFees` call.
+    - `SP_SEL.CLAIM_SHIELDED_FEES` selector `0x42e1e74c` added to `precompiles/addresses`.
+    - `precompiles/decode`: calldata decoder now recognises and partially decodes `claimShieldedFees` calls, returning `commitment`, `amount`, and `assetId`.
+    - `ClaimShieldedFeesParams` exported from `precompiles/types`.
 
 - **`proof-generator/fee-claim`** — `generateFeeClaimProof` fully implemented (previously a deprecated stub):
-  - Uses `CircuitType.ValueProof` (`'value_proof'`) via `@orbinum/proof-generator`.
-  - Circuit input mapping: `amount → value`, `assetId → asset_id`, `ownerPubkey → owner_pubkey` (all as decimal strings).
-  - Returns `FeeClaimProofOutput`: `proof` (128-byte Groth16 as `0x`-prefixed hex) and `publicSignals` (`number[]` of 76 bytes) with layout: commitment LE [0–32], value u64 LE [32–40], asset_id u32 LE [40–44], owner_hash LE [44–76].
-  - Validates `amount > 0n` before invoking the circuit.
-  - Accepts optional `provider` and `verbose` options.
+    - Uses `CircuitType.ValueProof` (`'value_proof'`) via `@orbinum/proof-generator`.
+    - Circuit input mapping: `amount → value`, `assetId → asset_id`, `ownerPubkey → owner_pubkey` (all as decimal strings).
+    - Returns `FeeClaimProofOutput`: `proof` (128-byte Groth16 as `0x`-prefixed hex) and `publicSignals` (`number[]` of 76 bytes) with layout: commitment LE [0–32], value u64 LE [32–40], asset_id u32 LE [40–44], owner_hash LE [44–76].
+    - Validates `amount > 0n` before invoking the circuit.
+    - Accepts optional `provider` and `verbose` options.
 
 - **New tests:**
-  - `tests/proof-generator/fee-claim.test.ts` — 24 tests covering circuit type, input field mapping, 76-byte buffer layout, validation, provider handling, and determinism.
-  - `tests/precompiles/ShieldedPoolPrecompile.test.ts` — 228 lines added: `buildClaimShieldedFeesCalldata` (selector, determinism, field encoding, error cases), `claimShieldedFees` signer call, and `estimateClaimShieldedFeesGas`.
-  - `tests/shielded-pool/NoteDisclosure.test.ts` — 27 tests for `createNoteDisclosureKey` and `decodeNoteDisclosureKey` (roundtrip, commitment verification, tamper rejection, unknown prefix/version handling).
-  - `tests/indexer/IndexerClient.test.ts` — relayer and registered-asset endpoint tests added.
+    - `tests/proof-generator/fee-claim.test.ts` — 24 tests covering circuit type, input field mapping, 76-byte buffer layout, validation, provider handling, and determinism.
+    - `tests/precompiles/ShieldedPoolPrecompile.test.ts` — 228 lines added: `buildClaimShieldedFeesCalldata` (selector, determinism, field encoding, error cases), `claimShieldedFees` signer call, and `estimateClaimShieldedFeesGas`.
+    - `tests/shielded-pool/NoteDisclosure.test.ts` — 27 tests for `createNoteDisclosureKey` and `decodeNoteDisclosureKey` (roundtrip, commitment verification, tamper rejection, unknown prefix/version handling).
+    - `tests/indexer/IndexerClient.test.ts` — relayer and registered-asset endpoint tests added.
 
 ### Changed
 
@@ -526,56 +817,56 @@ Privacy alignment with Zcash's visibility model: the shielded pool's boundary is
 ### Added
 
 - **`vault/`** — AES-GCM-256 encrypted note vault primitives:
-  - `deriveVaultKey(masterBytes)`: HKDF-SHA-256 key derivation from 32-byte master material. Key is stable across circuit field changes — derived before modular reduction.
-  - `encryptJson(key, payload)` / `decryptJson(key, iv, ciphertext)`: WebCrypto AES-GCM encrypt/decrypt with bigint-safe JSON serialisation.
-  - `encryptNote(key, note)` / `decryptNoteRecord(key, record)`: per-note encrypt/decrypt returning `EncryptedNoteRecord`.
-  - `applyNoteStatus(record, update)`: applies a `NoteStatusUpdate` without re-encrypting the full payload.
-  - `VaultLockedError`: typed error thrown when vault operations are attempted without an unlocked key.
-  - Types: `EncryptedNoteRecord`, `NoteStatusUpdate`.
-  - `vaultReplacer` / `vaultReviver`: bigint-safe JSON replacer and reviver for vault serialisation.
+    - `deriveVaultKey(masterBytes)`: HKDF-SHA-256 key derivation from 32-byte master material. Key is stable across circuit field changes — derived before modular reduction.
+    - `encryptJson(key, payload)` / `decryptJson(key, iv, ciphertext)`: WebCrypto AES-GCM encrypt/decrypt with bigint-safe JSON serialisation.
+    - `encryptNote(key, note)` / `decryptNoteRecord(key, record)`: per-note encrypt/decrypt returning `EncryptedNoteRecord`.
+    - `applyNoteStatus(record, update)`: applies a `NoteStatusUpdate` without re-encrypting the full payload.
+    - `VaultLockedError`: typed error thrown when vault operations are attempted without an unlocked key.
+    - Types: `EncryptedNoteRecord`, `NoteStatusUpdate`.
+    - `vaultReplacer` / `vaultReviver`: bigint-safe JSON replacer and reviver for vault serialisation.
 
 - **`proof-generator/`** — ZK proof generation wrappers delegating to `@orbinum/proof-generator`:
-  - `generateUnshieldProof(inputs, provider)`: builds a Groth16 unshield proof. Inputs: `merkleRoot`, `nullifier`, `amount`, `assetId`, `recipient`, `blinding`, `spendingKey`, `pathSiblings`, `leafIndex`, and optional `fee`, `changeValue`, `changeBlinding`, `changeOwnerPk`. Returns `UnshieldProofResult` with `proof`, `publicSignals`, and `changeCommitment`.
-  - `generateTransferProof(inputs, provider)`: builds a Groth16 private-transfer proof for exactly 2 inputs and 2 outputs. Inputs: `merkleRoot`, typed `TransferInputNote[2]`, `TransferOutputNote[2]`, and optional `fee`.
-  - `generateFeeClaimProof(inputs, provider)`: builds a Groth16 fee-claim proof for `claimShieldedFees`. Returns `FeeClaimProofOutput` with a 128-byte `proof` hex and 76-byte `publicSignals` buffer.
-  - `merkleProofToCircuit(pathSiblings, leafIndex, depth)`: adapts indexer Merkle proof data to the circuit's expected format.
-  - `CircuitType`, `WebArtifactProvider`: re-exported from `@orbinum/proof-generator` for consumers that do not install the package directly.
-  - Types: `ArtifactProvider`, `ProofResult`, `UnshieldProofInputs`, `UnshieldProofResult`, `TransferInputNote`, `TransferOutputNote`, `PrivateTransferProofInputs`, `FeeClaimProofInputs`, `FeeClaimProofOutput`.
+    - `generateUnshieldProof(inputs, provider)`: builds a Groth16 unshield proof. Inputs: `merkleRoot`, `nullifier`, `amount`, `assetId`, `recipient`, `blinding`, `spendingKey`, `pathSiblings`, `leafIndex`, and optional `fee`, `changeValue`, `changeBlinding`, `changeOwnerPk`. Returns `UnshieldProofResult` with `proof`, `publicSignals`, and `changeCommitment`.
+    - `generateTransferProof(inputs, provider)`: builds a Groth16 private-transfer proof for exactly 2 inputs and 2 outputs. Inputs: `merkleRoot`, typed `TransferInputNote[2]`, `TransferOutputNote[2]`, and optional `fee`.
+    - `generateFeeClaimProof(inputs, provider)`: builds a Groth16 fee-claim proof for `claimShieldedFees`. Returns `FeeClaimProofOutput` with a 128-byte `proof` hex and 76-byte `publicSignals` buffer.
+    - `merkleProofToCircuit(pathSiblings, leafIndex, depth)`: adapts indexer Merkle proof data to the circuit's expected format.
+    - `CircuitType`, `WebArtifactProvider`: re-exported from `@orbinum/proof-generator` for consumers that do not install the package directly.
+    - Types: `ArtifactProvider`, `ProofResult`, `UnshieldProofInputs`, `UnshieldProofResult`, `TransferInputNote`, `TransferOutputNote`, `PrivateTransferProofInputs`, `FeeClaimProofInputs`, `FeeClaimProofOutput`.
 
 - **`relayer/`** — Typed client for relayer registry JSON-RPC endpoints:
-  - `RelayerStatusModule.isRelayer(ss58)`: returns whether an account is a registered relayer.
-  - `RelayerStatusModule.pendingFees(ss58, assetId)`: returns pending relayer fees as `bigint`.
-  - `RelayerStatusModule.registeredEvmAddress(ss58)`: returns the registered EVM address or `null`.
-  - `RelayerStatusModule.getRelayerInfo(ss58)`: convenience wrapper returning a `RelayerInfo` object.
-  - Type: `RelayerInfo`.
+    - `RelayerStatusModule.isRelayer(ss58)`: returns whether an account is a registered relayer.
+    - `RelayerStatusModule.pendingFees(ss58, assetId)`: returns pending relayer fees as `bigint`.
+    - `RelayerStatusModule.registeredEvmAddress(ss58)`: returns the registered EVM address or `null`.
+    - `RelayerStatusModule.getRelayerInfo(ss58)`: convenience wrapper returning a `RelayerInfo` object.
+    - Type: `RelayerInfo`.
 
 - **`shielded-pool/pallet/`** — High-level Substrate pallet transaction module:
-  - `ShieldedPoolModule`: high-level class for all shielded-pool extrinsics, built on polkadot-api UnsafeApi:
-    - `shield(params, signer)`: deposits tokens into the shielded pool (signed tx).
-    - `unshield(params, signer?)`: withdraws tokens via ZK proof — submitted as unsigned (gasless) if no signer is provided.
-    - `privateTransfer(params, signer?)`: private transfer between two shielded addresses (unsigned gasless).
-    - `shieldBatch(params, signer)`: batch shield operation for multiple commitments.
-    - `claimShieldedFees(params, signer)`: claims accumulated relayer fees from the pool.
-    - Disclosure extrinsics: `requestDisclosure()`, `disclose()`, `rejectDisclosure()`, `pruneExpiredRequest()`, `revokeDisclosureRecord()`.
-  - Pallet event and extrinsic type re-exports via `shielded-pool/pallet/index.ts`.
+    - `ShieldedPoolModule`: high-level class for all shielded-pool extrinsics, built on polkadot-api UnsafeApi:
+        - `shield(params, signer)`: deposits tokens into the shielded pool (signed tx).
+        - `unshield(params, signer?)`: withdraws tokens via ZK proof — submitted as unsigned (gasless) if no signer is provided.
+        - `privateTransfer(params, signer?)`: private transfer between two shielded addresses (unsigned gasless).
+        - `shieldBatch(params, signer)`: batch shield operation for multiple commitments.
+        - `claimShieldedFees(params, signer)`: claims accumulated relayer fees from the pool.
+        - Disclosure extrinsics: `requestDisclosure()`, `disclose()`, `rejectDisclosure()`, `pruneExpiredRequest()`, `revokeDisclosureRecord()`.
+    - Pallet event and extrinsic type re-exports via `shielded-pool/pallet/index.ts`.
 
 - **`shielded-pool/protocol/`** — Off-chain cryptographic protocol primitives:
-  - `NoteBuilder.build(input)`: constructs a `ZkNote` (commitment + nullifier + encrypted memo) from value, assetId, ownerPk, and optional viewing key. Supports stealth addresses: when `viewingPublicKey` and `recipientOwnerPk` are provided, generates a per-note `stealthOwnerPk` so notes are unlinkable across transfers. Hash scheme: `commitment = Poseidon4(value, assetId, ownerPk, blinding)`, `nullifier = Poseidon2(commitment, spendingKey)`.
-  - `tryDecryptNote(commitment, viewingSecretKey, spendingKey, ownOwnerPk)`: attempts to decrypt an on-chain commitment. Returns a `ZkNote` on success, `null` on key mismatch or commitment failure.
-  - `tryDecryptNoteVerbose(...)`: like `tryDecryptNote` but additionally returns a human-readable `reason` string for failed decryptions.
-  - `computeNullifier(commitment, spendingKey)`: computes `Poseidon2(commitment, spendingKey)`.
-  - `EncryptedMemo`: 168-byte ChaCha20-Poly1305 encrypted memo with ECDH ephemeral key. `EncryptedMemo.encrypt(payload, viewingPublicKey, commitment)` and `EncryptedMemo.decrypt(bytes, viewingSecretKey, commitment)`. Constant `ENCRYPTED_MEMO_SIZE = 168`.
-  - `selectNotes(notes, needed)`: greedy note selection — single note first, then smallest qualifying pair. Returns `null` if no combination covers `needed`.
-  - `buildDummyTransferInput(assetId)`: builds a zero-value dummy `TransferInputNote` for the second slot in single-note transfers (circuit-level dummy exemption).
-  - `generateDisclosureProof`, `deriveBabyJubjubKeypair(substrateSigningKey)`, `decryptDisclosure(publicSignals, auditorSk)`: selective disclosure utilities for auditor workflows.
-  - Types: `ZkNote`, `ScanCommitment`, `DecryptedMemo`, `MerkleTreeInfo`, `ShieldParams`, `UnshieldParams`, `PrivateTransferParams`, `PrivateTransferInput`, `PrivateTransferOutput`, `ShieldBatchParams`, `ClaimShieldedFeesParams`, `NoteInput`, `DisclosureFlags`.
+    - `NoteBuilder.build(input)`: constructs a `ZkNote` (commitment + nullifier + encrypted memo) from value, assetId, ownerPk, and optional viewing key. Supports stealth addresses: when `viewingPublicKey` and `recipientOwnerPk` are provided, generates a per-note `stealthOwnerPk` so notes are unlinkable across transfers. Hash scheme: `commitment = Poseidon4(value, assetId, ownerPk, blinding)`, `nullifier = Poseidon2(commitment, spendingKey)`.
+    - `tryDecryptNote(commitment, viewingSecretKey, spendingKey, ownOwnerPk)`: attempts to decrypt an on-chain commitment. Returns a `ZkNote` on success, `null` on key mismatch or commitment failure.
+    - `tryDecryptNoteVerbose(...)`: like `tryDecryptNote` but additionally returns a human-readable `reason` string for failed decryptions.
+    - `computeNullifier(commitment, spendingKey)`: computes `Poseidon2(commitment, spendingKey)`.
+    - `EncryptedMemo`: 168-byte ChaCha20-Poly1305 encrypted memo with ECDH ephemeral key. `EncryptedMemo.encrypt(payload, viewingPublicKey, commitment)` and `EncryptedMemo.decrypt(bytes, viewingSecretKey, commitment)`. Constant `ENCRYPTED_MEMO_SIZE = 168`.
+    - `selectNotes(notes, needed)`: greedy note selection — single note first, then smallest qualifying pair. Returns `null` if no combination covers `needed`.
+    - `buildDummyTransferInput(assetId)`: builds a zero-value dummy `TransferInputNote` for the second slot in single-note transfers (circuit-level dummy exemption).
+    - `generateDisclosureProof`, `deriveBabyJubjubKeypair(substrateSigningKey)`, `decryptDisclosure(publicSignals, auditorSk)`: selective disclosure utilities for auditor workflows.
+    - Types: `ZkNote`, `ScanCommitment`, `DecryptedMemo`, `MerkleTreeInfo`, `ShieldParams`, `UnshieldParams`, `PrivateTransferParams`, `PrivateTransferInput`, `PrivateTransferOutput`, `ShieldBatchParams`, `ClaimShieldedFeesParams`, `NoteInput`, `DisclosureFlags`.
 
 - **New utility functions in `utils/`:**
-  - `bjj.ts` — `recoverOwnerPkPoint(ownerPkAx)`: recovers the Baby JubJub `[Ax, Ay]` point from the Ax coordinate alone using the Tonelli-Shanks modular square-root algorithm and the twisted Edwards curve equation. Needed for stealth key derivation when only Ax is stored on-chain.
-  - `blinding.ts` — `randomBlinding()`: generates a cryptographically random Poseidon blinding factor in `[1, BN254_R)` using `crypto.getRandomValues`.
-  - `crypto-constants.ts` — exports `BABYJUB_SUBORDER` and `BN254_R` BN254 field and subgroup order constants.
-  - `encoding.ts` — `toBase64(buf)` / `fromBase64(b64)`: pure browser/Node base-64 encode/decode without external dependencies.
-  - `stealth.ts` — `deriveStealthOwnerPk(sharedSecret, ownerPkBigint, ownerPkPoint)`: derives the per-note stealth public key for a recipient note (sender side). `deriveStealthSk(sharedSecret, ownerPkBigint, spendingKey)`: derives the stealth spending key for a received note (recipient side). Scheme: `HKDF-SHA256(sharedSecret, salt=ownerPk_LE, info="orbinum-stealth-v1") % BABYJUB_SUBORDER`.
+    - `bjj.ts` — `recoverOwnerPkPoint(ownerPkAx)`: recovers the Baby JubJub `[Ax, Ay]` point from the Ax coordinate alone using the Tonelli-Shanks modular square-root algorithm and the twisted Edwards curve equation. Needed for stealth key derivation when only Ax is stored on-chain.
+    - `blinding.ts` — `randomBlinding()`: generates a cryptographically random Poseidon blinding factor in `[1, BN254_R)` using `crypto.getRandomValues`.
+    - `crypto-constants.ts` — exports `BABYJUB_SUBORDER` and `BN254_R` BN254 field and subgroup order constants.
+    - `encoding.ts` — `toBase64(buf)` / `fromBase64(b64)`: pure browser/Node base-64 encode/decode without external dependencies.
+    - `stealth.ts` — `deriveStealthOwnerPk(sharedSecret, ownerPkBigint, ownerPkPoint)`: derives the per-note stealth public key for a recipient note (sender side). `deriveStealthSk(sharedSecret, ownerPkBigint, spendingKey)`: derives the stealth spending key for a received note (recipient side). Scheme: `HKDF-SHA256(sharedSecret, salt=ownerPk_LE, info="orbinum-stealth-v1") % BABYJUB_SUBORDER`.
 
 - **New tests** for all added modules: `proof-generator/` (unshield, transfer, merkle, fee-claim), `shielded-pool/` (coinSelection, disclosure, helpers, stealth-integration), and `vault/` (noteOps, errors).
 
@@ -601,14 +892,14 @@ Privacy alignment with Zcash's visibility model: the shielded pool's boundary is
 - **`EvmExplorer`**: full EVM block and transaction explorer client — wraps `eth_getBlockByNumber`, `eth_getTransactionByHash`, `eth_getLogs`, and related calls. Exposes typed responses: `EvmBlock`, `EvmTransaction`, `EvmAddressInfo`, `EvmTxSummary`, `EvmLog`, `TokenInfo`, `TokenTransfer`.
 - **`ZkVerifierModule`**: typed module for querying the on-chain ZK verifier — circuit version info, VK hashes, version stats, and historical versions. Types: `ZkVerifierCircuitVersionInfo`, `ZkVerifierVkHash`, `ZkVerifierVersionStats`, `ZkVerifierHistoricalVersion`.
 - **`SubstrateClient`** — heavily expanded:
-  - `blocks$`: observable stream of new blocks from the underlying PAPI client.
-  - `getBlockHeader(at?)`: raw block header retrieval.
-  - `getBlockHash(blockNumber)`: `chain_getBlockHash` with zero-hash null-guard.
-  - `getBlock(blockHash)`: full block info including timestamp and author decoded from digest logs.
-  - `queryBlockEvents(blockHash)`: decodes `System.Events` storage at a given block into typed `EventRecord[]`.
-  - `_toEventRecords` / `_buildDataProxy`: internal static helpers for converting raw SCALE-decoded events to the `EventRecord` shape used by consumers.
-  - `DynamicBuilder` and `ExtrinsicDecoder` type re-exports for advanced usage.
-  - New public types: `EventRecord`, `EventPhase`, `EventData`, `RawBlockHeader`, `RawBlock`, `BlockInfo`.
+    - `blocks$`: observable stream of new blocks from the underlying PAPI client.
+    - `getBlockHeader(at?)`: raw block header retrieval.
+    - `getBlockHash(blockNumber)`: `chain_getBlockHash` with zero-hash null-guard.
+    - `getBlock(blockHash)`: full block info including timestamp and author decoded from digest logs.
+    - `queryBlockEvents(blockHash)`: decodes `System.Events` storage at a given block into typed `EventRecord[]`.
+    - `_toEventRecords` / `_buildDataProxy`: internal static helpers for converting raw SCALE-decoded events to the `EventRecord` shape used by consumers.
+    - `DynamicBuilder` and `ExtrinsicDecoder` type re-exports for advanced usage.
+    - New public types: `EventRecord`, `EventPhase`, `EventData`, `RawBlockHeader`, `RawBlock`, `BlockInfo`.
 - **`extrinsic/`** module: `mapExtrinsicArgs` and `mapZkEventData` helpers for decoding raw pallet call data and events from the indexer or block scanner. Exports a comprehensive set of decoded arg and event shapes (`DecodedShieldArgs`, `DecodedUnshieldArgs`, `DecodedEthereumTransactArgs`, `ShieldedEventData`, `TransferEventData`, etc.).
 - **`IndexerClient`** — fully revised with paginated REST endpoints. New types: `IndexerClientConfig`, `PaginatedResult<T>`, `IndexedBlock`, `IndexedExtrinsic`, `IndexedEvmTx`, `IndexerStats`, `ShieldedAddressEvent`, `ShieldedCommitment`, `SpentNullifier`, `PrivateTransfer`, `Unshield`, `MerkleRoot`, `NullifierStatusResult`.
 - **`AccountMappingModule`** — refactored API with additional high-level helpers. New types: `ChainLink`, `PrivateLink`, `AccountMetadata`, `AliasInfo`, `AliasFullIdentity`, `ListingInfo`, `AccountListing`, `SupportedChain`.
@@ -642,13 +933,13 @@ Privacy alignment with Zcash's visibility model: the shielded pool's boundary is
 - **`formatORB(raw, precision?)`**: convenience wrapper for `formatBalance` with 18 decimals and `'ORB'` symbol.
 - **`FormatOptions`**: exported interface for `formatBalance` options.
 - **`types/pallet-extrinsics/`**: per-pallet extrinsic argument types, replacing the previous flat `pallet-args.ts` and `pallet-extrinsics.ts`. Organised as a directory with one file per pallet:
-  - `shielded-pool.ts` — 15 extrinsic call arg types (`ShieldArgs`, `ShieldBatchArgs`, `PrivateTransferArgs`, `UnshieldArgs`, `SetAuditPolicyArgs`, `RequestDisclosureArgs`, `DiscloseArgs`, `RejectDisclosureArgs`, `BatchSubmitDisclosureProofsArgs`, `RegisterAssetArgs`, `VerifyAssetArgs`, `UnverifyAssetArgs`, `PruneExpiredRequestArgs`, `RevokeDisclosureRecordArgs`) plus supporting types (`Bytes32`, `DisclosurePublicSignals`, `Auditor`, `DisclosureCondition`, `BatchDisclosureSubmission`, `ShieldOperation`) and discriminated union `ShieldedPoolCall`.
-  - `zk-verifier.ts` — `CircuitId` const object + type, `VkEntry`, 5 extrinsic arg types (`RegisterVerificationKeyArgs`, `SetActiveVersionArgs`, `RemoveVerificationKeyArgs`, `VerifyProofArgs`, `BatchRegisterVerificationKeysArgs`) and discriminated union `ZkVerifierCall`.
-  - `account-mapping.ts` — `SignatureScheme` type, 14 extrinsic arg types (`RegisterAliasArgs`, `TransferAliasArgs`, `PutAliasOnSaleArgs`, `BuyAliasArgs`, `AddChainLinkArgs`, `RemoveChainLinkArgs`, `SetAccountMetadataArgs`, `AddSupportedChainArgs`, `RemoveSupportedChainArgs`, `DispatchAsLinkedAccountArgs`, `RegisterPrivateLinkArgs`, `RemovePrivateLinkArgs`, `RevealPrivateLinkArgs`, `DispatchAsPrivateLinkArgs`) and discriminated union `AccountMappingCall`.
+    - `shielded-pool.ts` — 15 extrinsic call arg types (`ShieldArgs`, `ShieldBatchArgs`, `PrivateTransferArgs`, `UnshieldArgs`, `SetAuditPolicyArgs`, `RequestDisclosureArgs`, `DiscloseArgs`, `RejectDisclosureArgs`, `BatchSubmitDisclosureProofsArgs`, `RegisterAssetArgs`, `VerifyAssetArgs`, `UnverifyAssetArgs`, `PruneExpiredRequestArgs`, `RevokeDisclosureRecordArgs`) plus supporting types (`Bytes32`, `DisclosurePublicSignals`, `Auditor`, `DisclosureCondition`, `BatchDisclosureSubmission`, `ShieldOperation`) and discriminated union `ShieldedPoolCall`.
+    - `zk-verifier.ts` — `CircuitId` const object + type, `VkEntry`, 5 extrinsic arg types (`RegisterVerificationKeyArgs`, `SetActiveVersionArgs`, `RemoveVerificationKeyArgs`, `VerifyProofArgs`, `BatchRegisterVerificationKeysArgs`) and discriminated union `ZkVerifierCall`.
+    - `account-mapping.ts` — `SignatureScheme` type, 14 extrinsic arg types (`RegisterAliasArgs`, `TransferAliasArgs`, `PutAliasOnSaleArgs`, `BuyAliasArgs`, `AddChainLinkArgs`, `RemoveChainLinkArgs`, `SetAccountMetadataArgs`, `AddSupportedChainArgs`, `RemoveSupportedChainArgs`, `DispatchAsLinkedAccountArgs`, `RegisterPrivateLinkArgs`, `RemovePrivateLinkArgs`, `RevealPrivateLinkArgs`, `DispatchAsPrivateLinkArgs`) and discriminated union `AccountMappingCall`.
 - **`types/pallet-events/`**: per-pallet event types, replacing the previous flat `pallet-events.ts`. Sourced directly from the Rust pallet `#[pallet::event]` definitions:
-  - `shielded-pool.ts` — 13 event types covering the full lifecycle: `ShieldedEvent`, `PrivateTransferEvent`, `UnshieldedEvent`, `MerkleRootUpdatedEvent`, `AuditPolicySetEvent`, `DisclosedEvent`, `DisclosureRequestedEvent`, `DisclosureRejectedEvent`, `DisclosureRequestExpiredEvent`, `DisclosureRecordRevokedEvent`, `AssetRegisteredEvent`, `AssetVerifiedEvent`, `AssetUnverifiedEvent` and discriminated union `ShieldedPoolEvent`.
-  - `zk-verifier.ts` — 6 event types: `VerificationKeyRegisteredEvent`, `ActiveVersionSetEvent`, `VerificationKeyRemovedEvent`, `ProofVerifiedEvent`, `ProofVerificationFailedEvent`, `BatchVerificationKeysRegisteredEvent` and discriminated union `ZkVerifierEvent`.
-  - `account-mapping.ts` — 18 event types covering alias lifecycle, chain links, metadata, governance, private links and proxy dispatch, and discriminated union `AccountMappingEvent`.
+    - `shielded-pool.ts` — 13 event types covering the full lifecycle: `ShieldedEvent`, `PrivateTransferEvent`, `UnshieldedEvent`, `MerkleRootUpdatedEvent`, `AuditPolicySetEvent`, `DisclosedEvent`, `DisclosureRequestedEvent`, `DisclosureRejectedEvent`, `DisclosureRequestExpiredEvent`, `DisclosureRecordRevokedEvent`, `AssetRegisteredEvent`, `AssetVerifiedEvent`, `AssetUnverifiedEvent` and discriminated union `ShieldedPoolEvent`.
+    - `zk-verifier.ts` — 6 event types: `VerificationKeyRegisteredEvent`, `ActiveVersionSetEvent`, `VerificationKeyRemovedEvent`, `ProofVerifiedEvent`, `ProofVerificationFailedEvent`, `BatchVerificationKeysRegisteredEvent` and discriminated union `ZkVerifierEvent`.
+    - `account-mapping.ts` — 18 event types covering alias lifecycle, chain links, metadata, governance, private links and proxy dispatch, and discriminated union `AccountMappingEvent`.
 
 ### Removed
 

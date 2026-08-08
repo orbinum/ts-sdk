@@ -1,0 +1,21 @@
+{
+  "name": "orbinum-node-wallet-example",
+  "private": true,
+  "type": "module",
+  "description": "A working Orbinum wallet in Node, importing only published entry points.",
+  "scripts": {
+    "start": "tsx wallet.ts",
+    "portability": "tsx portability.ts",
+    "spend": "tsx spend.ts"
+  },
+  "dependencies": {
+    "@orbinum/sdk": "file:../..",
+    "polkadot-api": "^2.1.3",
+    "@polkadot/util-crypto": "^14.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "@types/node": "^22.10.2"
+  }
+}

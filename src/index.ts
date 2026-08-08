@@ -1,165 +1,79 @@
-// Public SDK exports.
-// This file defines the public API surface exposed to SDK consumers.
+/**
+ * `@orbinum/sdk` — the public API.
+ *
+ * The package is four layers, and this file re-exports them in that order.
+ * Where a symbol sits tells you what it needs:
+ *
+ * ```
+ * foundation/  encoding, crypto, formatting     no dependencies of its own
+ * protocol/    what a note IS                   pure and offline, no chain
+ * chain/       talking to a node                needs a connection
+ * wallet/      using notes                      needs both
+ * ```
+ *
+ * Two capabilities are NOT here, because each needs something a platform
+ * supplies rather than the SDK:
+ *
+ *   - `@orbinum/sdk/worker`             the decryption kernel, for a Web Worker
+ *   - `@orbinum/sdk/storage/indexeddb`  browser storage adapters
+ *
+ * Everything below is environment-agnostic — a browser tab, an extension
+ * service worker, React Native, Node and Cloudflare Workers all run it. The
+ * README lists the two globals a mobile runtime has to polyfill first.
+ */
 
-// ─── Main client ─────────────────────────────────────────────────────────────
-export { OrbinumClient } from './client/OrbinumClient';
-export { OrbinumClientProvider } from './client/OrbinumClientProvider';
+// ─── FOUNDATION ──────────────────────────────────────────────────────────────
+// Encoding, crypto primitives and formatting. Nothing here depends on a layer
+// above it, which is what makes this the safe place for anything shared.
 
-// ─── Client types ────────────────────────────────────────────────────────────
-export type { OrbinumClientConfig, TxResult } from './client/types';
-export type {
-    ConnectionStatus,
-    StatusChangeEvent,
-    StatusListener,
-    ClientProviderConfig,
-} from './client/OrbinumClientProvider';
+export * from './foundation/index';
 
-// ─── Core modules (for direct import / advanced usage) ───────────────────────
-export { SubstrateClient } from './substrate/index';
-export type { DynamicBuilder, ExtrinsicDecoder } from './substrate/index';
-export { EvmClient } from './evm/index';
-export { EvmExplorer } from './evm-explorer/index';
-export type {
-    ChainInfo,
-    SystemHealth,
-    EventRecord,
-    EventPhase,
-    EventData,
-    RawBlockHeader,
-    RawBlock,
-    BlockInfo,
-} from './substrate/index';
+// ─── PROTOCOL ────────────────────────────────────────────────────────────────
+// What a note is: how one is built, sealed, found and selected for a spend.
+// Pure and offline — a wallet does all of this with no node in reach.
+
+export * from './protocol/index';
+
+// Key derivation. The spending key comes from a wallet signature and is bound
+// to (chainId, account); see SPENDING_KEY_WARNING before deriving one.
+export * from './protocol/keys/index';
+
+// Proving. `ProofOptions.singleThread` is the one worth reading about — a
+// phone that spawns a worker per core runs out of memory before it proves.
+export * from './protocol/proving/index';
+
+// Pinning a proof to the circuit version its note was created under.
+// Fail-closed: a rotated verifying key must not orphan older notes.
+export * from './protocol/circuit-version/index';
+
+// ─── CHAIN ───────────────────────────────────────────────────────────────────
+// Everything that needs a connection: the clients, the custom RPC endpoints,
+// and the pallets that carry notes on chain.
+
+export * from './chain/client/index';
+export * from './chain/substrate/index';
+export * from './chain/rpc/index';
+export * from './chain/pallet/shielded-pool/index';
+export * from './chain/pallet/zk-verifier/index';
+export * from './chain/pallet/relayer/index';
+export { toTxResult, signAndSubmitTx } from './chain/tx';
+export type { UnsafeTxOptions } from './chain/tx';
+
+// The EVM side is named rather than splatted: its `precompiles/` barrel also
+// carries the ABI encoder/decoder it uses internally, and a consumer has no
+// reason to reach for `decodeUint` or a raw selector constant.
+export { EvmClient, EvmExplorer } from './chain/evm/index';
 export type {
     EvmBlock,
     EvmTransaction,
     EvmAddressInfo,
     EvmTxSummary,
     EvmLog,
+    EvmSigner,
+    EvmTxRequest,
     TokenInfo,
     TokenTransfer,
-} from './evm-explorer/index';
-
-// ─── rpc-v2 ──────────────────────────────────────────────────────────────────
-export { PrivacyModule } from './rpc-v2/index';
-export type {
-    RpcV2MerkleProof,
-    PrivacyMerkleProof,
-    RpcV2NullifierStatus,
-    RpcV2PoolAssetBalance,
-    RpcV2PoolStats,
-} from './rpc-v2/index';
-export { ZkVerifierModule } from './zk-verifier/index';
-export type {
-    ZkVerifierCircuitVersionInfo,
-    ZkVerifierVkHash,
-    ZkVerifierVersionStats,
-    ZkVerifierHistoricalVersion,
-} from './zk-verifier/index';
-
-// ─── Shielded pool ───────────────────────────────────────────────────────────
-export {
-    NoteBuilder,
-    EncryptedMemo,
-    ENCRYPTED_MEMO_SIZE,
-    ShieldedPoolModule,
-    tryDecryptNote,
-    tryDecryptNoteVerbose,
-    computeNullifier,
-    computeNoteCommitment,
-    deriveViewTag,
-    deriveSelfEphSk,
-    selfEphWindow,
-    derivePairwiseSharedSecret,
-    derivePairwiseEphSk,
-    pairwiseEphWindow,
-    selectNotes,
-    treeIdOf,
-    buildDummyTransferInput,
-    createNoteDisclosureKey,
-    decodeNoteDisclosureKey,
-    CircuitVersionResolver,
-} from './shielded-pool/index';
-export type { NoteDisclosure } from './shielded-pool/protocol/NoteDisclosure';
-export type {
-    ResolvedSpendVersion,
-    TryDecryptOptions,
-    SelfEphWindowEntry,
-    PairwiseEphWindowEntry,
-} from './shielded-pool/index';
-export { CURRENT_CIRCUIT_VERSION } from './shielded-pool/protocol/types';
-export { BN254_R, BABYJUB_SUBORDER } from './utils/crypto-constants';
-export { randomBlinding } from './utils/blinding';
-
-// ─── Privacy keys ─────────────────────────────────────────────────────────────
-export {
-    PrivacyKeyManager,
-    deriveViewingSecretKey,
-    deriveViewingPublicKey,
-    deriveOwnerPk,
-    deriveSpendingKeyTypedData,
-    deriveSpendingKeyMessageV2,
-    deriveSpendingKeyFromSignature,
-    deriveMasterKeyBytes,
-    SPENDING_KEY_VERIFYING_CONTRACT,
-    SPENDING_KEY_WARNING,
-    MIN_SIGNATURE_BYTES,
-    canonicalAccountId,
-} from './privacy-keys/index';
-export type { SpendingKeyTypedData } from './privacy-keys/index';
-
-// ─── Vault ────────────────────────────────────────────────────────────────────
-export {
-    deriveVaultKey,
-    deriveVaultBlindKey,
-    blindTag,
-    encryptJson,
-    decryptJson,
-    vaultReplacer,
-    vaultReviver,
-    VaultLockedError,
-    applyNoteStatus,
-    encryptNote,
-    decryptNoteRecord,
-    noteBlindTag,
-} from './vault/index';
-export type { EncryptedNoteRecord, NoteStatusUpdate } from './vault/index';
-
-// ─── Proof generator ─────────────────────────────────────────────────────────
-export {
-    generateUnshieldProof,
-    generateTransferProof,
-    generateFeeClaimProof,
-    CircuitType,
-    WebArtifactProvider,
-    shouldProveSingleThreaded,
-} from './proof-generator';
-export type {
-    ArtifactProvider,
-    ProofResult,
-    ProofOptions,
-    UnshieldProofInputs,
-    TransferInputNote,
-    TransferOutputNote,
-    PrivateTransferProofInputs,
-    FeeClaimProofInputs,
-} from './proof-generator';
-export type {
-    MerkleTreeInfo,
-    ShieldParams,
-    ShieldBatchItem,
-    ShieldBatchParams,
-    ClaimShieldedFeesParams,
-    UnshieldParams,
-    PrivateTransferInput,
-    PrivateTransferOutput,
-    PrivateTransferParams,
-    NoteInput,
-    ZkNote,
-    DecryptedMemo,
-    ScanCommitment,
-} from './shielded-pool/protocol/types';
-
-// ─── Precompiles ─────────────────────────────────────────────────────────────
+} from './chain/evm/index';
 export {
     ShieldedPoolPrecompile,
     CryptoPrecompiles,
@@ -167,171 +81,37 @@ export {
     KNOWN_PRECOMPILES,
     getPrecompileLabel,
     decodePrecompileCalldata,
-} from './precompiles/index';
+} from './chain/evm/precompiles/index';
 export type {
-    EvmTxRequest,
-    EvmSigner,
     KnownPrecompileInfo,
     DecodedPrecompile,
-} from './precompiles/index';
+    PrecompileMethod,
+} from './chain/evm/precompiles/index';
 
-// ─── Relayer ─────────────────────────────────────────────────────────────────
-export { RelayerStatusModule } from './relayer/index';
-export type { RelayerInfo } from './relayer/index';
+// ─── WALLET ──────────────────────────────────────────────────────────────────
+// Using notes: storing them encrypted, finding one's own, and spending them.
 
-// ─── Runtime event types ─────────────────────────────────────────────────────
+// Vault — encrypted note storage, layered crypto → session → storage → notes →
+// store. See `wallet/vault/index.ts` for what each layer may depend on.
+export * from './wallet/vault/index';
 
-// pallet-shielded-pool events
-export type {
-    ShieldedEvent,
-    NullifiersSpentEvent,
-    CommitmentsInsertedEvent,
-    UnshieldedEvent,
-    MerkleRootUpdatedEvent,
-    AssetRegisteredEvent,
-    AssetVerifiedEvent,
-    AssetUnverifiedEvent,
-    ShieldedPoolEvent,
-} from './shielded-pool/pallet/events';
+// Scanning. `NullifierSource` has no per-nullifier lookup, deliberately: the
+// wallet downloads the spent set and intersects locally, so every request the
+// server sees is identical regardless of which notes the caller holds.
+export * from './wallet/scanner/index';
 
-// pallet-zk-verifier events
-export type {
-    VerificationKeyRegisteredEvent,
-    ActiveVersionSetEvent,
-    VerificationKeyRemovedEvent,
-    ProofVerifiedEvent,
-    ProofVerificationFailedEvent,
-    BatchVerificationKeysRegisteredEvent,
-    ZkVerifierEvent,
-} from './zk-verifier/types/pallet-events';
+// Spending — plans, guards and the three operations. Each takes a `submit`
+// callback: the SDK owns protocol, the host owns transport.
+export * from './wallet/ops/index';
 
-// ─── Runtime extrinsic arg types ─────────────────────────────────────────────
+// Identity persistence — caching a derived identity so a wallet does not
+// re-sign on every launch, and naming the vault it belongs to.
+export * from './wallet/identity/index';
 
-// pallet-shielded-pool
-export type {
-    Bytes32,
-    ShieldOperation,
-    ShieldArgs,
-    ShieldBatchArgs,
-    RawTransferInput,
-    RawTransferOutput,
-    PrivateTransferArgs,
-    UnshieldArgs,
-    RegisterAssetArgs,
-    VerifyAssetArgs,
-    UnverifyAssetArgs,
-    ShieldedPoolCall,
-} from './shielded-pool/pallet/extrinsics';
+// The decryption pool's contract. The kernel itself lives in the `/worker`
+// subpath, because the Worker is one only a host's bundler can resolve.
+export * from './wallet/worker/index';
 
-// pallet-zk-verifier
-export type {
-    CircuitId as CircuitIdType,
-    VkEntry,
-    RegisterVerificationKeyArgs,
-    SetActiveVersionArgs,
-    RemoveVerificationKeyArgs,
-    VerifyProofArgs,
-    BatchRegisterVerificationKeysArgs,
-    ZkVerifierCall,
-} from './zk-verifier/types/pallet-extrinsics';
-export { CircuitId } from './zk-verifier/types/pallet-extrinsics';
-
-// ─── Utilities ───────────────────────────────────────────────────────────────
-export { formatBalance, formatORB } from './utils/format';
-export type { FormatOptions } from './utils/format';
-export { shortHash, truncateMiddle } from './utils/string';
-export { toHex, fromHex, ensureHexPrefix, hexToNumber, hexToBigint } from './utils/hex';
-export { toTxResult, type UnsafeTxOptions } from './utils/tx';
-export { toBase64, fromBase64 } from './utils/encoding';
-export { deriveStealthOwnerPk, deriveStealthSk } from './utils/stealth';
-export { recoverOwnerPkPoint } from './utils/bjj';
-export {
-    bigintTo32Le,
-    bigintTo32Be,
-    bigintTo32LeArr,
-    bytesToBigintLE,
-    computePathIndices,
-    leHexToBigint,
-} from './utils/bytes';
-export {
-    normalizeEvmAddress,
-    isSs58,
-    isEvmAddress,
-    evmAddressToAccountId,
-    evmToImplicitSubstrate,
-    evmToMappedAccountHex,
-    isImplicitEvmAccount,
-    implicitSubstrateToEvm,
-    isSubstrateAddress,
-    isUnifiedAddress,
-    substrateToEvm,
-    evmToSubstrate,
-    accountIdHexToSs58,
-    substrateSs58ToAccountIdHex,
-    addressToAccountIdHex,
-} from './utils/address';
-
-// ─── Extrinsic / event arg mappers ───────────────────────────────────────────
-export { mapExtrinsicArgs, mapZkEventData } from './extrinsic/index';
-
-// ─── Decoded pallet arg & event shapes (explorer / read path) ────────────────
-export type {
-    DecodedShieldArgs,
-    DecodedShieldBatchOperation,
-    DecodedShieldBatchArgs,
-    DecodedPrivateTransferArgs,
-    DecodedUnshieldArgs,
-    DecodedTransferArgs,
-    DecodedTransferKeepAliveArgs,
-    DecodedTransferAllArgs,
-    DecodedBatchArgs,
-    DecodedSudoArgs,
-    DecodedRemarkArgs,
-    DecodedEthereumTransactArgs,
-    DecodedEvmCallArgs,
-} from './extrinsic/decoded-args';
-
-export type {
-    ShieldedEventData,
-    NullifiersSpentEventData,
-    CommitmentsInsertedEventData,
-    UnshieldedEventData,
-    MerkleRootUpdatedData,
-    TransferEventData,
-    EndowedEventData,
-    ReservedEventData,
-    EvmExitReason,
-    EvmExecutedData,
-    EthereumExecutedData,
-    DispatchInfo,
-    DispatchError,
-    ExtrinsicSuccessData,
-    ExtrinsicFailedData,
-} from './extrinsic/decoded-events';
-
-// ─── Substrate SCALE primitives (re-exported for SDK consumers) ──────────────
-export {
-    Blake2256,
-    AccountId,
-    u128,
-    u64,
-    Storage,
-    Keccak256,
-} from '@polkadot-api/substrate-bindings';
-
-// ─── Base encoding utilities ─────────────────────────────────────────────────
-export { base58 } from '@scure/base';
-
-// ─── Re-export PAPI types used in public APIs ────────────────────────────────
-export type { PolkadotSigner } from 'polkadot-api';
-// Signers for Node.js (raw keypair testing)
-export { getPolkadotSigner } from 'polkadot-api/signer';
-// Signer bridge to @polkadot/extension-dapp (browser)
-export {
-    getPolkadotSignerFromPjs,
-    connectInjectedExtension,
-    getInjectedExtensions,
-} from 'polkadot-api/pjs-signer';
-export type { SignPayload, SignRaw } from 'polkadot-api/pjs-signer';
-// Ss58 address decoding
-export { getSs58AddressInfo } from 'polkadot-api';
+// The assembled wallet. Use the pieces above directly when a host needs a
+// different shape — this is the shortest path, not the only one.
+export * from './wallet/index';
