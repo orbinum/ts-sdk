@@ -18,3 +18,10 @@ export {
     QR_PAGE_MAX_CHARS,
 } from './noteTransfer';
 export type { NoteTransferEntry, NoteTransferPayload } from './noteTransfer';
+export {
+    encodeNoteBackup,
+    decodeNoteBackup,
+    importNotesFromBackup,
+    NOTE_BACKUP_VERSION,
+} from './noteBackup';
+export type { NoteBackup, NoteBackupEntry, BackupImportKeys } from './noteBackup';

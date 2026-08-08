@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-08
+
+**Closed note backups — move notes between devices without re-scanning.** A
+wallet can now export its notes to a plain JSON file and recover them on another
+device, without walking the whole pool. The backup carries only public data
+(commitment + encrypted memo), never a spending key: ownership is proven by
+DECRYPTING each memo with the importer's own viewing key. A note that decrypts is
+theirs and comes back fully spendable (the stealth spending key is derived from
+their identity); a note that does not decrypt belongs to someone else and is
+skipped. It is not a chain scan — only the backup's own memos are tried.
+
+### Added
+
+- `encodeNoteBackup(notes)` / `decodeNoteBackup(json)` — the closed `NoteBackup`
+  format (`{ v, ts, notes: [{ commitmentHex, encryptedMemo, leafIndex? }] }`).
+  Public data only; no keys travel.
+- `importNotesFromBackup(entries, keys)` — decrypts each entry's memo with the
+  importer's `{ viewingSecretKey, spendingKey, ownerPk }` and returns the notes
+  that belong to them as spendable `ZkNote`s. Foreign notes are silently skipped.
+- Types `NoteBackup`, `NoteBackupEntry`, `BackupImportKeys`.
+
+### Notes
+
+- The Merkle proof and `leafIndex` are not needed to import — a spend re-fetches
+  the proof by commitment, so an imported note is spendable as soon as its
+  commitment is still on chain.
+- Complements the existing QR note-transfer path (`encodeNoteTransferPages`),
+  which remains for scanner-based device-to-device transfer.
+
 ## [1.0.1] - 2026-08-08
 
 **Privacy addresses gain a checksum (`orbpriv2`).** A privacy address travels by
