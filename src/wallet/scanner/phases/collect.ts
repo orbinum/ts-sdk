@@ -2,9 +2,9 @@
  * Phase 1 — walk the hint feed and trial-decrypt every memo against the wallet's
  * keys.
  *
- * Pure collection: no vault writes and no spent-status resolution, both of which
- * are later phases. Nothing here persists, so the note list a user is looking at
- * stays stable for the whole scan.
+ * Pure collection: this phase itself writes nothing — persistence happens only
+ * through the injected `onPage`/`onBatchDone` callbacks, so the caller decides
+ * what (if anything) is checkpointed while the scan runs.
  *
  * Transport, in order of preference:
  *   1. Sealed chunks — the immutable bulk of the feed, digest-addressed and
@@ -104,6 +104,15 @@ export interface CollectScanEntriesParams {
      */
     onPage?: ((entries: Array<{ note: ZkNote; isNew: boolean }>) => Promise<void>) | undefined;
     /**
+     * Awaited after each fully processed chunk/page — AFTER `onPage`, so the
+     * batch's notes are already in the caller's hands — with the highest valid
+     * leaf seen so far. Fires for every batch, including ones with no owned
+     * notes: that is the common case, and the checkpoint must advance past
+     * other people's leaves too. Lets callers persist the scan cursor
+     * incrementally so an aborted scan resumes instead of restarting.
+     */
+    onBatchDone?: ((maxLeafIndex: number | undefined) => Promise<void>) | undefined;
+    /**
      * Bounds `outcome.onChainHexes` to commitments the wallet actually holds.
      * Pass the pre-scan snapshot, since `existingHexes` grows during the scan.
      * Defaults to `existingHexes`, which is correct but lets mid-scan
@@ -123,6 +132,7 @@ interface ScanContext {
     onProgress?: ((p: ScanProgress) => void) | undefined;
     signal?: AbortSignal | undefined;
     onPage?: ((entries: Array<{ note: ZkNote; isNew: boolean }>) => Promise<void>) | undefined;
+    onBatchDone?: ((maxLeafIndex: number | undefined) => Promise<void>) | undefined;
 }
 
 /**
@@ -204,6 +214,9 @@ async function processHints(ctx: ScanContext, hints: ScanHint[], total: number) 
     // Hand this batch's notes over before reporting progress, so the count the
     // caller shows is backed by notes it can already render.
     if (pageEntries.length > 0) await ctx.onPage?.(pageEntries);
+    // Notes first, cursor second: a checkpoint that advanced past unsaved
+    // notes would make the next incremental scan skip them forever.
+    await ctx.onBatchDone?.(outcome.maxLeafIndex);
     ctx.onProgress?.({ scanned: outcome.scanned, total, found: outcome.found });
 }
 
@@ -273,6 +286,7 @@ async function processSealedChunks(
 export async function collectScanEntries(params: CollectScanEntriesParams): Promise<ScanOutcome> {
     const { source, pool, keys, existingHexes, sinceLeafIndex, onProgress, signal, onPage } =
         params;
+    const { onBatchDone } = params;
     if (signal?.aborted) throw scanAbortError();
 
     const outcome: ScanOutcome = {
@@ -299,6 +313,7 @@ export async function collectScanEntries(params: CollectScanEntriesParams): Prom
         onProgress,
         signal,
         onPage,
+        onBatchDone,
     };
 
     // ── Phase A: sealed chunks (immutable bulk, cache-friendly) ───────────────

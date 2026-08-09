@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-08
+
+**Scans now checkpoint per chunk — aborting no longer loses the work.**
+Previously a scan persisted everything at the end: notes in phase 3, the cursor
+in phase 4. Closing the tab (or aborting) at 90% of a long rescan threw away
+every decrypted batch, and the next scan restarted from the old cursor. Now each
+processed chunk/page saves its NEW notes and then advances the cursor, so a
+rescan resumes right after the last completed batch. Newly discovered notes also
+appear in the vault progressively while the scan runs instead of all at once at
+the end.
+
+### Added
+
+- `onBatchDone` callback on `collectScanEntries` — awaited after each fully
+  processed chunk/page (after `onPage`) with the highest valid leaf seen so far.
+- `openSpentSet` in the spent-set phase: syncs the local nullifier cache once
+  (chunks + a consistent tail snapshot) and returns a reusable handle for local
+  membership queries. `resolveSpentSet` is now a thin wrapper over it.
+
+### Changed
+
+- `runScan` wires the checkpoints itself: per batch it saves the new notes with
+  spent status resolved from the locally synced nullifier set (opened lazily on
+  the first batch that finds a note — an incremental tick that finds nothing
+  pays no nullifier sync), then persists the cursor. Existing vault notes are
+  never rewritten mid-scan — a batch-save without the authoritative spent map
+  could downgrade a spent note to unspent; phase 3 remains their only writer.
+- Abort remains write-safe: the signal is re-checked immediately before every
+  mid-scan write, so an identity-switch abort still prevents notes decrypted
+  under one account's keys from landing in another account's vault.
+
 ## [1.2.0] - 2026-08-08
 
 **Payment slips — a sender hands the recipient their note, no scan required.**
