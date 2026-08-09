@@ -80,6 +80,13 @@ export type NoteInput = {
      * generates its own coordinated ephSk). Default: random.
      */
     ephSkOverride?: Uint8Array;
+    /**
+     * Sender's 32-byte outgoing viewing key (ovk). When present on the stealth
+     * path, `build()` seals the memo's shared secret into a 56-byte `ovkBlob` so
+     * the sender can recover this transfer after a cold restore. Absent → no blob
+     * (the app applies the ⊥ default at submit time, never the SDK).
+     */
+    outgoingViewingKey?: Uint8Array;
 };
 
 /**
@@ -135,4 +142,38 @@ export type ZkNote = {
     memo: number[];
     /** Counterparty BabyJubJub Ax coordinate. Zero for shield/unshield notes. */
     counterpartyPk: bigint;
+    /**
+     * 56-byte outgoing-viewing-key blob (per-note in the domain object; becomes a
+     * per-transaction field at submit, see the OVK plan §4.1). Present only on a
+     * stealth recipient note built with an `outgoingViewingKey`. It wraps the
+     * memo's shared secret under the sender's ovk so the sender can recover the
+     * transfer; the recipient never needs it. Not persisted in the vault.
+     */
+    ovkBlob?: number[];
+};
+
+/**
+ * A sender's record of a note they SENT, recovered via the OVK blob. Not a
+ * spendable note: it deliberately carries no `spendingKey`, no `nullifier`, no
+ * `spent` flag — the sender does not own the recipient's note, only the memory of
+ * having sent it. Used to rebuild the outgoing history after a cold restore.
+ */
+export type OutgoingNoteRecord = {
+    /** 0x-prefixed 32-byte LE commitment hex of the recipient output. */
+    commitmentHex: string;
+    /** Global Merkle leaf index, when the hint carried one. */
+    leafIndex?: number;
+    /** Amount sent, in planck. */
+    value: bigint;
+    /** Asset ID of the sent note. */
+    assetId: bigint;
+    /** The recipient's one-time stealth owner public key (BJJ Ax). */
+    recipientStealthPk: bigint;
+    /** Blinding scalar of the recipient output. With value/assetId/stealthPk it
+     *  recomputes the commitment — needed to rebuild a payment slip for the note. */
+    blinding: bigint;
+    /** Counterparty BabyJubJub Ax coordinate stamped in the memo. */
+    counterpartyPk: bigint;
+    /** Circuit version the sent note was created under. */
+    circuitVersion: number;
 };

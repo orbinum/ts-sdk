@@ -5,7 +5,10 @@ import {
     deriveViewingSecretKey,
     deriveViewingPublicKey,
     deriveOwnerPk,
+    deriveOutgoingViewingKey,
+    deriveSpendingKeyFromMaster,
 } from '../../../src/protocol/keys/PrivacyKeys';
+import { toHex } from '../../../src/foundation/encoding/hex';
 import {
     deriveSpendingKeyFromSignature,
     deriveMasterKeyBytes,
@@ -484,5 +487,61 @@ describe('identity separation', () => {
         const sk = await deriveSpendingKeyFromSignature(SIG, CHAIN_ID, ADDR);
         expect(sk).toBeGreaterThanOrEqual(1n);
         expect(sk).toBeLessThan(BABYJUB_SUBORDER);
+    });
+});
+
+// ─── deriveOutgoingViewingKey (ovk) ──────────────────────────────────────────
+
+describe('deriveOutgoingViewingKey', () => {
+    const master = new Uint8Array(32).fill(0xab);
+
+    it('returns a Uint8Array of exactly 32 bytes', () => {
+        const ovk = deriveOutgoingViewingKey(master);
+        expect(ovk).toBeInstanceOf(Uint8Array);
+        expect(ovk).toHaveLength(32);
+    });
+
+    it('is deterministic — same masterBytes produce the same ovk', () => {
+        expect(deriveOutgoingViewingKey(master)).toEqual(deriveOutgoingViewingKey(master));
+    });
+
+    it('differs for different masterBytes', () => {
+        const other = new Uint8Array(32).fill(0xcd);
+        expect(deriveOutgoingViewingKey(master)).not.toEqual(deriveOutgoingViewingKey(other));
+    });
+
+    it('is domain-separated from the vault key (same masterBytes, different HKDF info)', () => {
+        // vaultKey = HKDF(masterBytes, "orbinum-vault-key-v1"); ovk uses "orbinum-ovk-v1".
+        const vaultLike = hkdf(
+            sha256,
+            master,
+            undefined,
+            new TextEncoder().encode('orbinum-vault-key-v1'),
+            32
+        );
+        expect(deriveOutgoingViewingKey(master)).not.toEqual(vaultLike);
+    });
+
+    it('is a sibling of the ivsk, not derivable from it (§3.9)', () => {
+        // ovk hangs off masterBytes; ivsk off the reduced spendingKey scalar.
+        // Neither is a function of the other — feeding the ivsk as ikm to the ovk
+        // domain must not reproduce the ovk.
+        const spendingKey = deriveSpendingKeyFromMaster(master);
+        const ivsk = deriveViewingSecretKey(spendingKey);
+        const fromIvsk = hkdf(
+            sha256,
+            ivsk,
+            undefined,
+            new TextEncoder().encode('orbinum-ovk-v1'),
+            32
+        );
+        expect(deriveOutgoingViewingKey(master)).not.toEqual(fromIvsk);
+    });
+
+    it('golden vector: masterBytes = 0xab × 32', () => {
+        const expected = toHex(
+            hkdf(sha256, master, undefined, new TextEncoder().encode('orbinum-ovk-v1'), 32)
+        );
+        expect(toHex(deriveOutgoingViewingKey(master))).toBe(expected);
     });
 });

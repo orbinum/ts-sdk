@@ -24,7 +24,8 @@ import { generateTransferProof } from '../../../protocol/proving/transfer';
 import { buildDummyTransferInput } from '../../../protocol/spend/index';
 import { CircuitType } from '@orbinum/proof-generator';
 import { deriveViewingPublicKey, deriveViewingSecretKey } from '../../../protocol/keys/PrivacyKeys';
-import { fromHex } from '../../../foundation/encoding/hex';
+import { sealPaymentSlip, encodePaymentSlip } from '../../../protocol/memo/PaymentSlip';
+import { fromHex, toHex } from '../../../foundation/encoding/hex';
 import { bigintTo32LeArr } from '../../../foundation/encoding/bytes';
 import { checkSpendableInputs, treeOf } from './guards';
 import { failed, refuseIfAlreadySpent, markInputsSpent } from './lifecycle';
@@ -106,11 +107,18 @@ export interface TransferParams {
  */
 const MAX_ROOT_SYNC_ATTEMPTS = 3;
 
+/**
+ * A transfer result, plus — for a transfer to another user — a `paymentSlip`:
+ * the `orbslip1:` string the sender can hand the recipient so they rebuild their
+ * note without scanning. Absent for self-transfers and change-only transfers.
+ */
+export type TransferResult = TxResult & { paymentSlip?: string };
+
 export async function transferNotes(
     deps: TransferDeps,
     params: TransferParams,
     onProgress?: (step: TransferStep) => void
-): Promise<TxResult> {
+): Promise<TransferResult> {
     const { inputNotes, transferAmount, recipientPk, recipientViewingPublicKey, senderPk } = params;
     const effectiveFee = params.fee ?? 0n;
     const [noteA, noteB_] = inputNotes;
@@ -301,6 +309,26 @@ export async function transferNotes(
             const selfNote = deps.recoverStealth(recipientNote);
             if (selfNote) {
                 await deps.vault.save(stampCreatedTxHash(selfNote, txResult.txHash, txKind));
+            }
+        }
+
+        // Payment slip: for a transfer to ANOTHER user (real memo, not a
+        // self-transfer), seal the recipient output so the sender can hand it over
+        // and the recipient rebuilds the note without scanning. leafIndex is
+        // omitted — the recipient re-fetches the Merkle proof at spend time.
+        // Best-effort: a slip is a convenience, so a failure to seal it must never
+        // fail the transfer, which already landed on chain.
+        const isSelf = deps.selfOwnerPk !== null && recipientPk === deps.selfOwnerPk;
+        if (recipientViewingPublicKey !== undefined && !isSelf) {
+            try {
+                const envelope = sealPaymentSlip(recipientViewingPublicKey, {
+                    commitmentHex: recipientNote.commitmentHex,
+                    encryptedMemo: toHex(Uint8Array.from(recipientNote.memo)),
+                    ...(txResult.txHash ? { txHash: txResult.txHash } : {}),
+                });
+                return { ...txResult, paymentSlip: encodePaymentSlip(envelope) };
+            } catch {
+                // Leave the slip out; the transfer succeeded regardless.
             }
         }
     }

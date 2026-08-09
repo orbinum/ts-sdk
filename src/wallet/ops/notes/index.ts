@@ -25,3 +25,5 @@ export {
     NOTE_BACKUP_VERSION,
 } from './noteBackup';
 export type { NoteBackup, NoteBackupEntry, BackupImportKeys } from './noteBackup';
+export { importPaymentSlip } from './paymentSlipImport';
+export type { SlipImportKeys } from './paymentSlipImport';

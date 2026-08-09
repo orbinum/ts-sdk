@@ -20,6 +20,18 @@
  *          └──► ivsk = HKDF(LE32(spendingKey), info="orbinum-ivk-v1")       (secret)
  *                 └──► ivk = packPoint(BJJ_mul(Base8, ivsk_scalar))         (public)
  *
+ *   ovk = HKDF(masterBytes, info="orbinum-ovk-v1")                          (secret)
+ *
+ * The `ovk` (outgoing viewing key) hangs off masterBytes, NOT the reduced
+ * spendingKey scalar — same root as the vault key. It is a long-term outgoing
+ * auditing key: deriving it from masterBytes keeps it stable across any future
+ * change of the circuit modulus, and — unlike the ivsk — it is a SIBLING of the
+ * ivsk, not a descendant. Neither derives from the other, so incoming-audit
+ * (ivsk) and outgoing-audit (ovk) capabilities can be delegated independently.
+ * Tradeoff: an ovk is not bound to the spending identity, so rotating the
+ * spending key (were that ever possible) would not invalidate it. Deliberate for
+ * an auditing key; documented, not mitigated.
+ *
  * VERSIONING: the HKDF `info` carries the identity version, so v1 and v2 are
  * cryptographically disjoint even given identical signature bytes. This is the
  * layer that still separates the identities when the message-level defense fails
@@ -39,6 +51,7 @@ import { toHex } from '../../foundation/encoding/hex';
 import { BABYJUB_SUBORDER } from '../../foundation/crypto/constants';
 
 const IVK_DOMAIN = new TextEncoder().encode('orbinum-ivk-v1');
+const OVK_DOMAIN = new TextEncoder().encode('orbinum-ovk-v1');
 
 /**
  * Identity version, folded into the HKDF `info` so a future scheme is disjoint
@@ -116,4 +129,21 @@ export function deriveOwnerPk(spendingKey: bigint): bigint {
     } catch {
         return 0n;
     }
+}
+
+/**
+ * Derive the 32-byte outgoing viewing key (ovk) from master bytes.
+ *   ovk = HKDF-SHA256(ikm=masterBytes, info="orbinum-ovk-v1")
+ *
+ * Mirror of the vault-key derivation: rooted at masterBytes, not the spendingKey
+ * scalar (see the derivation chain above for why). The ovk lets the SENDER of a
+ * private transfer recover what they sent — it wraps the memo's shared secret so
+ * a cold restore rebuilds the outgoing history. Sibling of the ivsk, delegable
+ * independently.
+ *
+ * SECRET. Never embed it in a shareable address — it stays out of
+ * encodePrivacyAddress by construction (there is no public component to derive).
+ */
+export function deriveOutgoingViewingKey(masterBytes: Uint8Array): Uint8Array {
+    return hkdf(sha256, masterBytes, undefined, OVK_DOMAIN, 32);
 }

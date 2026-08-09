@@ -12,6 +12,7 @@ export {
     deriveViewingSecretKey,
     deriveViewingPublicKey,
     deriveOwnerPk,
+    deriveOutgoingViewingKey,
 } from './PrivacyKeys';
 export { PrivacyKeyManager } from './PrivacyKeyManager';
 export {

@@ -6,9 +6,11 @@ export { NoteBuilder } from './NoteBuilder';
 export {
     tryDecryptNote,
     tryDecryptNoteVerbose,
+    tryRecoverOutgoing,
     computeNullifier,
     computeNoteCommitment,
     commitmentHexOf,
 } from './NoteDecryptor';
+export type { OutgoingHint } from './NoteDecryptor';
 export { createNoteDisclosureKey, decodeNoteDisclosureKey } from './NoteDisclosure';
 export type { NoteDisclosure } from './NoteDisclosure';

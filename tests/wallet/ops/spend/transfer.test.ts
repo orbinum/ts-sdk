@@ -356,6 +356,37 @@ describe('transferNotes — output construction', () => {
         expect('recipientOwnerPk' in changeCall!).toBe(false);
     });
 
+    it('returns a payment slip for a transfer to another user (real recipient ivk)', async () => {
+        const deps = makeDeps();
+        // A real BJJ viewing public key so the slip can actually seal.
+        const recipientIvk = deriveViewingPublicKey(deriveViewingSecretKey(424242n));
+
+        const result = await transferNotes(asDeps(deps), {
+            inputNotes: [makeNote(50n)],
+            transferAmount: 30n,
+            recipientPk: 99n,
+            recipientViewingPublicKey: recipientIvk,
+        });
+
+        expect(result.ok).toBe(true);
+        expect(result.paymentSlip).toBeDefined();
+        expect(result.paymentSlip!.startsWith('orbslip1:')).toBe(true);
+    });
+
+    it('omits the payment slip for a self-transfer', async () => {
+        const deps = makeDeps({ selfOwnerPk: 99n });
+        const recipientIvk = deriveViewingPublicKey(deriveViewingSecretKey(424242n));
+
+        const result = await transferNotes(asDeps(deps), {
+            inputNotes: [makeNote(50n)],
+            transferAmount: 30n,
+            recipientPk: 99n, // == selfOwnerPk → self-transfer
+            recipientViewingPublicKey: recipientIvk,
+        });
+
+        expect(result.paymentSlip).toBeUndefined();
+    });
+
     it('omits the recipient viewing key when none was given (dummy memo)', async () => {
         const deps = makeDeps();
 

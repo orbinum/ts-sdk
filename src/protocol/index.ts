@@ -19,5 +19,12 @@ export * from './memo/index';
 export * from './eph/index';
 export * from './note/index';
 export * from './spend/index';
-export type { MerkleTreeInfo, ScanCommitment, DecryptedMemo, NoteInput, ZkNote } from './types';
+export type {
+    MerkleTreeInfo,
+    ScanCommitment,
+    DecryptedMemo,
+    NoteInput,
+    ZkNote,
+    OutgoingNoteRecord,
+} from './types';
 export { CURRENT_CIRCUIT_VERSION } from './types';
