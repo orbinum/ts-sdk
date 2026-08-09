@@ -39,24 +39,33 @@ function normalizeNullifierHex(hex: string): string {
     return hex.toLowerCase();
 }
 
-export interface ResolveSpentSetParams {
+export interface OpenSpentSetParams {
     source: NullifierSource;
     cache: NullifierCache;
-    /** The wallet's own nullifiers, lowercase hex. */
-    ownNullifiers: Set<string>;
     signal?: AbortSignal | undefined;
     onWarning?: ((message: string, cause?: unknown) => void) | undefined;
 }
 
+export interface ResolveSpentSetParams extends OpenSpentSetParams {
+    /** The wallet's own nullifiers, lowercase hex. */
+    ownNullifiers: Set<string>;
+}
+
+export interface SpentSetHandle {
+    /** Spent members of `ownNullifiers` (lowercase hex) → spend details. */
+    query(ownNullifiers: Set<string>): Promise<Map<string, SpendDetails>>;
+}
+
 /**
- * Returns ONLY the spent members of `ownNullifiers` as a Map hex → spend details
- * (block timestamp + spending tx hash, each null when the row carried none).
- * Throws on network/consistency failure; the caller degrades.
+ * Syncs the local nullifier cache once (chunks + a consistent tail snapshot)
+ * and returns a handle for repeated LOCAL membership queries — this is what
+ * lets a scan checkpoint notes with their spent status batch by batch without
+ * re-fetching anything per batch. The tail is frozen at open time; spends that
+ * land while the handle lives are caught by the authoritative pass at the end
+ * of the scan.
  */
-export async function resolveSpentSet(
-    params: ResolveSpentSetParams
-): Promise<Map<string, SpendDetails>> {
-    const { source, cache, ownNullifiers, signal } = params;
+export async function openSpentSet(params: OpenSpentSetParams): Promise<SpentSetHandle> {
+    const { source, cache, signal } = params;
     const throwIfAborted = () => {
         if (signal?.aborted) throw scanAbortError();
     };
@@ -67,20 +76,38 @@ export async function resolveSpentSet(
 
     throwIfAborted();
     const tail = await getConsistentTail(params, throwIfAborted);
-    const stored = await cache.getSpentNullifiers([...ownNullifiers]);
     const tailMap = new Map<string, SpendDetails>(
         tail.data.map((h, i) => [
             normalizeNullifierHex(h),
             { spentAt: tail.timestampsMs?.[i] ?? null, txHash: tail.txHashes?.[i] ?? null },
         ])
     );
-    const spent = new Map<string, SpendDetails>();
-    const unknown: SpendDetails = { spentAt: null, txHash: null };
-    for (const h of ownNullifiers) {
-        if (stored.has(h)) spent.set(h, stored.get(h) ?? unknown);
-        else if (tailMap.has(h)) spent.set(h, tailMap.get(h) ?? unknown);
-    }
-    return spent;
+
+    return {
+        async query(ownNullifiers: Set<string>): Promise<Map<string, SpendDetails>> {
+            if (ownNullifiers.size === 0) return new Map();
+            const stored = await cache.getSpentNullifiers([...ownNullifiers]);
+            const spent = new Map<string, SpendDetails>();
+            const unknown: SpendDetails = { spentAt: null, txHash: null };
+            for (const h of ownNullifiers) {
+                if (stored.has(h)) spent.set(h, stored.get(h) ?? unknown);
+                else if (tailMap.has(h)) spent.set(h, tailMap.get(h) ?? unknown);
+            }
+            return spent;
+        },
+    };
+}
+
+/**
+ * Returns ONLY the spent members of `ownNullifiers` as a Map hex → spend details
+ * (block timestamp + spending tx hash, each null when the row carried none).
+ * Throws on network/consistency failure; the caller degrades.
+ */
+export async function resolveSpentSet(
+    params: ResolveSpentSetParams
+): Promise<Map<string, SpendDetails>> {
+    const handle = await openSpentSet(params);
+    return handle.query(params.ownNullifiers);
 }
 
 /**
@@ -89,7 +116,7 @@ export async function resolveSpentSet(
  * persisted atomically together with its sync-meta update.
  */
 async function syncNullifierCache(
-    params: ResolveSpentSetParams,
+    params: OpenSpentSetParams,
     manifest: NullifierManifest,
     throwIfAborted: () => void
 ): Promise<void> {
@@ -145,7 +172,7 @@ async function syncNullifierCache(
  * the caller degrades until the next scan fetches a fresh manifest.
  */
 async function getConsistentTail(
-    params: ResolveSpentSetParams,
+    params: OpenSpentSetParams,
     throwIfAborted: () => void
 ): Promise<Awaited<ReturnType<NullifierSource['tail']>>> {
     const { source, cache } = params;

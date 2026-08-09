@@ -341,6 +341,86 @@ describe('runScan', () => {
             name: 'AbortError',
         });
     });
+
+    /** Two sealed chunks of 5 leaves each; the tail after them is empty. */
+    function chunkedSource(): ScanHintSource {
+        const chunks = [
+            [0, 1, 2, 3, 4].map(hint),
+            [5, 6, 7, 8, 9].map(hint),
+        ];
+        const flat = chunks.flat();
+        return {
+            async listHints({ limit, sinceLeafIndex }) {
+                const from = sinceLeafIndex ?? 0;
+                const data = flat.filter((h) => (h.leafIndex ?? 0) >= from);
+                return { data, pagination: { limit, total: data.length } };
+            },
+            chunks: {
+                async manifest() {
+                    return {
+                        chunkSize: 5,
+                        chunks: chunks.map((c, i) => ({ idx: i, count: c.length, digest: `d${i}` })),
+                        lastSealedLeaf: flat.length - 1,
+                        total: flat.length,
+                    };
+                },
+                async chunk(idx: number) {
+                    return chunks[idx]!;
+                },
+            },
+        };
+    }
+
+    it('checkpoints new notes (with spent status) and the cursor per completed chunk', async () => {
+        // Abort after the first chunk fully processed: its notes and the cursor
+        // must survive, so the next scan resumes instead of restarting. The
+        // spent one must be saved SPENT — a checkpoint that wrote it unspent
+        // would overstate the balance until a scan finally completes.
+        const controller = new AbortController();
+
+        await expect(
+            scan({
+                hints: chunkedSource(),
+                pool: fakePool((h) =>
+                    h.commitmentHex === '0xc1' || h.commitmentHex === '0xc3'
+                        ? note(h.commitmentHex)
+                        : null
+                ),
+                nullifiers: nullifierSource(['0xnc3']),
+                signal: controller.signal,
+                onProgress: (p) => {
+                    if (p.scanned === 5) controller.abort();
+                },
+            })
+        ).rejects.toMatchObject({ name: 'AbortError' });
+
+        const saved = new Map(vault.getAll().map((n) => [n.commitmentHex, n]));
+        expect([...saved.keys()].sort()).toEqual(['0xc1', '0xc3']);
+        expect(saved.get('0xc1')?.spent).toBe(false);
+        expect(saved.get('0xc3')?.spent).toBe(true);
+        expect(saved.get('0xc3')?.spentAt).toBe(4242);
+        expect((await storage.getConfig())?.lastScannedLeafIndex).toBe(4);
+    });
+
+    it('advances the checkpoint cursor past chunks holding no owned notes', async () => {
+        // The common case: a whole chunk of other people's notes. The cursor
+        // must still move, or an aborted scan re-decrypts it all next time.
+        const controller = new AbortController();
+
+        await expect(
+            scan({
+                hints: chunkedSource(),
+                pool: fakePool(() => null),
+                signal: controller.signal,
+                onProgress: (p) => {
+                    if (p.scanned === 5) controller.abort();
+                },
+            })
+        ).rejects.toMatchObject({ name: 'AbortError' });
+
+        expect(vault.getAll()).toHaveLength(0);
+        expect((await storage.getConfig())?.lastScannedLeafIndex).toBe(4);
+    });
 });
 
 describe('collectNullifiersToQuery', () => {

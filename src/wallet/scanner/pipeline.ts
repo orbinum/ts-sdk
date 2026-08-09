@@ -2,10 +2,12 @@
  * Scan pipeline — the core scan, composed from independent phase modules.
  * A thin orchestrator: it wires the phases in order and owns no phase logic.
  *
- *   1. scan          — walk the hint feed, trial-decrypt memos
+ *   1. collect       — walk the hint feed, trial-decrypt memos; each completed
+ *                      batch is checkpointed (checkpoint.ts): new notes saved,
+ *                      cursor advanced, so an abort or crash resumes there
  *   2. spentStatus   — resolve spent status locally (see spentSet.ts)
  *   3. persist       — batched save + reconcile + ghost purge (full scan only)
- *   4. persistCursor — save the leafIndex for the next incremental scan
+ *   4. persistCursor — save the final leafIndex for the next incremental scan
  *
  * Everything environment-specific is injected: the feed sources, the decrypt
  * pool, the vault. A host wires its own transport and worker strategy without
@@ -17,6 +19,7 @@ import type { NoteStorage, NullifierCache } from '../vault/index';
 import type { DecryptPool } from '../worker/index';
 import { scanAbortError } from '../../foundation/errors/abort';
 import { collectScanEntries } from './phases/collect';
+import { createScanCheckpoint } from './phases/checkpoint';
 import { resolveSelfEphCeiling, windowSizeForCounter } from './selfEphGap';
 import { collectNullifiersToQuery, resolveSpentStatus } from './phases/spentStatus';
 import { persistScanResults, persistCursor } from './phases/persist';
@@ -63,9 +66,10 @@ export async function runScan(params: RunScanParams): Promise<ScanResult> {
 
     const isIncremental = sinceLeafIndex !== undefined;
 
-    // 1. Walk the feed and trial-decrypt. Nothing is persisted here: the visible
-    //    note list must stay stable while a scan runs, so the user keeps working
-    //    with existing notes. Results land once in phase 3, with the spent set.
+    // 1. Walk the feed and trial-decrypt. NEW notes and the cursor are
+    //    checkpointed per batch (checkpoint.ts), so an abort or crash never
+    //    loses completed work; existing notes are only rewritten in phase 3,
+    //    with the authoritative spent set.
     const existingHexes = new Set(vault.getAll().map((n) => n.commitmentHex));
     // Frozen copy: `existingHexes` is MUTATED by the scan as it discovers notes,
     // so it cannot double as the "what did the vault hold before we started"
@@ -95,6 +99,18 @@ export async function runScan(params: RunScanParams): Promise<ScanResult> {
         }
     );
 
+    // Persists completed batches (new notes + cursor) while phase 1 runs, so
+    // an abort or crash resumes after the last completed batch — the what and
+    // why live in checkpoint.ts.
+    const checkpoint = createScanCheckpoint({
+        vault,
+        storage,
+        nullifiers,
+        isIncremental,
+        signal,
+        onWarning,
+    });
+
     const scan = await collectScanEntries({
         source: hints,
         pool,
@@ -116,6 +132,8 @@ export async function runScan(params: RunScanParams): Promise<ScanResult> {
         // only bought heap.
         vaultHexes: preScanHexes,
         onWarning,
+        onPage: (entries) => checkpoint.savePageNotes(entries),
+        onBatchDone: (maxLeafIndex) => checkpoint.advanceCursor(maxLeafIndex),
     });
 
     // 2. Spent status, by local intersection.
@@ -132,11 +150,12 @@ export async function runScan(params: RunScanParams): Promise<ScanResult> {
         onWarning,
     });
 
-    // Last checkpoint before anything is written. Phases 1 and 2 only read, so
-    // an abort until now costs nothing; past this line the scan mutates the
-    // vault. A host that swapped identities mid-scan aborts precisely to stop
-    // THIS — writing notes decrypted under one account's keys into whichever
-    // vault is open by the time the scan finishes.
+    // Last signal check before the FINAL writes. Phase 1's checkpoint writes
+    // are individually signal-guarded (checkpoint.ts); past this line the scan
+    // rewrites EXISTING notes and purges ghosts. A host that swapped identities
+    // mid-scan aborts precisely to stop this — writing notes decrypted under
+    // one account's keys into whichever vault is open by the time the scan
+    // finishes.
     if (signal?.aborted) throw scanAbortError();
 
     // 3. Save results + reconcile + ghost purge (full scan only).
