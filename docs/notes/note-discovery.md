@@ -120,24 +120,35 @@ the contract itself — not documentation — forbids the per-nullifier query.
 `runScan` phases, with the property each one protects:
 
 ```
-1. COLLECT   page hints from ScanHintSource, trial-decrypt via the pool
-             → abort checkpoints between pages
-2. SPENT     resolve the spent set by local intersection
+1. COLLECT   sealed chunks, then the paginated tail — both through a
+             PREFETCH-deep download window — trial-decrypting via the pool
+             → each completed batch CHECKPOINTS (checkpoint.ts):
+               NEW notes saved, then the cursor advanced past the batch
+2. SPENT     resolve the authoritative spent set by local intersection
              → reads only; abortable
-   ── last checkpoint: nothing written yet ──────────────────────
-3. PERSIST   save found notes, reconcile spent flags, purge ghosts
-4. CURSOR    advance lastScannedLeafIndex for the next incremental pass
+3. PERSIST   rewrite existing notes, reconcile spent flags, purge ghosts
+4. CURSOR    final lastScannedLeafIndex for the next incremental pass
 ```
 
-- **The pre-persist checkpoint** is what an identity switch relies on: a scan
-  reads its keys once at start but writes through whatever storage is open at
-  the end. Aborting before phase 3 guarantees notes decrypted under one
+- **Per-batch checkpoints** are why an abort or crash resumes instead of
+  restarting: the next scan continues right after the last completed batch.
+  Order inside a batch is load-bearing — notes first, cursor second; a cursor
+  advanced past unsaved notes would make the next incremental scan skip them
+  forever. Checkpoints save **new** notes only, with spent status from the
+  locally synced nullifier set; existing notes could be downgraded
+  (spent → unspent) by a save without the authoritative map, so phase 3
+  remains their only writer.
+- **The identity-switch guarantee** still holds, enforced per write instead of
+  by a single pre-persist gate: the abort signal is re-checked immediately
+  before every checkpoint write, and once more before phase 3's final writes.
+  A host that swaps accounts mid-scan aborts, and notes decrypted under one
   account's keys never land in another account's vault.
 - **The purge gate**: a full scan may purge vault notes absent from the chain —
   but only when `hintsScanned > 0`. An empty feed (indexer down, wrong URL)
   must read as "no data", never as "your notes are gone".
-- **The cursor** only advances on completion, and clearing it deletes the key
-  rather than storing `undefined` ([vault.md](./vault.md) §4).
+- **The cursor** advances per completed batch during collection and lands on
+  its final value in phase 4; clearing it deletes the key rather than storing
+  `undefined` ([vault.md](./vault.md) §4).
 
 ## 6. The worker pool
 

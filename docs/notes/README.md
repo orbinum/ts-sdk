@@ -100,7 +100,7 @@ expressed as a small interface the host implements:
 | Contract                               | Methods                                               | Who implements it                                                |
 | -------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------- |
 | `VaultStorage`                         | config + notes + nullifier cache + history            | `IndexedDbVaultStorage`, `MemoryVaultStorage`, or the host's own |
-| `ScanHintSource`                       | list commitment hints by page                         | an indexer adapter                                               |
+| `ScanHintSource`                       | commitment hints by page + optional sealed chunks     | an indexer adapter                                               |
 | `NullifierSource`                      | manifest / chunk / tail — **no per-nullifier lookup** | an indexer adapter                                               |
 | `TxFactsSource`, `TransferFactsSource` | extrinsic facts for history                           | an indexer adapter                                               |
 | `WalletSession`                        | the keys held while unlocked                          | plain object, or the host's store                                |
