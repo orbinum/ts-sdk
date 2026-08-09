@@ -5,7 +5,9 @@ import {
     deriveViewingSecretKey,
     deriveViewingPublicKey,
     deriveOwnerPk,
+    deriveOutgoingViewingKey,
 } from '../../../src/protocol/keys/PrivacyKeys';
+import { openOutgoingBlob } from '../../../src/protocol/memo/OutgoingBlob';
 
 // ─── NoteBuilder.build ────────────────────────────────────────────────────────
 
@@ -248,5 +250,89 @@ describe('NoteBuilder.build — stealth path', () => {
             // No recipientOwnerPk → non-stealth path
         });
         expect(ownNote.ownerPk).toBe(ownPk);
+    });
+
+    // ─── OVK blob emission (Fase 3) ──────────────────────────────────────────
+
+    const senderMaster = new Uint8Array(32).fill(0x5a);
+    const senderOvk = deriveOutgoingViewingKey(senderMaster);
+
+    it('stealth build with outgoingViewingKey → 56-byte ovkBlob', async () => {
+        const note = await NoteBuilder.build({
+            value: 500n,
+            blinding: 1n,
+            ownerPk: recipientOwnerPk,
+            viewingPublicKey: recipientViewingPublicKey,
+            recipientOwnerPk,
+            outgoingViewingKey: senderOvk,
+        });
+        expect(note.ovkBlob).toBeDefined();
+        expect(note.ovkBlob).toHaveLength(56);
+    });
+
+    it('stealth build without outgoingViewingKey → ovkBlob undefined', async () => {
+        const note = await NoteBuilder.build({
+            value: 500n,
+            blinding: 1n,
+            ownerPk: recipientOwnerPk,
+            viewingPublicKey: recipientViewingPublicKey,
+            recipientOwnerPk,
+        });
+        expect(note.ovkBlob).toBeUndefined();
+    });
+
+    it('non-stealth build never produces an ovkBlob, even with an ovk', async () => {
+        const note = await NoteBuilder.build({
+            value: 500n,
+            blinding: 1n,
+            ownerPk: recipientOwnerPk,
+            outgoingViewingKey: senderOvk,
+            // no viewingPublicKey/recipientOwnerPk → non-stealth
+        });
+        expect(note.ovkBlob).toBeUndefined();
+    });
+
+    it('the ovkBlob is sealed against the memo ephPk (bytes 148..180) and commitment', async () => {
+        const note = await NoteBuilder.build({
+            value: 777n,
+            blinding: 5n,
+            ownerPk: recipientOwnerPk,
+            viewingPublicKey: recipientViewingPublicKey,
+            recipientOwnerPk,
+            outgoingViewingKey: senderOvk,
+        });
+        const ephPkBytes = Uint8Array.from(note.memo.slice(148, 180));
+        const commitmentBytes = Uint8Array.from(
+            (note.commitmentHex.slice(2).match(/.{2}/g) ?? []).map((b) => parseInt(b, 16))
+        );
+        // Opening with the sender ovk against the on-chain ephPk + commitment must
+        // succeed and yield a 32-byte shared secret.
+        const ss = openOutgoingBlob(
+            senderOvk,
+            Uint8Array.from(note.ovkBlob!),
+            commitmentBytes,
+            ephPkBytes
+        );
+        expect(ss).not.toBeNull();
+        expect(ss).toHaveLength(32);
+    });
+
+    it('the ovk does not perturb the note shape: same 180-byte memo, only ovkBlob added', async () => {
+        // The stealth path generates its own random ephSk (ephSkOverride is
+        // ignored here), so the two memos differ by ephemeral key — but both must
+        // still be exactly 180 bytes, and only the ovk build carries a blob.
+        const base = {
+            value: 500n,
+            blinding: 1n,
+            ownerPk: recipientOwnerPk,
+            viewingPublicKey: recipientViewingPublicKey,
+            recipientOwnerPk,
+        };
+        const withOvk = await NoteBuilder.build({ ...base, outgoingViewingKey: senderOvk });
+        const withoutOvk = await NoteBuilder.build(base);
+        expect(withOvk.memo).toHaveLength(ENCRYPTED_MEMO_SIZE);
+        expect(withoutOvk.memo).toHaveLength(ENCRYPTED_MEMO_SIZE);
+        expect(withOvk.ovkBlob).toBeDefined();
+        expect(withoutOvk.ovkBlob).toBeUndefined();
     });
 });

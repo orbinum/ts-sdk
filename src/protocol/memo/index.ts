@@ -7,3 +7,12 @@
  */
 export { EncryptedMemo, ENCRYPTED_MEMO_SIZE, bytesToBjjScalar } from './EncryptedMemo';
 export { serializeMemo, deriveViewTag } from './plaintext';
+
+// Outgoing viewing key: the sender-side blob that wraps a memo's shared secret.
+export {
+    OVK_BLOB_SIZE,
+    deriveOutgoingCipherKey,
+    sealOutgoingBlob,
+    openOutgoingBlob,
+    randomOutgoingBlob,
+} from './OutgoingBlob';

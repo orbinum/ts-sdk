@@ -1,5 +1,6 @@
 import { CURRENT_CIRCUIT_VERSION, type NoteInput, type ZkNote } from '../types';
 import { EncryptedMemo, ENCRYPTED_MEMO_SIZE } from '../memo/EncryptedMemo';
+import { sealOutgoingBlob, OVK_BLOB_SIZE } from '../memo/OutgoingBlob';
 import { deriveStealthOwnerPk } from '../../foundation/crypto/stealth';
 import { recoverOwnerPkPoint } from '../../foundation/crypto/bjj';
 import { toHex } from '../../foundation/encoding/hex';
@@ -117,6 +118,27 @@ export class NoteBuilder {
                     `NoteBuilder.build: invariant violated — memo must be ${ENCRYPTED_MEMO_SIZE} bytes, got ${memo.length}`
                 );
 
+            // OVK: wrap the shared secret so the SENDER can recover this transfer.
+            // Only on the stealth path, and only when an ovk is supplied — the ⊥
+            // default (random blob) is the app's job at submit, never invented here.
+            // The ephPk is sliced from the memo we just built (bytes 148..180), so
+            // it is byte-identical to what goes on chain (raw-bytes-in-KDF rule).
+            let ovkBlob: number[] | undefined;
+            if (input.outgoingViewingKey !== undefined) {
+                const ephPkBytes = Uint8Array.from(memo.slice(148, 180));
+                const sealed = sealOutgoingBlob(
+                    input.outgoingViewingKey,
+                    sharedSecret,
+                    stealthCommitmentBytes,
+                    ephPkBytes
+                );
+                if (sealed.length !== OVK_BLOB_SIZE)
+                    throw new Error(
+                        `NoteBuilder.build: invariant violated — ovkBlob must be ${OVK_BLOB_SIZE} bytes, got ${sealed.length}`
+                    );
+                ovkBlob = Array.from(sealed);
+            }
+
             return {
                 value,
                 assetId,
@@ -132,6 +154,7 @@ export class NoteBuilder {
                 nullifierHex: toHex(nullifierBytes),
                 memo,
                 counterpartyPk,
+                ...(ovkBlob ? { ovkBlob } : {}),
             };
         }
 

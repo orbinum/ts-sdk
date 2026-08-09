@@ -24,7 +24,12 @@
  */
 
 import { sha256 } from '@noble/hashes/sha2.js';
-import { deriveViewingSecretKey, deriveViewingPublicKey, deriveOwnerPk } from './PrivacyKeys';
+import {
+    deriveViewingSecretKey,
+    deriveViewingPublicKey,
+    deriveOwnerPk,
+    deriveOutgoingViewingKey,
+} from './PrivacyKeys';
 import { toHex, scalarToHex } from '../../foundation/encoding/hex';
 import { bigintTo32Le } from '../../foundation/encoding/bytes';
 import { BABYJUB_SUBORDER } from '../../foundation/crypto/constants';
@@ -55,6 +60,8 @@ interface PrivacyKeyState {
     /** 32-byte LE-encoded packed BJJ viewing public key (ivk). Embedded in privacy addresses. */
     viewingPublicKeyPacked: Uint8Array | null;
     ownerPk: bigint | null;
+    /** 32-byte outgoing viewing key (ovk). Wraps outgoing shared secrets; never in addresses. */
+    outgoingViewingKey: Uint8Array | null;
 }
 
 // ─── PrivacyKeyManager ────────────────────────────────────────────────────────
@@ -66,6 +73,7 @@ export class PrivacyKeyManager {
         viewingSecretKey: null,
         viewingPublicKeyPacked: null,
         ownerPk: null,
+        outgoingViewingKey: null,
     };
 
     /**
@@ -81,12 +89,14 @@ export class PrivacyKeyManager {
         const viewingSecretKey = deriveViewingSecretKey(spendingKey);
         const viewingPublicKeyPacked = deriveViewingPublicKey(viewingSecretKey);
         const ownerPk = deriveOwnerPk(spendingKey);
+        const outgoingViewingKey = deriveOutgoingViewingKey(masterBytes);
         this._state = {
             spendingKey,
             masterBytes,
             viewingSecretKey,
             viewingPublicKeyPacked,
             ownerPk,
+            outgoingViewingKey,
         };
     }
 
@@ -98,6 +108,7 @@ export class PrivacyKeyManager {
             viewingSecretKey: null,
             viewingPublicKeyPacked: null,
             ownerPk: null,
+            outgoingViewingKey: null,
         };
     }
 
@@ -146,6 +157,17 @@ export class PrivacyKeyManager {
             throw new Error('PrivacyKeyManager: no key loaded. Call load() first.');
         }
         return this._state.ownerPk;
+    }
+
+    /**
+     * Returns the 32-byte outgoing viewing key (ovk). Throws if not loaded.
+     * Used to seal/open the outgoing blob that lets the sender recover a transfer.
+     */
+    getOutgoingViewingKey(): Uint8Array {
+        if (this._state.outgoingViewingKey === null) {
+            throw new Error('PrivacyKeyManager: no key loaded. Call load() first.');
+        }
+        return this._state.outgoingViewingKey;
     }
 
     /** Returns the spending key as a 32-byte little-endian Uint8Array. Throws if not loaded. */

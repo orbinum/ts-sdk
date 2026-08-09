@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { PrivacyKeyManager } from '../../../src/protocol/keys/PrivacyKeyManager';
 import { deriveViewingSecretKey, deriveOwnerPk } from '../../../src/protocol/keys/PrivacyKeys';
 import { bigintTo32Le } from '../../../src/foundation/encoding/bytes';
+import { toHex } from '../../../src/foundation/encoding/hex';
 import { BABYJUB_SUBORDER } from '../../../src/foundation/crypto/constants';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -406,5 +407,42 @@ describe('PrivacyKeyManager.decodePrivacyAddress', () => {
         const result = PrivacyKeyManager.decodePrivacyAddress(addr);
         expect(result?.ownerPkHex).toBe(expectedPk);
         expect(result?.viewingPublicKeyHex).toBe(expectedVk);
+    });
+});
+
+// ─── getOutgoingViewingKey (ovk) ─────────────────────────────────────────────
+
+describe('pkm.getOutgoingViewingKey', () => {
+    it('throws if not loaded', () => {
+        expect(() => pkm.getOutgoingViewingKey()).toThrow(/no key loaded/i);
+    });
+
+    it('returns a 32-byte ovk after load()', async () => {
+        await pkm.load(TEST_SK, MASTER_BYTES);
+        const ovk = pkm.getOutgoingViewingKey();
+        expect(ovk).toBeInstanceOf(Uint8Array);
+        expect(ovk).toHaveLength(32);
+    });
+
+    it('is derived from masterBytes — differs across identities', async () => {
+        await pkm.load(TEST_SK, MASTER_BYTES);
+        const a = pkm.getOutgoingViewingKey();
+        await pkm.load(OTHER_SK, OTHER_MASTER_BYTES);
+        const b = pkm.getOutgoingViewingKey();
+        expect(a).not.toEqual(b);
+    });
+
+    it('clear() drops the ovk', async () => {
+        await pkm.load(TEST_SK, MASTER_BYTES);
+        pkm.clear();
+        expect(() => pkm.getOutgoingViewingKey()).toThrow(/no key loaded/i);
+    });
+
+    it('is absent from the privacy address', async () => {
+        await pkm.load(TEST_SK, MASTER_BYTES);
+        const ovkHex = toHex(pkm.getOutgoingViewingKey());
+        const addr = pkm.encodePrivacyAddress();
+        // The ovk is secret — its bytes must never appear in the shareable address.
+        expect(addr).not.toContain(ovkHex.slice(2));
     });
 });
