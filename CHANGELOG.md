@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-08-09
+
+**The sealed-chunk phase downloads with a 3-deep window, matching the tail.**
+Previously the bulk of a full rescan kept a single next-chunk prefetch in
+flight, paying one serialized round-trip per chunk. Now a sliding window of 3
+requests (the shared `PREFETCH` constant) keeps the pipe full; on
+bandwidth-bound connections total time is unchanged — in-flight requests share
+the pipe — so the fixed depth is safe at every connection speed. Chunks are
+still processed strictly in ascending leaf order: the cursor and checkpoint
+invariants depend on it.
+
 ## [1.3.0] - 2026-08-08
 
 **Scans now checkpoint per chunk — aborting no longer loses the work.**

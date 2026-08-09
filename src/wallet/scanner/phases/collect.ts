@@ -14,9 +14,9 @@
  *
  * The expensive part (one ECDH per memo) runs in the injected decrypt pool —
  * Web Workers when the host provides a factory, a yielded loop otherwise — while
- * the cheap bookkeeping (cursor, on-chain set, counters) stays here. The next
- * chunk/page is prefetched while the current one decrypts, overlapping network
- * and CPU.
+ * the cheap bookkeeping (cursor, on-chain set, counters) stays here. Both
+ * transports download through the same PREFETCH-deep sliding window
+ * (`runPrefetched`), overlapping network and CPU.
  */
 import type { ZkNote } from '../../../protocol/types';
 import { isValidLeafIndex } from '../../../protocol/spend/index';
@@ -34,6 +34,18 @@ import { scanAbortError, isAbortError } from '../../../foundation/errors/abort';
  * still works — the loop reads the effective limit from the response.
  */
 export const PAGE_SIZE = 2500;
+
+/**
+ * Requests kept in flight ahead of processing, in BOTH transports (chunks and
+ * tail). A batch decrypts faster than the feed serves the next one, so a single
+ * prefetch leaves the scan network-bound: every batch pays its round-trip in
+ * series. A small window pays the RTT ~once for the whole phase instead. On a
+ * bandwidth-bound connection the window changes nothing — the in-flight
+ * requests share the same pipe and total time stays bytes/bandwidth — so a
+ * fixed depth is safe at every connection speed. Batches are still PROCESSED
+ * strictly in order; the cursor and checkpoint invariants depend on it.
+ */
+const PREFETCH = 3;
 
 export interface ScanOutcome {
     /** Decrypted notes found in this window, flagged new vs already in the vault. */
@@ -57,8 +69,11 @@ export interface ScanOutcome {
     onChainHexes: Set<string>;
     /** Highest leafIndex seen — the next incremental scan resumes after it. */
     maxLeafIndex: number | undefined;
+    /** Hints walked this call, across both transports. */
     scanned: number;
+    /** Notes recovered that the vault did not hold yet. */
     found: number;
+    /** Hints carrying no memo or ephemeral key — nothing to decrypt. */
     noMemo: number;
     /**
      * Hints whose memo did not open with this wallet's keys.
@@ -69,6 +84,7 @@ export interface ScanOutcome {
      * recovers nothing while this equals the whole pool has a key problem.
      */
     decryptFailed: number;
+    /** Notes recovered that the vault already held. */
     alreadyPresent: number;
     /** Hints discarded by the view-tag fast filter (no AEAD decrypt attempted). */
     tagFiltered: number;
@@ -123,6 +139,10 @@ export interface CollectScanEntriesParams {
     onWarning?: ((message: string, cause?: unknown) => void) | undefined;
 }
 
+/**
+ * What every batch needs, threaded through the two transports. The callbacks
+ * mirror {@link CollectScanEntriesParams} and are documented there.
+ */
 interface ScanContext {
     outcome: ScanOutcome;
     pool: DecryptPool;
@@ -221,15 +241,49 @@ async function processHints(ctx: ScanContext, hints: ScanHint[], total: number) 
 }
 
 /**
- * Chunk phase: downloads every sealed chunk past the cursor and processes it,
- * prefetching the next while the current one decrypts. Returns the leaf the tail
- * starts at, or null when there is no chunk path (source without chunk support,
- * no manifest, no sealed chunks, or cursor already past them) — the caller then
- * pages the whole window instead.
+ * Drives `handle` over items 0..count-1 STRICTLY in order while keeping up to
+ * PREFETCH downloads in flight (the one being awaited plus the ones ahead).
+ * The in-order guarantee is load-bearing: the cursor and checkpoint invariants
+ * assume ascending leaf order.
  *
- * Any non-abort failure falls back gracefully: notes already processed are
- * persisted (via onPage) and the caller resumes paging right after the last
- * processed leaf.
+ * Abandoned prefetches on the way out (abort/error) are silenced so they never
+ * surface as unhandled rejections.
+ */
+async function runPrefetched<T>(
+    count: number,
+    fetchItem: (i: number) => Promise<T>,
+    signal: AbortSignal | undefined,
+    handle: (item: T) => Promise<void>
+): Promise<void> {
+    const inFlight = new Map<number, Promise<T>>();
+    const ensureFetching = (i: number) => {
+        if (i < count && !inFlight.has(i)) inFlight.set(i, fetchItem(i));
+    };
+
+    try {
+        for (let i = 0; i < count; i++) {
+            if (signal?.aborted) throw scanAbortError();
+            for (let n = i; n < i + PREFETCH; n++) ensureFetching(n);
+            const item = await inFlight.get(i)!;
+            inFlight.delete(i);
+            await handle(item);
+        }
+    } finally {
+        for (const pending of inFlight.values()) pending.catch(() => {});
+    }
+}
+
+/**
+ * Chunk phase: downloads every sealed chunk past the cursor through the shared
+ * prefetch window and processes it in order.
+ *
+ * Returns the leaf the tail starts at, or null when there is no chunk path
+ * (source without chunk support, no manifest, no sealed chunks, or cursor
+ * already past them) — the caller then pages the whole window instead.
+ *
+ * Any non-abort failure falls back gracefully: notes already handed to the
+ * checkpoint callbacks stay persisted, and the caller resumes paging right
+ * after the last processed leaf.
  */
 async function processSealedChunks(
     ctx: ScanContext,
@@ -254,26 +308,49 @@ async function processSealedChunks(
 
     const fetchChunk = (i: number) => source.chunks!.chunk(pending[i]!.idx, pending[i]!.digest);
 
-    let nextChunk: Promise<ScanHint[]> | null = fetchChunk(0);
-    try {
-        for (let i = 0; i < pending.length; i++) {
-            if (ctx.signal?.aborted) throw scanAbortError();
-            const hints = await nextChunk!;
-            nextChunk = i + 1 < pending.length ? fetchChunk(i + 1) : null;
-            // The first chunk may straddle the cursor — drop already-scanned leaves.
-            await processHints(
-                ctx,
-                hints.filter((h) => (h.leafIndex ?? 0) >= startLeaf),
-                total
-            );
-        }
-    } finally {
-        // An abandoned prefetch (abort/error path) must not surface as an
-        // unhandled rejection.
-        nextChunk?.catch(() => {});
-    }
+    await runPrefetched(pending.length, fetchChunk, ctx.signal, (hints) =>
+        // The first chunk may straddle the cursor — drop already-scanned leaves.
+        processHints(
+            ctx,
+            hints.filter((h) => (h.leafIndex ?? 0) >= startLeaf),
+            total
+        )
+    );
 
     return manifest.lastSealedLeaf + 1;
+}
+
+/**
+ * Tail phase: pages the mutable feed after the sealed chunks — or the whole
+ * window when the chunk path was unavailable. The first page is fetched alone
+ * because its `pagination` is what sizes the rest of the walk; the remaining
+ * pages go through the shared prefetch window.
+ */
+async function processPaginatedTail(
+    ctx: ScanContext,
+    source: ScanHintSource,
+    sinceLeafIndex: number | undefined
+): Promise<void> {
+    const fetchPage = (page: number): Promise<ScanHintPage> =>
+        source.listHints({ page, limit: PAGE_SIZE, sinceLeafIndex });
+
+    const firstPage = await fetchPage(1);
+    // Progress total spans everything processed this call (chunks + tail).
+    const total = ctx.outcome.scanned + firstPage.pagination.total;
+    // Page math uses the limit the SERVER applied, not the one requested: a
+    // server that clamps 2500 back to 500 would make dividing by the requested
+    // size undercount pages and silently skip hints.
+    const effectiveLimit = firstPage.pagination.limit || PAGE_SIZE;
+    const totalPages = Math.max(Math.ceil(firstPage.pagination.total / effectiveLimit), 1);
+
+    // Item i is 1-based page i+1; page 1 rides along already resolved, so the
+    // window starts pulling page 2 while page 1 decrypts.
+    await runPrefetched(
+        totalPages,
+        (i) => (i === 0 ? Promise.resolve(firstPage) : fetchPage(i + 1)),
+        ctx.signal,
+        (page) => processHints(ctx, page.data, total)
+    );
 }
 
 /**
@@ -284,9 +361,7 @@ async function processSealedChunks(
  * pool is normally reused across the scans of a session.
  */
 export async function collectScanEntries(params: CollectScanEntriesParams): Promise<ScanOutcome> {
-    const { source, pool, keys, existingHexes, sinceLeafIndex, onProgress, signal, onPage } =
-        params;
-    const { onBatchDone } = params;
+    const { source, sinceLeafIndex, signal } = params;
     if (signal?.aborted) throw scanAbortError();
 
     const outcome: ScanOutcome = {
@@ -306,14 +381,14 @@ export async function collectScanEntries(params: CollectScanEntriesParams): Prom
 
     const ctx: ScanContext = {
         outcome,
-        pool,
-        keys,
-        existingHexes,
-        vaultHexes: params.vaultHexes ?? existingHexes,
-        onProgress,
+        pool: params.pool,
+        keys: params.keys,
+        existingHexes: params.existingHexes,
+        vaultHexes: params.vaultHexes ?? params.existingHexes,
+        onProgress: params.onProgress,
         signal,
-        onPage,
-        onBatchDone,
+        onPage: params.onPage,
+        onBatchDone: params.onBatchDone,
     };
 
     // ── Phase A: sealed chunks (immutable bulk, cache-friendly) ───────────────
@@ -330,45 +405,7 @@ export async function collectScanEntries(params: CollectScanEntriesParams): Prom
     }
 
     // ── Phase B: paginated hints (tail, or the whole window on fallback) ──────
-    const fetchPage = (page: number): Promise<ScanHintPage> =>
-        source.listHints({ page, limit: PAGE_SIZE, sinceLeafIndex: tailSince });
-
-    const firstPage = await fetchPage(1);
-    // Progress total spans everything processed this call (chunks + tail).
-    const total = outcome.scanned + firstPage.pagination.total;
-    // Page math uses the limit the SERVER applied, not the one requested: a
-    // server that clamps 2500 back to 500 would make dividing by the requested
-    // size undercount pages and silently skip hints.
-    const effectiveLimit = firstPage.pagination.limit || PAGE_SIZE;
-    const totalPages = Math.ceil(firstPage.pagination.total / effectiveLimit);
-
-    // A page decrypts faster than the feed serves the next one, so a single-page
-    // prefetch leaves the scan network-bound. Keep a small sliding window of
-    // requests in flight; pages are still PROCESSED in order, so the leafIndex
-    // cursor invariants hold.
-    const PREFETCH = 3;
-    const inFlight = new Map<number, Promise<ScanHintPage>>();
-    const ensureFetching = (page: number) => {
-        if (page >= 2 && page <= totalPages && !inFlight.has(page)) {
-            inFlight.set(page, fetchPage(page));
-        }
-    };
-
-    try {
-        for (let p = 2; p < 2 + PREFETCH; p++) ensureFetching(p);
-        await processHints(ctx, firstPage.data, total);
-        for (let page = 2; page <= totalPages; page++) {
-            if (signal?.aborted) throw scanAbortError();
-            ensureFetching(page);
-            const current = await inFlight.get(page)!;
-            inFlight.delete(page);
-            for (let p = page + 1; p <= page + PREFETCH; p++) ensureFetching(p);
-            await processHints(ctx, current.data, total);
-        }
-    } finally {
-        // Abandoned prefetches (abort/error) must not surface as unhandled rejections.
-        for (const pending of inFlight.values()) pending.catch(() => {});
-    }
+    await processPaginatedTail(ctx, source, tailSince);
 
     return outcome;
 }

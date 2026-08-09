@@ -421,6 +421,54 @@ describe('runScan', () => {
         expect(vault.getAll()).toHaveLength(0);
         expect((await storage.getConfig())?.lastScannedLeafIndex).toBe(4);
     });
+
+    it('keeps a bounded window of chunk downloads in flight, processing in order', async () => {
+        // The window is what removes the serialized per-chunk round-trip; the
+        // in-order processing is what the cursor/checkpoint invariants rest on.
+        const chunks = Array.from({ length: 6 }, (_, c) =>
+            [0, 1, 2, 3, 4].map((i) => hint(c * 5 + i))
+        );
+        const flat = chunks.flat();
+        let inFlight = 0;
+        let maxInFlight = 0;
+        const source: ScanHintSource = {
+            async listHints({ limit, sinceLeafIndex }) {
+                const from = sinceLeafIndex ?? 0;
+                const data = flat.filter((h) => (h.leafIndex ?? 0) >= from);
+                return { data, pagination: { limit, total: data.length } };
+            },
+            chunks: {
+                async manifest() {
+                    return {
+                        chunkSize: 5,
+                        chunks: chunks.map((c, i) => ({ idx: i, count: c.length, digest: `d${i}` })),
+                        lastSealedLeaf: flat.length - 1,
+                        total: flat.length,
+                    };
+                },
+                async chunk(idx: number) {
+                    inFlight++;
+                    maxInFlight = Math.max(maxInFlight, inFlight);
+                    await new Promise((r) => setTimeout(r, 1));
+                    inFlight--;
+                    return chunks[idx]!;
+                },
+            },
+        };
+        const processed: number[] = [];
+
+        await scan({
+            hints: source,
+            pool: fakePool((h) => {
+                processed.push(h.leafIndex!);
+                return null;
+            }),
+        });
+
+        expect(maxInFlight).toBeGreaterThan(1); // the window actually overlaps downloads
+        expect(maxInFlight).toBeLessThanOrEqual(3); // and never exceeds PREFETCH
+        expect(processed).toEqual(flat.map((h) => h.leafIndex)); // strict ascending order
+    });
 });
 
 describe('collectNullifiersToQuery', () => {
