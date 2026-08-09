@@ -7,6 +7,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-08
+
+**Payment slips — a sender hands the recipient their note, no scan required.**
+After a private transfer to another user, the sender can produce an `orbslip1:`
+string and give it to the recipient, who rebuilds the note instantly instead of
+walking the pool. The slip carries only public on-chain data — the recipient
+output's commitment and encrypted memo — sealed toward the recipient so an
+interceptor learns nothing, not even that a payment is expected. The recipient
+opens it with their own viewing key, derives the stealth spending key, and gets a
+fully spendable note; a forged slip reconstructs nothing because the recomputed
+commitment must match the chain.
+
+Built on the outgoing viewing key (ovk), a sender-side auditing key that also
+lets a sender recover what they sent after a cold restore.
+
+### Added
+
+- **Payment slip (`src/protocol/memo/PaymentSlip.ts`).**
+    - `sealPaymentSlip(recipientIvk, fields)` / `openPaymentSlip(recipientIvsk, envelope)`
+      — seal a slip toward a recipient and open it (ECDH, ChaCha20-Poly1305,
+      domain `orbinum-payment-slip-v1`). `openPaymentSlip` returns `null` for a
+      slip that is not ours or is corrupt; it never throws.
+    - `encodePaymentSlip` / `decodePaymentSlip` — the `orbslip1:{payload}:{checksum}`
+      wire string; a mistyped or truncated slip fails the checksum and decodes to
+      `null`.
+    - `PAYMENT_SLIP_SCHEME`, and the `PaymentSlipFields` type
+      (`commitmentHex`, `encryptedMemo`, `leafIndex?`, `txHash?`).
+- **`importPaymentSlip(slip, keys)`** (`src/wallet/ops/notes`) — opens a slip and
+  reconstructs a spendable `ZkNote` through the SAME decryption path a scan uses
+  (`tryDecryptNote`): decrypt the memo, derive the stealth spending key, verify
+  the commitment. Stamps the slip's `txHash` as the note's creating tx so history
+  shows its origin. Returns `null` on a foreign or forged slip. Type
+  `SlipImportKeys`.
+- **`transferNotes` now returns `{ ...txResult, paymentSlip }`** for a transfer to
+  another user (type `TransferResult`). Best-effort: sealing the slip can never
+  fail the transfer, which has already landed on chain. Absent for self-transfers.
+- **Outgoing viewing key (ovk).**
+    - `deriveOutgoingViewingKey(masterBytes)` — `HKDF(masterBytes, "orbinum-ovk-v1")`,
+      a sibling of the ivsk (neither derives from the other, so incoming- and
+      outgoing-audit can be delegated independently). `PrivacyKeyManager` derives
+      and exposes it (`getOutgoingViewingKey()`).
+    - `sealOutgoingBlob` / `openOutgoingBlob` / `randomOutgoingBlob`,
+      `deriveOutgoingCipherKey`, `OVK_BLOB_SIZE` (`src/protocol/memo/OutgoingBlob.ts`)
+      — the 56-byte blob that wraps a memo's shared secret under the ovk.
+    - `tryRecoverOutgoing(hint, ovk)` → `OutgoingNoteRecord` — rebuilds the public
+      facts of a note the caller SENT (value, recipient stealth pk, blinding,
+      counterparty). Never a spendable note: no spending key, no nullifier.
+    - `NoteBuilder.build` seals an `ovkBlob` onto a stealth recipient note when an
+      `outgoingViewingKey` is supplied (`NoteInput.outgoingViewingKey`); the blob
+      is not persisted in the vault.
+    - Types `OutgoingNoteRecord` (with `blinding`, needed to recompute the
+      commitment) and `OutgoingHint`.
+
+### Notes
+
+- **The slip grants no spend power.** It holds only data already public on chain;
+  the recipient derives the stealth spending key from their own identity. It is
+  not a chain scan — only the one slip is opened.
+- **Why it is still encrypted.** The fields are public, but pairing them off-chain
+  would leak that this recipient is expecting this payment. Sealing toward the
+  recipient hides that correlation.
+- `leafIndex` is omitted from a sealed slip — a spend re-fetches the Merkle proof
+  by commitment, so it is not needed to reconstruct.
+- **Format constants are frozen** (`orbinum-payment-slip-v1`, the `orbslip1:`
+  scheme); a golden vector pins them. Changing them requires a new version.
+- **Residual, stated not hidden:** a leaked ovk lets an attacker fabricate a
+  self-consistent outgoing record — it moves no funds (Zcash accepts the same
+  residual), and the app runs recovery only over commitments from extrinsics that
+  spent the wallet's own nullifiers. The on-chain wire for the blob is a separate,
+  later change; this release ships the crypto and the sender-side slip.
+
 ## [1.1.1] - 2026-08-08
 
 ### Fixed
