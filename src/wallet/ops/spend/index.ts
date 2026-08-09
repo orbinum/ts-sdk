@@ -11,7 +11,13 @@
  * implementation serve a browser, an extension and a mobile runtime.
  */
 export { transferNotes } from './transfer';
-export type { TransferDeps, TransferParams, TransferStep, TransferSubmitRequest } from './transfer';
+export type {
+    TransferDeps,
+    TransferParams,
+    TransferStep,
+    TransferSubmitRequest,
+    TransferResult,
+} from './transfer';
 export { unshieldNote } from './unshield';
 export type {
     UnshieldDeps,

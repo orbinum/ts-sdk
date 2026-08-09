@@ -16,3 +16,13 @@ export {
     openOutgoingBlob,
     randomOutgoingBlob,
 } from './OutgoingBlob';
+
+// Payment slip: the sealed handoff a sender gives a recipient to skip scanning.
+export {
+    sealPaymentSlip,
+    openPaymentSlip,
+    encodePaymentSlip,
+    decodePaymentSlip,
+    PAYMENT_SLIP_SCHEME,
+} from './PaymentSlip';
+export type { PaymentSlipFields } from './PaymentSlip';
