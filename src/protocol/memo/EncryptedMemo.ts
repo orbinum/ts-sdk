@@ -13,7 +13,7 @@
  * tagActivationLeaf.
  *
  * Plaintext layout (120 bytes):
- *   value_lo(8 LE) || value_hi(8 LE) || owner_pk(32) || blinding(32) || asset_id(4 LE) || counterparty_pk(32) || circuit_version(4 LE)
+ *   value_lo(8 LE) || value_hi(8 LE) || owner_pk(32) || blinding(32) || asset_id(4 LE) || source_pk(32) || circuit_version(4 LE)
  *
  * value is stored as a 128-bit LE unsigned integer (two uint64 words), supporting
  * amounts up to ~3.4 × 10^38 planck — well above any realistic token supply.
@@ -75,9 +75,9 @@ function parsePlaintext(
         const ownerPk = bytesToBigintLE(plaintext.slice(16, 48));
         const blinding = bytesToBigintLE(plaintext.slice(48, 80));
         const assetId = BigInt(view.getUint32(80, true));
-        const counterpartyPk = bytesToBigintLE(plaintext.slice(84, 116));
+        const sourcePk = bytesToBigintLE(plaintext.slice(84, 116));
         const circuitVersion = view.getUint32(116, true);
-        return { value, ownerPk, blinding, assetId, counterpartyPk, circuitVersion };
+        return { value, ownerPk, blinding, assetId, sourcePk, circuitVersion };
     } catch {
         return null;
     }
@@ -98,7 +98,10 @@ export const EncryptedMemo = {
      *                           (from PrivacyKeyManager.getViewingPublicKeyPacked() or
      *                           decoded from a privacy address).
      *                           Pass `new Uint8Array(32)` (all zeros) for a publicly-readable memo.
-     * @param counterpartyPk     32-byte counterparty BJJ Ax. Default: all zeros.
+     * @param sourcePk           32-byte one-time key of the other party, or all
+     *                           zeros when there is none. Default: all zeros.
+     *                           See `NoteInput.sourcePk` — this is never a
+     *                           stable identity.
      * @param circuitVersion     ZK circuit version the note is spent under. Default: 0.
      * @param ephSkOverride      32-byte ephemeral secret key (stealth coordination). Optional.
      * @returns 180-byte encrypted memo: nonce(12) || ciphertext+MAC(136) || ephPk(32).
@@ -110,7 +113,7 @@ export const EncryptedMemo = {
         assetId: number,
         commitment: Uint8Array,
         recipientIvkPacked: Uint8Array,
-        counterpartyPk: Uint8Array = new Uint8Array(32),
+        sourcePk: Uint8Array = new Uint8Array(32),
         circuitVersion: number = 0,
         ephSkOverride?: Uint8Array
     ): Uint8Array {
@@ -120,7 +123,7 @@ export const EncryptedMemo = {
             ownerPk,
             blinding,
             assetId,
-            counterpartyPk,
+            sourcePk,
             circuitVersion
         );
 

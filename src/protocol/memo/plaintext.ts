@@ -5,7 +5,7 @@ const VIEW_TAG_DOMAIN = new TextEncoder().encode('orbinum-view-tag-v1');
 
 /**
  * Plaintext layout (120 bytes):
- *   value_lo(8 LE) || value_hi(8 LE) || owner_pk(32) || blinding(32) || asset_id(4 LE) || counterparty_pk(32) || circuit_version(4 LE)
+ *   value_lo(8 LE) || value_hi(8 LE) || owner_pk(32) || blinding(32) || asset_id(4 LE) || source_pk(32) || circuit_version(4 LE)
  *
  * value is stored as a 128-bit LE unsigned integer split into two uint64 words.
  * This supports values up to ~3.4 × 10^38, well above any realistic token supply.
@@ -15,12 +15,21 @@ const VIEW_TAG_DOMAIN = new TextEncoder().encode('orbinum-view-tag-v1');
  */
 export const MEMO_PLAINTEXT_SIZE = 120;
 
+/**
+ * Serialises the 120-byte memo plaintext.
+ *
+ * The BYTE OFFSETS are the frozen contract, not the parameter names — a golden
+ * vector pins them, and any other implementation has to agree with those offsets
+ * to interoperate. `sourcePk` occupies [84,116); older material calls that field
+ * `counterparty_pk`, which is the same 32 bytes under a name that wrongly
+ * suggested it identifies the sender (see `NoteInput.sourcePk`).
+ */
 export function serializeMemo(
     value: bigint,
     ownerPk: Uint8Array,
     blinding: Uint8Array,
     assetId: number,
-    counterpartyPk: Uint8Array,
+    sourcePk: Uint8Array,
     circuitVersion: number
 ): Uint8Array {
     const buf = new Uint8Array(MEMO_PLAINTEXT_SIZE);
@@ -31,7 +40,7 @@ export function serializeMemo(
     buf.set(ownerPk.slice(0, 32), 16);
     buf.set(blinding.slice(0, 32), 48);
     view.setUint32(80, assetId >>> 0, true);
-    buf.set(counterpartyPk.slice(0, 32), 84);
+    buf.set(sourcePk.slice(0, 32), 84);
     view.setUint32(116, circuitVersion >>> 0, true);
     return buf;
 }

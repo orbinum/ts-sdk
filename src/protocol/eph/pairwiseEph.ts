@@ -20,7 +20,7 @@
  * field, no migration.
  *
  * Where the counterparty comes from: the memo's plaintext carries
- * `counterpartyPk`, so the FIRST payment from a stranger is discovered by
+ * `sourcePk`, so the FIRST payment from a stranger is discovered by
  * ordinary trial decryption, and every payment after it is a hash lookup.
  * This makes recurring relationships — the common case for a wallet in daily
  * use — nearly free, while leaving first contact exactly as it is today.

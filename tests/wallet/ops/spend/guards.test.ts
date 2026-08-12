@@ -157,7 +157,7 @@ describe('malformed input notes never throw', () => {
             blinding: 42n,
             spendingKey: SPENDING_KEY,
             ownerPk: deriveOwnerPk(SPENDING_KEY),
-            counterpartyPk: 0n,
+            sourcePk: 0n,
             commitmentHex,
             nullifierHex: '0xn1',
             circuitVersion: 1,

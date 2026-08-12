@@ -20,7 +20,7 @@ const ownerPk = new Uint8Array(32).fill(0x01);
 const blinding = new Uint8Array(32).fill(0x02);
 const assetId = 3;
 const commitment = new Uint8Array(32).fill(0x04);
-const counterpartyPk = new Uint8Array(32).fill(0x09);
+const sourcePk = new Uint8Array(32).fill(0x09);
 
 // ─── ENCRYPTED_MEMO_SIZE ──────────────────────────────────────────────────────
 
@@ -171,7 +171,10 @@ describe('EncryptedMemo.decrypt — ECDH round-trip', () => {
         expect(result.assetId).toBe(BigInt(assetId));
     });
 
-    it('recovered counterpartyPk matches original', () => {
+    // The field at plaintext [84,116). Older material calls it `counterparty_pk`;
+    // surfaces as `sourcePk`. The bytes it was parsed from are unchanged — the
+    // layout tests in helpers.test.ts still assert offset [84,116) verbatim.
+    it('recovered sourcePk matches the bytes encrypted', () => {
         const enc = EncryptedMemo.encrypt(
             value,
             ownerPk,
@@ -179,13 +182,13 @@ describe('EncryptedMemo.decrypt — ECDH round-trip', () => {
             assetId,
             commitment,
             viewingPublicKey,
-            counterpartyPk
+            sourcePk
         );
         const result = EncryptedMemo.decrypt(enc, commitment, viewingSecretKey)!;
-        expect(result.counterpartyPk).toBe(bytesToBigintLE(counterpartyPk));
+        expect(result.sourcePk).toBe(bytesToBigintLE(sourcePk));
     });
 
-    it('counterpartyPk is 0n when not provided', () => {
+    it('sourcePk is 0n when none was provided', () => {
         const enc = EncryptedMemo.encrypt(
             value,
             ownerPk,
@@ -195,7 +198,7 @@ describe('EncryptedMemo.decrypt — ECDH round-trip', () => {
             viewingPublicKey
         );
         const result = EncryptedMemo.decrypt(enc, commitment, viewingSecretKey)!;
-        expect(result.counterpartyPk).toBe(0n);
+        expect(result.sourcePk).toBe(0n);
     });
 
     it('works with value = 0n', () => {

@@ -422,16 +422,16 @@ describe('computeNoteCommitment', () => {
     });
 });
 
-// ─── counterpartyPk round-trip ─────────────────────────────────────────────────
+// ─── sourcePk round-trip ─────────────────────────────────────────────────
 
-describe('tryDecryptNoteVerbose — counterpartyPk', () => {
-    it('counterpartyPk is 0n for shield notes (no counterpartyPk in input)', () => {
+describe('tryDecryptNoteVerbose — sourcePk', () => {
+    it('sourcePk is 0n for shield notes (no sourcePk in input)', () => {
         const result = tryDecryptNoteVerbose(validCommitment, viewingKey, SPENDING_KEY);
         expect(result.note).not.toBeNull();
-        expect(result.note!.counterpartyPk).toBe(0n);
+        expect(result.note!.sourcePk).toBe(0n);
     });
 
-    it('counterpartyPk is recovered correctly after encrypt/decrypt round-trip', async () => {
+    it('sourcePk is recovered correctly after encrypt/decrypt round-trip', async () => {
         const sk = SPENDING_KEY;
         const vsk = deriveViewingSecretKey(sk);
         const vpk = deriveViewingPublicKey(vsk);
@@ -442,7 +442,7 @@ describe('tryDecryptNoteVerbose — counterpartyPk', () => {
             ownerPk: 0n,
             blinding: 77n,
             spendingKey: sk,
-            counterpartyPk: cpk,
+            sourcePk: cpk,
         });
         const memoBytes = NoteBuilder.buildMemo(n, vpk);
         const commitment: ScanCommitment = {
@@ -452,7 +452,7 @@ describe('tryDecryptNoteVerbose — counterpartyPk', () => {
         };
         const result = tryDecryptNoteVerbose(commitment, vsk, sk);
         expect(result.note).not.toBeNull();
-        expect(result.note!.counterpartyPk).toBe(cpk);
+        expect(result.note!.sourcePk).toBe(cpk);
     });
 });
 
@@ -481,7 +481,7 @@ describe('stealth address — end-to-end (NoteBuilder + NoteDecryptor)', () => {
             value: 5000n,
             blinding: 77n,
             ownerPk: recipientOwnerPk,
-            counterpartyPk: senderOwnerPk,
+            sourcePk: senderOwnerPk,
             viewingPublicKey: recipientVpk,
             recipientOwnerPk,
         });

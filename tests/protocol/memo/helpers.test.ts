@@ -13,7 +13,7 @@ import { deriveOwnerPk } from '../../../src/protocol/keys/PrivacyKeys';
 // ─── serializeMemo ────────────────────────────────────────────────────────────
 //
 // Plaintext layout (120 bytes — mirrors Rust MemoData::to_bytes()):
-//   value_lo(8 LE) | value_hi(8 LE) | ownerPk(32) | blinding(32) | assetId(4 LE) | counterpartyPk(32)
+//   value_lo(8 LE) | value_hi(8 LE) | ownerPk(32) | blinding(32) | assetId(4 LE) | sourcePk(32)
 //
 // value is stored as a 128-bit LE unsigned integer (two uint64 words).
 // This is the Memo v2 format. Total plaintext size is 120 bytes.
@@ -23,7 +23,7 @@ describe('serializeMemo', () => {
     const ownerPk = new Uint8Array(32).fill(0x01);
     const blinding = new Uint8Array(32).fill(0x02);
     const assetId = 3;
-    const counterpartyPk = new Uint8Array(32).fill(0x04);
+    const sourcePk = new Uint8Array(32).fill(0x04);
     const circuitVersion = 2;
 
     it('returns a Uint8Array of exactly 120 bytes', () => {
@@ -32,7 +32,7 @@ describe('serializeMemo', () => {
             ownerPk,
             blinding,
             assetId,
-            counterpartyPk,
+            sourcePk,
             circuitVersion
         );
         expect(buf).toBeInstanceOf(Uint8Array);
@@ -45,7 +45,7 @@ describe('serializeMemo', () => {
             ownerPk,
             blinding,
             assetId,
-            counterpartyPk,
+            sourcePk,
             circuitVersion
         );
         const dv = new DataView(buf.buffer, buf.byteOffset);
@@ -60,7 +60,7 @@ describe('serializeMemo', () => {
             ownerPk,
             blinding,
             assetId,
-            counterpartyPk,
+            sourcePk,
             circuitVersion
         );
         expect(buf.slice(16, 48)).toEqual(ownerPk);
@@ -72,7 +72,7 @@ describe('serializeMemo', () => {
             ownerPk,
             blinding,
             assetId,
-            counterpartyPk,
+            sourcePk,
             circuitVersion
         );
         expect(buf.slice(48, 80)).toEqual(blinding);
@@ -84,26 +84,26 @@ describe('serializeMemo', () => {
             ownerPk,
             blinding,
             assetId,
-            counterpartyPk,
+            sourcePk,
             circuitVersion
         );
         const dv = new DataView(buf.buffer, buf.byteOffset);
         expect(dv.getUint32(80, true)).toBe(assetId);
     });
 
-    it('counterpartyPk occupies bytes [84, 116) — Memo v2 field', () => {
+    it('sourcePk occupies bytes [84, 116) — Memo v2 field', () => {
         const buf = serializeMemo(
             value,
             ownerPk,
             blinding,
             assetId,
-            counterpartyPk,
+            sourcePk,
             circuitVersion
         );
-        expect(buf.slice(84, 116)).toEqual(counterpartyPk);
+        expect(buf.slice(84, 116)).toEqual(sourcePk);
     });
 
-    it('zero counterpartyPk (shield/unshield) serializes to 32 zero bytes', () => {
+    it('zero sourcePk (shield/unshield) serializes to 32 zero bytes', () => {
         const zeroCpk = new Uint8Array(32);
         const buf = serializeMemo(value, ownerPk, blinding, assetId, zeroCpk, circuitVersion);
         expect(buf.slice(84, 116)).toEqual(new Uint8Array(32));
@@ -115,7 +115,7 @@ describe('serializeMemo', () => {
             ownerPk,
             blinding,
             assetId,
-            counterpartyPk,
+            sourcePk,
             circuitVersion
         );
         const dv = new DataView(buf.buffer, buf.byteOffset);
@@ -123,7 +123,7 @@ describe('serializeMemo', () => {
     });
 
     it('value = 0n serializes correctly', () => {
-        const buf = serializeMemo(0n, ownerPk, blinding, assetId, counterpartyPk, circuitVersion);
+        const buf = serializeMemo(0n, ownerPk, blinding, assetId, sourcePk, circuitVersion);
         const dv = new DataView(buf.buffer, buf.byteOffset);
         const lo = dv.getBigUint64(0, true);
         const hi = dv.getBigUint64(8, true);
@@ -137,7 +137,7 @@ describe('serializeMemo', () => {
             ownerPk,
             blinding,
             assetId,
-            counterpartyPk,
+            sourcePk,
             circuitVersion
         );
         const dv = new DataView(buf.buffer, buf.byteOffset);
@@ -154,7 +154,7 @@ describe('serializeMemo', () => {
             ownerPk,
             blinding,
             assetId,
-            counterpartyPk,
+            sourcePk,
             circuitVersion
         );
         const dv = new DataView(buf.buffer, buf.byteOffset);
@@ -164,7 +164,7 @@ describe('serializeMemo', () => {
     });
 
     it('assetId = 0 produces four zero bytes at offset 80', () => {
-        const buf = serializeMemo(value, ownerPk, blinding, 0, counterpartyPk, circuitVersion);
+        const buf = serializeMemo(value, ownerPk, blinding, 0, sourcePk, circuitVersion);
         expect(buf.slice(80, 84)).toEqual(new Uint8Array(4));
     });
 
@@ -174,7 +174,7 @@ describe('serializeMemo', () => {
             ownerPk,
             blinding,
             assetId,
-            counterpartyPk,
+            sourcePk,
             circuitVersion
         );
         const buf2 = serializeMemo(
@@ -182,7 +182,7 @@ describe('serializeMemo', () => {
             ownerPk,
             blinding,
             assetId,
-            counterpartyPk,
+            sourcePk,
             circuitVersion
         );
         expect(buf1).not.toEqual(buf2);
@@ -192,11 +192,11 @@ describe('serializeMemo', () => {
         const pk1 = new Uint8Array(32).fill(0xaa);
         const pk2 = new Uint8Array(32).fill(0xbb);
         expect(
-            serializeMemo(value, pk1, blinding, assetId, counterpartyPk, circuitVersion)
-        ).not.toEqual(serializeMemo(value, pk2, blinding, assetId, counterpartyPk, circuitVersion));
+            serializeMemo(value, pk1, blinding, assetId, sourcePk, circuitVersion)
+        ).not.toEqual(serializeMemo(value, pk2, blinding, assetId, sourcePk, circuitVersion));
     });
 
-    it('different counterpartyPks produce different serializations', () => {
+    it('different sourcePks produce different serializations', () => {
         const cpk1 = new Uint8Array(32).fill(0x11);
         const cpk2 = new Uint8Array(32).fill(0x22);
         expect(serializeMemo(value, ownerPk, blinding, assetId, cpk1, circuitVersion)).not.toEqual(
@@ -204,13 +204,13 @@ describe('serializeMemo', () => {
         );
     });
 
-    it('mirrors the Rust MemoData::to_bytes() layout: value_lo|value_hi|ownerPk|blinding|assetId|counterpartyPk', () => {
+    it('mirrors the Rust MemoData::to_bytes() layout: value_lo|value_hi|ownerPk|blinding|assetId|sourcePk', () => {
         const buf = serializeMemo(
             value,
             ownerPk,
             blinding,
             assetId,
-            counterpartyPk,
+            sourcePk,
             circuitVersion
         );
         // Verify each region independently against the known layout
@@ -221,12 +221,12 @@ describe('serializeMemo', () => {
         expect(buf.slice(16, 48)).toEqual(ownerPk); // [16,48) ownerPk
         expect(buf.slice(48, 80)).toEqual(blinding); // [48,80) blinding
         expect(dv.getUint32(80, true)).toBe(assetId); // [80,84) assetId
-        expect(buf.slice(84, 116)).toEqual(counterpartyPk); // [84,116) counterpartyPk
+        expect(buf.slice(84, 116)).toEqual(sourcePk); // [84,116) sourcePk
     });
 
     it('ownerPk is truncated to 32 bytes when provided as longer slice', () => {
         const longPk = new Uint8Array(64).fill(0x07);
-        const buf = serializeMemo(value, longPk, blinding, assetId, counterpartyPk, circuitVersion);
+        const buf = serializeMemo(value, longPk, blinding, assetId, sourcePk, circuitVersion);
         expect(buf.slice(16, 48)).toEqual(longPk.slice(0, 32));
     });
 });

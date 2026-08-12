@@ -12,7 +12,7 @@ import {
     stampSpentTxHash,
 } from '../../../../src/wallet/vault/notes/meta';
 
-const note = (over: Partial<ZkNote>): ZkNote => ({ counterpartyPk: 0n, ...over }) as ZkNote;
+const note = (over: Partial<ZkNote>): ZkNote => ({ sourcePk: 0n, ...over }) as ZkNote;
 
 describe('noteMeta', () => {
     it('origin: zero counterpartyPk → shield, non-zero → private-transfer', () => {

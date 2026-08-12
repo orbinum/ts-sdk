@@ -34,7 +34,7 @@ function makeNote(overrides: Partial<ZkNote> = {}): ZkNote {
         spent: false,
         spentAt: null,
         memo: [],
-        counterpartyPk: 0n,
+        sourcePk: 0n,
         ...overrides,
     };
 }

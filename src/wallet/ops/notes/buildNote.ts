@@ -48,8 +48,9 @@ export interface BuildNoteParams {
     spendingKey?: bigint | undefined;
     /** Packed viewing public key of the RECIPIENT, from their privacy address. */
     viewingPublicKey?: Uint8Array | undefined;
-    /** Counterparty ownerPk. Zero for shield/unshield notes. */
-    counterpartyPk?: bigint | undefined;
+    /** One-time key of the other party, stamped in the memo. Zero when there is
+     *  none — shield/unshield, or a spend with no one-time key to offer. */
+    sourcePk?: bigint | undefined;
     /** Recipient's global ownerPk. With `viewingPublicKey`, enables stealth. */
     recipientOwnerPk?: bigint | undefined;
     /**
@@ -107,8 +108,8 @@ export async function buildZkNote(params: BuildNoteParams, deps: BuildNoteDeps):
         viewingPublicKey,
         circuitVersion: params.circuitVersion,
         // Omitted rather than passed as undefined: the builder distinguishes an
-        // absent recipient (a self note) from one explicitly set.
-        ...(params.counterpartyPk !== undefined && { counterpartyPk: params.counterpartyPk }),
+        // absent other party (a self note) from one explicitly set.
+        ...(params.sourcePk !== undefined && { sourcePk: params.sourcePk }),
         ...(params.recipientOwnerPk !== undefined && {
             recipientOwnerPk: params.recipientOwnerPk,
         }),
