@@ -52,7 +52,7 @@ export class NoteBuilder {
         const ownerPk = input.ownerPk ?? 0n;
         const blinding = input.blinding ?? BigInt(Date.now());
         const spendingKey = input.spendingKey ?? 0n;
-        const counterpartyPk = input.counterpartyPk ?? 0n;
+        const sourcePk = input.sourcePk ?? 0n;
         const circuitVersion = input.circuitVersion ?? CURRENT_CIRCUIT_VERSION;
 
         const useStealth =
@@ -102,7 +102,7 @@ export class NoteBuilder {
                     Number(assetId),
                     stealthCommitmentBytes,
                     recipientIvkPacked,
-                    bigintTo32Le(counterpartyPk),
+                    bigintTo32Le(sourcePk),
                     circuitVersion,
                     ephSk
                 )
@@ -153,7 +153,7 @@ export class NoteBuilder {
                 commitmentHex: toHex(commitmentBytes),
                 nullifierHex: toHex(nullifierBytes),
                 memo,
-                counterpartyPk,
+                sourcePk,
                 ...(ovkBlob ? { ovkBlob } : {}),
             };
         }
@@ -174,7 +174,7 @@ export class NoteBuilder {
                           Number(assetId),
                           commitmentBytes,
                           input.viewingPublicKey,
-                          bigintTo32Le(counterpartyPk),
+                          bigintTo32Le(sourcePk),
                           circuitVersion,
                           input.ephSkOverride
                       )
@@ -200,7 +200,7 @@ export class NoteBuilder {
             commitmentHex: toHex(commitmentBytes),
             nullifierHex: toHex(nullifierBytes),
             memo,
-            counterpartyPk,
+            sourcePk,
         };
     }
 
@@ -213,13 +213,13 @@ export class NoteBuilder {
      * @param note                    The ZkNote whose fields populate the plaintext.
      * @param recipientIvkPacked      32-byte LE packed BJJ viewing public key of the recipient.
      *                                Pass `new Uint8Array(32)` (default) for a public/dummy memo.
-     * @param counterpartyPk          32-byte counterparty BabyJubJub Ax.
+     * @param sourcePk          32-byte counterparty BabyJubJub Ax.
      *                                Pass `new Uint8Array(32)` (default) for no counterparty.
      */
     static buildMemo(
         note: ZkNote,
         recipientIvkPacked?: Uint8Array,
-        counterpartyPk?: Uint8Array
+        sourcePk?: Uint8Array
     ): Uint8Array {
         return EncryptedMemo.encrypt(
             note.value,
@@ -228,7 +228,7 @@ export class NoteBuilder {
             Number(note.assetId),
             bigintTo32Le(note.commitment),
             recipientIvkPacked ?? new Uint8Array(32),
-            counterpartyPk ?? bigintTo32Le(note.counterpartyPk ?? 0n),
+            sourcePk ?? bigintTo32Le(note.sourcePk ?? 0n),
             note.circuitVersion
         );
     }

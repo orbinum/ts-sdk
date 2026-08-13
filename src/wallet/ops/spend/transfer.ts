@@ -16,7 +16,7 @@
  * recipient's viewing key (stealth when they shared a privacy address); the
  * change note goes back to the sender under a viewing key derived from the
  * INPUT's spending key, so a rescan under the same identity can always reopen
- * it. The change note's counterpartyPk records the recipient's ONE-TIME
+ * it. The change note's sourcePk records the recipient's ONE-TIME
  * stealth key rather than their global one, so the vault never stores a stable
  * identifier of who was paid.
  */
@@ -68,7 +68,7 @@ export interface TransferDeps {
         assetId: bigint;
         ownerPk: bigint;
         spendingKey?: bigint;
-        counterpartyPk: bigint;
+        sourcePk: bigint;
         viewingPublicKey?: Uint8Array;
         recipientOwnerPk?: bigint;
     }) => Promise<ZkNote>;
@@ -194,7 +194,7 @@ export async function transferNotes(
         value: transferAmount,
         assetId: noteA.assetId,
         ownerPk: recipientPk,
-        counterpartyPk: effectiveSenderPk,
+        sourcePk: effectiveSenderPk,
         // Undefined → dummy memo; the recipient finds the note by scanning.
         ...(recipientViewingPublicKey !== undefined
             ? { viewingPublicKey: recipientViewingPublicKey }
@@ -205,14 +205,14 @@ export async function transferNotes(
 
     // No stealth for the change: the circuit validates the eventual spend by
     // BabyPbk(spendingKey).Ax === ownerPk, so the pair must be the sender's
-    // real one. counterpartyPk records the recipient's ONE-TIME stealth key —
+    // real one. sourcePk records the recipient's ONE-TIME stealth key —
     // never their stable global identifier.
     const changeNote = await deps.buildNote({
         value: changeValue,
         assetId: noteA.assetId,
         ownerPk: effectiveSenderPk,
         spendingKey: noteA.spendingKey,
-        counterpartyPk: recipientNote.ownerPk,
+        sourcePk: recipientNote.ownerPk,
         viewingPublicKey: senderViewingPublicKey,
     });
 

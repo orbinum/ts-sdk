@@ -26,7 +26,7 @@ function makeNote(overrides: Partial<ZkNote> = {}): ZkNote {
         commitmentHex: COMMIT_HEX,
         nullifierHex: NULL_HEX,
         memo: [],
-        counterpartyPk: 0n,
+        sourcePk: 0n,
         spent: false,
         spentAt: null,
         ...overrides,
@@ -177,7 +177,7 @@ describe('decryptNoteRecord', () => {
             blinding: 22222222222222222222n,
             commitment: 33333333333333333333n,
             nullifier: 44444444444444444444n,
-            counterpartyPk: 55555555555555555555n,
+            sourcePk: 55555555555555555555n,
         });
         const rec = await encryptNote(key, blindKey, note);
         const decrypted = await decryptNoteRecord(key, rec);
@@ -187,7 +187,7 @@ describe('decryptNoteRecord', () => {
         expect(decrypted.blinding).toBe(note.blinding);
         expect(decrypted.commitment).toBe(note.commitment);
         expect(decrypted.nullifier).toBe(note.nullifier);
-        expect(decrypted.counterpartyPk).toBe(note.counterpartyPk);
+        expect(decrypted.sourcePk).toBe(note.sourcePk);
     });
 
     it('lanza si la nota descifrada no lleva circuitVersion (fail-closed, cero legacy)', async () => {

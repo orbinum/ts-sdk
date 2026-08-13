@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**`counterpartyPk` is now `sourcePk`.**
+
+The field holds a key used for exactly ONE transfer, but the old name read like
+a stable identifier for the other party — an invitation to treat it as "who
+this counterparty is" and correlate payments by it. `sourcePk` says what it is:
+the source of this note, and nothing beyond it.
+
+The **wire format is unchanged**. The same 32 bytes sit at plaintext `[84,116)`
+as before; the byte offsets are the frozen contract that other implementations
+agree with, not the parameter names.
+
+### Changed
+
+- **BREAKING** — `counterpartyPk` is `sourcePk` across `DecryptedMemo`,
+  `NoteInput`, `ZkNote` and `BuildNoteParams`, and in the `EncryptedMemo.build`
+  and `serializeMemo` parameters.
+- **BREAKING** — vault schema v4 → v5. A v4 record does NOT throw on read:
+  `sourcePk` is in `ABSENT_MEANS_ZERO`, so the old key's absence reads as a
+  legitimate zero. The note loads and spends fine while silently losing the only
+  copy of the payee a sender can still open. The bump exists because that
+  failure is quiet, not because the note becomes unusable. Wipe-and-rescan as
+  usual — the ephemeral counters carry forward.
+
+---
+
 **Values that crossed a trust boundary are validated before they become bytes.**
 
 The ABI encoder is total: it left-pads whatever it is handed into a 32-byte

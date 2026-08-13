@@ -6,8 +6,22 @@
  */
 import type { VaultConfigRecord } from './contract';
 
-/** The schema version this build writes and expects to read back. */
-export const VAULT_SCHEMA_VERSION = 4;
+/**
+ * The schema version this build writes and expects to read back.
+ *
+ * v5: `counterpartyPk` became `sourcePk` on the persisted note. A v4 record
+ * carries the old key, and reading it back does NOT throw — `sourcePk` is in
+ * `ABSENT_MEANS_ZERO`, so its absence reads as a legitimate zero. The note
+ * loads fine, spends fine, and silently loses the other party's key: the only
+ * copy of the payee a sender can still open. The bump exists because that
+ * failure is quiet, not because the note becomes unusable.
+ *
+ * No data migration — wipe-and-rescan IS this repo's migration mechanism, and
+ * nothing is lost by it: notes live on chain and come back from a scan, while
+ * the ephemeral counters (the one piece that cannot be rebuilt) are carried
+ * forward by `mergeCounters` rather than wiped.
+ */
+export const VAULT_SCHEMA_VERSION = 5;
 
 /**
  * Lowercases a chain fingerprint, or returns undefined when there is none —

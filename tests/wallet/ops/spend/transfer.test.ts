@@ -60,7 +60,7 @@ function makeNote(value: bigint, blinding = 9n, circuitVersion = 1): ZkNote {
         commitmentHex: toHex(new Uint8Array(bigintTo32LeArr(commitment))),
         nullifierHex: toHex(new Uint8Array(bigintTo32LeArr(blinding * 1000n))),
         memo: [],
-        counterpartyPk: 0n,
+        sourcePk: 0n,
         circuitVersion,
         spent: false,
         spentAt: null,
@@ -339,7 +339,7 @@ describe('transferNotes — output construction', () => {
             value: 30n,
             ownerPk: 99n,
             recipientOwnerPk: 99n,
-            counterpartyPk: OWNER_PK,
+            sourcePk: OWNER_PK,
         });
         expect(recipientCall!['viewingPublicKey']).toBe(ivk);
 
@@ -350,7 +350,7 @@ describe('transferNotes — output construction', () => {
             value: 20n,
             ownerPk: OWNER_PK,
             spendingKey: SPENDING_KEY,
-            counterpartyPk: builtNote(99n, 30n).ownerPk,
+            sourcePk: builtNote(99n, 30n).ownerPk,
         });
         expect(changeCall!['viewingPublicKey']).toEqual(SENDER_IVK);
         expect('recipientOwnerPk' in changeCall!).toBe(false);
@@ -413,7 +413,7 @@ describe('transferNotes — output construction', () => {
         const [recipientCall, changeCall] = deps.buildNote.mock.calls.map(
             (c) => c[0] as Record<string, unknown>
         );
-        expect(recipientCall!['counterpartyPk']).toBe(777n);
+        expect(recipientCall!['sourcePk']).toBe(777n);
         expect(changeCall!['ownerPk']).toBe(777n);
     });
 });

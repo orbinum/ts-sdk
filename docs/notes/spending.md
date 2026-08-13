@@ -98,7 +98,7 @@ is a chain under load, and retrying harder makes that worse.
 - **Change note** — back to the sender, and two details are load-bearing:
     - its viewing key derives from the **input's** spending key, so a rescan
       under the same identity always reopens it;
-    - its `counterpartyPk` records the recipient's **one-time stealth key**,
+    - its `sourcePk` records the recipient's **one-time stealth key**,
       never their stable identifier — the vault must not become a ledger of who
       was paid.
 

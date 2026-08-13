@@ -43,7 +43,7 @@ function makeNote(value = 50n): ZkNote {
         commitmentHex: toHex(new Uint8Array(bigintTo32LeArr(commitment))),
         nullifierHex: '0x' + '22'.repeat(32),
         memo: [],
-        counterpartyPk: 0n,
+        sourcePk: 0n,
         circuitVersion: 1,
         spent: false,
         spentAt: null,

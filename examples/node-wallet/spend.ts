@@ -154,7 +154,7 @@ async function main() {
         value: amount,
         assetId: 0n,
         ownerPk: deriveOwnerPk(RECIPIENT_SK),
-        counterpartyPk: wallet.spendKeys().ownerPk,
+        sourcePk: wallet.spendKeys().ownerPk,
         viewingPublicKey: deriveViewingPublicKey(deriveViewingSecretKey(RECIPIENT_SK)),
         recipientOwnerPk: deriveOwnerPk(RECIPIENT_SK),
     });

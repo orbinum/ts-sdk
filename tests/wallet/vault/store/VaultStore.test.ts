@@ -13,6 +13,7 @@ import { createNotesCache } from '../../../../src/wallet/vault/notes/cache';
 import { createWalletSession } from '../../../../src/wallet/vault/session/WalletSession';
 import { deriveVaultKey, deriveVaultBlindKey } from '../../../../src/wallet/vault/crypto/keys';
 import { VaultLockedError } from '../../../../src/wallet/vault/session/errors';
+import { VAULT_SCHEMA_VERSION } from '../../../../src/wallet/vault/storage/config';
 import { deriveOwnerPk } from '../../../../src/protocol/keys/PrivacyKeys';
 import type { ZkNote } from '../../../../src/protocol/types';
 import type { ObservableNotesCache } from '../../../../src/wallet/vault/notes/cache';
@@ -336,7 +337,7 @@ describe('VaultStore', () => {
 
             await store.unlock(session.cryptoKey!, { expectedSchemaVersion: 4 });
 
-            expect((await storage.getConfig())?.v).toBe(4);
+            expect((await storage.getConfig())?.v).toBe(5);
         });
 
         it('resets on a NEWER stored version too', async () => {
@@ -357,6 +358,23 @@ describe('VaultStore', () => {
 
             expect(result.wasReset).toBe(false);
             expect(store.getAll().map((n) => n.commitmentHex)).toEqual(['0xa']);
+        });
+
+        it('resets a v4 vault under the current schema', async () => {
+            // The transition this bump exists for. A v4 record stores the note
+            // key as `counterpartyPk`, and reading it back does NOT throw:
+            // `sourcePk` is in ABSENT_MEANS_ZERO, so the missing key reads as a
+            // legitimate zero and the note loads and spends while having
+            // silently dropped the payee. Resetting is what stops that.
+            await store.save(note('0xa'));
+            await storage.putConfig({ id: 'main', v: 4, createdAt: 1, updatedAt: 1 });
+
+            const result = await store.unlock(session.cryptoKey!, {
+                expectedSchemaVersion: VAULT_SCHEMA_VERSION,
+            });
+
+            expect(result.wasReset).toBe(true);
+            expect(store.getAll()).toEqual([]);
         });
 
         it('skips the check when no version is expected', async () => {

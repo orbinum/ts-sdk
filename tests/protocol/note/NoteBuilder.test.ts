@@ -113,20 +113,20 @@ describe('NoteBuilder.build', () => {
         expect(note.spendingKey).toBe(0xabcdn);
     });
 
-    it('counterpartyPk defaults to 0n when not provided', async () => {
+    it('sourcePk defaults to 0n when not provided', async () => {
         const note = await NoteBuilder.build({ value: 100n, blinding: 1n });
-        expect(note.counterpartyPk).toBe(0n);
+        expect(note.sourcePk).toBe(0n);
     });
 
-    it('counterpartyPk is preserved from input', async () => {
+    it('sourcePk is preserved from input', async () => {
         const cpk = 0xdeadbeefcafen;
-        const note = await NoteBuilder.build({ value: 100n, blinding: 1n, counterpartyPk: cpk });
-        expect(note.counterpartyPk).toBe(cpk);
+        const note = await NoteBuilder.build({ value: 100n, blinding: 1n, sourcePk: cpk });
+        expect(note.sourcePk).toBe(cpk);
     });
 
-    it('counterpartyPk does not affect commitment (same commitment with or without)', async () => {
+    it('sourcePk does not affect commitment (same commitment with or without)', async () => {
         const base = { value: 100n, assetId: 0n, ownerPk: 0n, blinding: 1n, spendingKey: 0n };
-        const withCpk = await NoteBuilder.build({ ...base, counterpartyPk: 0xdeadbeefn });
+        const withCpk = await NoteBuilder.build({ ...base, sourcePk: 0xdeadbeefn });
         const withoutCpk = await NoteBuilder.build(base);
         expect(withCpk.commitment).toBe(withoutCpk.commitment);
         expect(withCpk.nullifier).toBe(withoutCpk.nullifier);

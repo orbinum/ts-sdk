@@ -40,7 +40,7 @@ function note(over: Partial<ZkNote>): ZkNote {
         commitmentHex: '0xc',
         nullifierHex: '0xn',
         memo: [],
-        counterpartyPk: 0n,
+        sourcePk: 0n,
         spent: false,
         spentAt: null,
         ...over,
@@ -60,7 +60,7 @@ const CHANGE = note({
     commitmentHex: '0xc-change',
     nullifierHex: '0xn-change',
     value: 1_000_000_000_000_000n,
-    counterpartyPk: 0xabcn,
+    sourcePk: 0xabcn,
     spent: false,
 });
 
@@ -199,7 +199,7 @@ describe('reconstructOutgoingTxRecords', () => {
 
     it('record existente sin pk y change note sin counterparty → no reescribe nada', async () => {
         mocks.getTxRecords.mockResolvedValue([{ hash: '0xhash-100-2' }]);
-        mocks.getAll.mockReturnValue([INPUT, { ...CHANGE, counterpartyPk: 0n }]);
+        mocks.getAll.mockReturnValue([INPUT, { ...CHANGE, sourcePk: 0n }]);
 
         await reconstructOutgoingTxRecords(makeIndexer());
 

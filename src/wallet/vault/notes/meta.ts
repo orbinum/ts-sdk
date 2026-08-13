@@ -38,9 +38,9 @@ export type NoteWithMeta = ZkNote & {
 };
 
 /** Shield deposit vs PrivateTransfer output (received or change) — the memo's
- * counterpartyPk is zero only for shield/unshield-built notes. */
+ * sourcePk is zero only for shield/unshield-built notes. */
 export function noteOrigin(note: ZkNote): 'shield' | 'private-transfer' {
-    return note.counterpartyPk === 0n ? 'shield' : 'private-transfer';
+    return note.sourcePk === 0n ? 'shield' : 'private-transfer';
 }
 
 export function noteCreatedAt(note: ZkNote): number | null {

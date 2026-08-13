@@ -25,7 +25,7 @@ const note = (over: Partial<Record<string, unknown>> = {}): ZkNote =>
         spendingKey: 3n,
         commitment: 4n,
         nullifier: 5n,
-        counterpartyPk: 6n,
+        sourcePk: 6n,
         circuitVersion: 1,
         spent: false,
         spentAt: null,
@@ -40,18 +40,18 @@ describe('NOTE_BIGINT_FIELDS', () => {
             'assetId',
             'blinding',
             'commitment',
-            'counterpartyPk',
             'nullifier',
             'ownerPk',
+            'sourcePk',
             'spendingKey',
             'value',
         ]);
     });
 
-    it('includes counterpartyPk — the one a host enumerating by hand misses', () => {
+    it('includes sourcePk — the one a host enumerating by hand misses', () => {
         // Optional on the way in, so it is easy to leave out; a string here
         // breaks change-note construction rather than the balance.
-        expect(NOTE_BIGINT_FIELDS).toContain('counterpartyPk');
+        expect(NOTE_BIGINT_FIELDS).toContain('sourcePk');
     });
 });
 
@@ -82,12 +82,12 @@ describe('normalizeNote', () => {
         expect(repaired.commitmentHex).toBe('0xc1');
     });
 
-    it('defaults an ABSENT counterpartyPk to zero — that is its real value', () => {
+    it('defaults an ABSENT sourcePk to zero — that is its real value', () => {
         // The type documents it as "Zero for shield/unshield notes", and older
         // records omit it entirely. Those notes are good; rejecting them would
         // make a wallet drop notes it can spend.
-        const repaired = normalizeNote(note({ counterpartyPk: undefined }));
-        expect(repaired.counterpartyPk).toBe(0n);
+        const repaired = normalizeNote(note({ sourcePk: undefined }));
+        expect(repaired.sourcePk).toBe(0n);
     });
 
     it('does NOT default any other absent scalar', () => {
