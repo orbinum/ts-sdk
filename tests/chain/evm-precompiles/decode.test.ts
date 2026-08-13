@@ -290,3 +290,110 @@ describe('decodePrecompileCalldata — method', () => {
         expect(decodePrecompileCalldata(SP_ADDR, calldata)?.method).toBe('shield');
     });
 });
+
+// ─── Truncated calldata is not a source of invented values ───────────────────
+//
+// This decoder reads calldata taken FROM THE CHAIN, so its input is whatever
+// anyone chose to submit — including a call that was never valid. `decodeUint`
+// reads a fixed 32-byte window and substitutes `?? 0` for bytes past the end,
+// so a half-present field is completed with zeros and returns a number nobody
+// encoded. Consumers render `args.amount` to the user as the transaction's
+// value, which makes a fabricated amount worse than an absent one.
+
+describe('decodePrecompileCalldata — truncated input', () => {
+    /** A well-formed call, cut to `bytes` of payload after the selector. */
+    function truncate(fullCalldata: string, bytes: number): string {
+        return fullCalldata.slice(0, 10 + bytes * 2);
+    }
+
+    const fullUnshield = () =>
+        new ShieldedPoolPrecompile(mockEvm()).buildUnshieldCalldata({
+            proof: PROOF,
+            merkleRoot: ROOT,
+            nullifier: NULLIFIER,
+            assetId: 0,
+            amount: 1000n,
+            recipientAddress: RECIPIENT,
+            circuitVersion: 1,
+        });
+
+    it('does not report an amount when the amount field is cut in half', () => {
+        // The amount slot is [128,160). Sixteen present bytes of 0xff plus
+        // sixteen substituted zeros decode to ~1.15e77 — a value the sender
+        // never wrote, shown to a user as what they are about to pay.
+        const cut = truncate(fullUnshield(), 144);
+        const decoded = decodePrecompileCalldata(SP_ADDR, cut);
+
+        expect(decoded?.args['amount']).toBeUndefined();
+    });
+
+    it('does not report fields that lie entirely past the end', () => {
+        const cut = truncate(fullUnshield(), 100);
+        const decoded = decodePrecompileCalldata(SP_ADDR, cut);
+
+        expect(decoded?.args['amount']).toBeUndefined();
+        expect(decoded?.args['circuitVersion']).toBeUndefined();
+    });
+
+    it('still names the method for a truncated call', () => {
+        // Losing the args must not lose the classification: the UI can still
+        // label the row, it just has no amount to show.
+        const decoded = decodePrecompileCalldata(SP_ADDR, truncate(fullUnshield(), 100));
+
+        expect(decoded?.method).toBe('unshield');
+    });
+
+    it('decodes every field when the calldata is complete', () => {
+        const decoded = decodePrecompileCalldata(SP_ADDR, fullUnshield());
+
+        expect(decoded?.args['amount']).toBe(1000n);
+        expect(decoded?.args['circuitVersion']).toBe(1n);
+    });
+});
+
+// ─── Array offsets are read from the calldata itself ─────────────────────────
+
+describe('decodePrecompileCalldata — hostile array offsets', () => {
+    /** A privateTransfer head with `offset` written into the nullifiers slot. */
+    function transferWithNullifierOffset(offset: bigint, headSlots = 8): string {
+        const data = new Uint8Array(headSlots * 32);
+        const slot = new Uint8Array(32);
+        let v = offset;
+        for (let i = 31; i >= 0; i--) {
+            slot[i] = Number(v & 0xffn);
+            v >>= 8n;
+        }
+        data.set(slot, 64); // [64,96) — offset → nullifiers
+        const hex = Array.from(data, (b) => b.toString(16).padStart(2, '0')).join('');
+        return '0x66ed2cd4' + hex;
+    }
+
+    it('does not report a count for an offset past the end of the calldata', () => {
+        // The offset is attacker-chosen. Following it past the end reads a
+        // length out of substituted zero bytes and reports "0 nullifiers" for a
+        // call whose shape is unknown.
+        const decoded = decodePrecompileCalldata(SP_ADDR, transferWithNullifierOffset(2n ** 64n));
+
+        expect(decoded?.args['nullifiers']).toBeUndefined();
+    });
+
+    it('does not report a count for an offset that lands on a partial word', () => {
+        // An offset 16 bytes short of the end leaves half a length word, which
+        // decodes to a huge number rather than failing.
+        const decoded = decodePrecompileCalldata(
+            SP_ADDR,
+            transferWithNullifierOffset(BigInt(8 * 32 - 16))
+        );
+
+        expect(decoded?.args['nullifiers']).toBeUndefined();
+    });
+
+    it('still reports the fixed fields when an offset is unusable', () => {
+        // The head is intact, so root/assetId/fee/circuitVersion remain valid —
+        // only the array counts are dropped.
+        const decoded = decodePrecompileCalldata(SP_ADDR, transferWithNullifierOffset(2n ** 64n));
+
+        expect(decoded?.method).toBe('privateTransfer');
+        expect(decoded?.args['circuitVersion']).toBeDefined();
+    });
+});

@@ -5,6 +5,77 @@ All notable changes to the Orbinum TypeScript SDK will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+**Values that crossed a trust boundary are validated before they become bytes.**
+
+The ABI encoder is total: it left-pads whatever it is handed into a 32-byte
+word. That makes the encoder a silent corruption point rather than a rejection
+point, and the fields flowing through it become on-chain commitments,
+nullifiers and circuit selectors — where a wrong value is not an error but a
+note nobody can find or spend.
+
+### Added
+
+- `isHexOfLength(value, byteLen)` — total predicate on `unknown`, for values
+  that arrived from outside and must be a hex string of an exact byte length.
+- `buildShieldCalldata`, `buildPrivateTransferCalldata`, `buildUnshieldCalldata`
+  and `buildClaimShieldedFeesCalldata` are exported as standalone functions from
+  `chain/evm/precompiles`. Building calldata is a pure function of its params,
+  so a custom signing flow no longer has to construct an `EvmClient` it never
+  calls. The methods of the same name stay on `ShieldedPoolPrecompile` and now
+  delegate to these.
+
+### Changed
+
+- `ShieldedPoolPrecompile` is transport only — the precompile address, the
+  signer callback, gas estimation. Calldata construction and its validation move
+  to `shieldedPoolCalldata`, which has no chain dependency.
+
+### Fixed
+
+- **Security** — `fromHex` rejects non-hex up front. `parseInt(_, 16)` accepts
+  a valid prefix and drops the rest (`"1z"` → `1`, `"-1"` → `-1`), so near-hex
+  from an untrusted source decoded into attacker-chosen bytes instead of
+  throwing.
+- **Security** — calldata builders validate before encoding. An empty string
+  became 32 zero bytes, and an oversized number was truncated on the far side:
+  a `circuitVersion` of `2^32` reads back as `0` and silently selects a
+  different verifying key. `bytes32` and `uint32` fields are now checked where
+  the field name is still known.
+- `bigintTo32Le` / `bigintTo32Be` / `bigintTo32LeArr` throw on a negative value
+  or one ≥ 2^256. Both were silent: `>>` on a negative is arithmetic and
+  converges to `-1n` (32×`0xFF`, read back as `2^256 - 1`), and oversized
+  values dropped their high bits (`2^256 + 7` → `7`).
+- **Security** — `decodePrecompileCalldata` reports no value for a field the
+  calldata does not fully contain. `decodeUint` reads a fixed 32-byte window and
+  substitutes `?? 0` past the end, so a half-present `amount` — sixteen real
+  bytes and sixteen invented zeros — decoded to ~1.15e77 instead of failing.
+  This input comes from the chain, so a truncated or hand-crafted call is
+  ordinary, and consumers render `args.amount` to the user as what a transaction
+  moved. The method is still named; only the fabricated fields are dropped.
+- **Security** — `privateTransfer` array counts are read only when the offset,
+  which is itself attacker-chosen calldata, lands on a complete length word.
+  Following an out-of-range offset reported "0 nullifiers" for a call whose
+  shape is unknown.
+- **Security** — the ABI encoder refuses a `bytes32` that is not exactly 32
+  bytes instead of truncating it to the first 32 or right-padding it with zeros.
+  Both produced a well-formed slot holding a value nobody asked to encode. The
+  rule now applies to `bytes32[]` too, where the array encoder kept its own copy
+  of the slot logic — that is the path every nullifier and commitment in a
+  private transfer takes. An `address` longer than 20 bytes is refused with a
+  message naming the value rather than a `RangeError` from inside the encoder,
+  for `address[]` as well.
+- **Security** — an `unshield` recipient longer than 32 bytes is refused rather
+  than truncated to its first 32. The slot is `bytes32`, so an over-long address
+  was cut down and the funds left the pool toward an account the caller never
+  named, from calldata that looked well-formed. A SHORT address is still
+  right-padded: an H160 followed by twelve zero bytes is a legitimate
+  `EeSuffix` AccountId32.
+- `decodePrecompileCalldata` accepts both the 8-slot and 9-slot
+  `privateTransfer` layouts; every field it reads sits at the same offset in
+  both.
+
 ## [1.4.0] - 2026-08-12
 
 **A restored vault no longer republishes an ephemeral key.**

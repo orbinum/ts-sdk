@@ -42,6 +42,20 @@ function methodOf(fnSig: string): PrecompileMethod | null {
 }
 
 /**
+ * Is the ABI head long enough to hold `slots` complete 32-byte words?
+ *
+ * `decodeUint` reads a fixed 32-byte window and substitutes `?? 0` for bytes
+ * past the end, so a field that is half present decodes to a value nobody
+ * encoded — 16 bytes of `0xff` followed by 16 substituted zeros reads as
+ * ~1.15e77. This input comes from the CHAIN, so a truncated or hand-crafted
+ * call is ordinary, and consumers render `args.amount` to the user as what a
+ * transaction moved. An absent field is honest; a fabricated one is not.
+ */
+function hasFullHead(data: Uint8Array, slots: number): boolean {
+    return data.length >= slots * 32;
+}
+
+/**
  * Decodes EVM calldata for a known Orbinum precompile.
  *
  * @param address - The precompile contract address (0x-prefixed).
@@ -62,6 +76,7 @@ export function decodePrecompileCalldata(address: string, input: string): Decode
     if (fnSig.startsWith('shield(')) {
         try {
             const data = fromHex(input.slice(10));
+            if (!hasFullHead(data, 3)) return { fnSig, method: methodOf(fnSig), args: {} };
             const assetId = decodeUint(data, 0);
             const commitment = toHex(data.slice(32, 64));
             // amount is msg.value — not present in calldata
@@ -79,6 +94,7 @@ export function decodePrecompileCalldata(address: string, input: string): Decode
     if (fnSig.startsWith('unshield(')) {
         try {
             const data = fromHex(input.slice(10));
+            if (!hasFullHead(data, 10)) return { fnSig, method: methodOf(fnSig), args: {} };
             const root = toHex(data.slice(32, 64));
             const nullifier = toHex(data.slice(64, 96));
             const assetId = decodeUint(data, 96);
@@ -106,26 +122,41 @@ export function decodePrecompileCalldata(address: string, input: string): Decode
         }
     }
 
-    // privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32)
-    // ABI head after selector:
+    // privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32[,bytes])
+    // ABI head after selector (both the legacy 8-slot and current 9-slot layout —
+    // every field read below sits at the same offset in both):
     // [0-31] offset→proof | [32-63] root | [64-95] offset→nullifiers
     // [96-127] offset→commitments | [128-159] offset→memos
     // [160-191] assetId (uint32) | [192-223] fee (uint256) | [224-255] circuit_version (uint32)
     if (fnSig.startsWith('privateTransfer(')) {
         try {
             const data = fromHex(input.slice(10));
+            if (!hasFullHead(data, 8)) return { fnSig, method: methodOf(fnSig), args: {} };
             const root = toHex(data.slice(32, 64));
-            const nullOffset = Number(decodeUint(data, 64)); // byte offset into data
-            const commOffset = Number(decodeUint(data, 96)); // byte offset into data
-            const nullifiers = Number(decodeUint(data, nullOffset));
-            const commitments = Number(decodeUint(data, commOffset));
             const assetId = decodeUint(data, 160);
             const fee = decodeUint(data, 192);
             const circuitVersion = decodeUint(data, 224);
+
+            // The array lengths sit at offsets read FROM the calldata, so they
+            // are attacker-chosen: an offset past the end would read a length
+            // of zero out of substituted bytes, and `Number()` on a 32-byte
+            // word silently loses precision well before that. Reported only
+            // when the offset actually lands on a complete length word.
+            const counts: Record<string, number> = {};
+            for (const [name, slot] of [
+                ['nullifiers', 64],
+                ['commitments', 96],
+            ] as const) {
+                const offset = decodeUint(data, slot);
+                if (offset <= BigInt(data.length - 32)) {
+                    counts[name] = Number(decodeUint(data, Number(offset)));
+                }
+            }
+
             return {
                 fnSig,
                 method: methodOf(fnSig),
-                args: { root, nullifiers, commitments, assetId, fee, circuitVersion },
+                args: { root, ...counts, assetId, fee, circuitVersion },
             };
         } catch {
             return { fnSig, method: methodOf(fnSig), args: {} };
@@ -144,6 +175,7 @@ export function decodePrecompileCalldata(address: string, input: string): Decode
     if (fnSig.startsWith('claimShieldedFees(')) {
         try {
             const data = fromHex(input.slice(10));
+            if (!hasFullHead(data, 7)) return { fnSig, method: methodOf(fnSig), args: {} };
             const commitment = toHex(data.slice(0, 32));
             const amount = decodeUint(data, 32);
             const assetId = decodeUint(data, 64);

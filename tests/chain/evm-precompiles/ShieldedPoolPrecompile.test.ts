@@ -124,6 +124,36 @@ describe('ShieldedPoolPrecompile.buildPrivateTransferCalldata', () => {
         expect(without).toBe(withZero);
     });
 
+    it('golden: the selector is the one the precompile decodes', () => {
+        // The argument count IS the selector: keccak covers the whole signature,
+        // so a ninth argument yields a different four bytes and the node answers
+        // "unsupported selector". That failure is silent — indistinguishable
+        // from a legitimate rejection — which is exactly how a stale selector
+        // went unnoticed before. Pin it.
+        const precompile = new ShieldedPoolPrecompile(mockEvm());
+        const calldata = precompile.buildPrivateTransferCalldata(TRANSFER_PARAMS);
+        expect(calldata.slice(0, 10)).toBe('0x66ed2cd4');
+    });
+
+    it('golden: the head is 8 slots, with the fee in slot 6', () => {
+        // Eight arguments, no trailing blob. Slot 6 is where the relay reads the
+        // fee (calldata[196..228] including the selector), so its position is
+        // part of the contract with the node, not an implementation detail.
+        const precompile = new ShieldedPoolPrecompile(mockEvm());
+        const calldata = precompile.buildPrivateTransferCalldata({
+            ...TRANSFER_PARAMS,
+            fee: 1_234n,
+        });
+        const params = calldata.slice(10);
+        const feeWord = params.slice(192 * 2, 224 * 2);
+        expect(BigInt('0x' + feeWord)).toBe(1_234n);
+
+        // Slot 7 (the last head slot) is the circuit version; nothing follows it
+        // in the head. A ninth argument would push the tail and break this.
+        const circuitWord = params.slice(224 * 2, 256 * 2);
+        expect(parseInt(circuitWord, 16)).toBe(TRANSFER_PARAMS.circuitVersion);
+    });
+
     it('produces different calldata for different fee values', () => {
         const precompile = new ShieldedPoolPrecompile(mockEvm());
         const noFee = precompile.buildPrivateTransferCalldata(TRANSFER_PARAMS);
