@@ -53,8 +53,8 @@ function extrinsicKey(row: Pick<TransferFactsRow, 'blockNumber' | 'extrinsicInde
 }
 
 /** A 0x-prefixed 64-char pk, or ZERO_PK when the note carries no counterparty. */
-function toPkHex(counterpartyPk: bigint | null | undefined): string {
-    return counterpartyPk != null && counterpartyPk !== 0n ? scalarToHex(counterpartyPk) : ZERO_PK;
+function toPkHex(sourcePk: bigint | null | undefined): string {
+    return sourcePk != null && sourcePk !== 0n ? scalarToHex(sourcePk) : ZERO_PK;
 }
 
 /**
@@ -72,9 +72,7 @@ function findChangeNote(
     const candidates = commitments
         .map((h) => noteByCommitment.get(h))
         .filter((n): n is ZkNote => n !== undefined);
-    return (
-        candidates.find((n) => n.counterpartyPk != null && n.counterpartyPk !== 0n) ?? candidates[0]
-    );
+    return candidates.find((n) => n.sourcePk != null && n.sourcePk !== 0n) ?? candidates[0];
 }
 
 /** Local records keyed by tx hash; an unavailable history reads as empty. */
@@ -132,7 +130,7 @@ export async function reconstructOutgoingTxRecords(deps: ReconstructDeps): Promi
             commitmentsByExtrinsic.get(extrinsicKey(transfer)) ?? [],
             noteByCommitment
         );
-        const recipientPkHex = toPkHex(changeNote?.counterpartyPk);
+        const recipientPkHex = toPkHex(changeNote?.sourcePk);
 
         // Backfill: the record exists but its recipient was unknown — update in
         // place, keeping every other field.

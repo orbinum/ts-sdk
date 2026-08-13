@@ -254,7 +254,7 @@ export function tryDecryptNoteVerbose(
             commitmentHex: toHex(bigintTo32Le(recomputed)),
             nullifierHex: toHex(bigintTo32Le(nullifier)),
             memo: Array.from(memoBytes),
-            counterpartyPk: plaintext.counterpartyPk,
+            sourcePk: plaintext.sourcePk,
         },
     };
 }
@@ -347,7 +347,7 @@ export function tryRecoverOutgoing(
         assetId: plaintext.assetId,
         recipientStealthPk: plaintext.ownerPk,
         blinding: plaintext.blinding,
-        counterpartyPk: plaintext.counterpartyPk,
+        sourcePk: plaintext.sourcePk,
         circuitVersion: plaintext.circuitVersion,
     };
 }

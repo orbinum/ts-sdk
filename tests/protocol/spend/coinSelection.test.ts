@@ -28,7 +28,7 @@ function note(value: bigint, opts: Partial<ZkNote> = {}): ZkNote {
         commitmentHex: '0x' + value.toString(16).padStart(64, '0'),
         nullifierHex: '0x' + (value + 1000n).toString(16).padStart(64, '0'),
         memo: [],
-        counterpartyPk: 0n,
+        sourcePk: 0n,
         ...opts,
     };
 }

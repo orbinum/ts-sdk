@@ -336,7 +336,7 @@ describe('buildZkNote', () => {
                     assetId: 7n,
                     ownerPk: 111n,
                     spendingKey: 222n,
-                    counterpartyPk: 333n,
+                    sourcePk: 333n,
                 },
                 { keys: KEYS }
             );
@@ -345,7 +345,7 @@ describe('buildZkNote', () => {
                 assetId: 7n,
                 ownerPk: 111n,
                 spendingKey: 222n,
-                counterpartyPk: 333n,
+                sourcePk: 333n,
                 circuitVersion: 2,
             });
         });
@@ -354,7 +354,7 @@ describe('buildZkNote', () => {
             // The builder distinguishes "no recipient" from an explicit value.
             await buildZkNote({ value: 5n, circuitVersion: 1 }, { keys: KEYS });
 
-            expect('counterpartyPk' in buildArgs()).toBe(false);
+            expect('sourcePk' in buildArgs()).toBe(false);
             expect('recipientOwnerPk' in buildArgs()).toBe(false);
         });
 

@@ -38,7 +38,7 @@ const note = (over: Partial<ZkNote> = {}): ZkNote =>
         blinding: 42n,
         spendingKey: SPENDING_KEY,
         ownerPk: deriveOwnerPk(SPENDING_KEY),
-        counterpartyPk: 0n,
+        sourcePk: 0n,
         commitmentHex: '0xc1',
         nullifierHex: '0xn1',
         circuitVersion: 1,
@@ -60,7 +60,7 @@ describe('resetVaultToEmpty', () => {
         await resetVaultToEmpty(storage, null, '0xchain');
 
         expect(clearNotes).not.toHaveBeenCalled();
-        expect(await storage.getConfig()).toMatchObject({ chainFingerprint: '0xchain', v: 4 });
+        expect(await storage.getConfig()).toMatchObject({ chainFingerprint: '0xchain', v: 5 });
     });
 
     it('clears the stored notes when a config already existed', async () => {

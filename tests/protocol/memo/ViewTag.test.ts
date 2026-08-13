@@ -274,7 +274,7 @@ describe('tryDecryptNote with viewTag option', () => {
             spendingKey: 1n, // sender-side placeholder; receiver re-derives stealth sk
             viewingPublicKey: ivk,
             recipientOwnerPk,
-            counterpartyPk: 777n,
+            sourcePk: 777n,
             circuitVersion: 1,
         });
         const sc = asScanCommitment(note);

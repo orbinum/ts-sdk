@@ -12,12 +12,12 @@ import {
     stampSpentTxHash,
 } from '../../../../src/wallet/vault/notes/meta';
 
-const note = (over: Partial<ZkNote>): ZkNote => ({ counterpartyPk: 0n, ...over }) as ZkNote;
+const note = (over: Partial<ZkNote>): ZkNote => ({ sourcePk: 0n, ...over }) as ZkNote;
 
 describe('noteMeta', () => {
-    it('origin: zero counterpartyPk → shield, non-zero → private-transfer', () => {
-        expect(noteOrigin(note({ counterpartyPk: 0n }))).toBe('shield');
-        expect(noteOrigin(note({ counterpartyPk: 123n }))).toBe('private-transfer');
+    it('origin: zero sourcePk → shield, non-zero → private-transfer', () => {
+        expect(noteOrigin(note({ sourcePk: 0n }))).toBe('shield');
+        expect(noteOrigin(note({ sourcePk: 123n }))).toBe('private-transfer');
     });
 
     it('createdAt: absent → null, stamped → value, survives spread', () => {

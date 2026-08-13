@@ -13,7 +13,7 @@
  * already exists.
  *
  * The field list belongs here because it is a fact about `ZkNote`, and a host
- * enumerating it independently would miss `counterpartyPk` — the one that is
+ * enumerating it independently would miss `sourcePk` — the one that is
  * optional on the way in and easy to overlook.
  */
 import type { ZkNote } from '../../../protocol/types';
@@ -33,20 +33,20 @@ export const NOTE_BIGINT_FIELDS = [
     'spendingKey',
     'commitment',
     'nullifier',
-    'counterpartyPk',
+    'sourcePk',
 ] as const satisfies readonly (keyof ZkNote)[];
 
 /**
  * Fields where an absent value means zero rather than damage.
  *
- * `counterpartyPk` is documented as "Zero for shield/unshield notes", and older
+ * `sourcePk` is documented as "Zero for shield/unshield notes", and older
  * records simply omit it — those notes are perfectly good. Defaulting the rest
  * would not be: a `spendingKey` or `blinding` quietly set to `0n` rebuilds a
  * DIFFERENT commitment than the one on chain, so the note sits in the balance
  * as money that cannot move and fails seconds into proving on an assert that
  * names nothing.
  */
-const ABSENT_MEANS_ZERO = new Set<string>(['counterpartyPk']);
+const ABSENT_MEANS_ZERO = new Set<string>(['sourcePk']);
 
 /**
  * Coerces a note's scalars to `bigint`, or throws naming the field that cannot

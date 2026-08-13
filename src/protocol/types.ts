@@ -39,7 +39,7 @@ export type DecryptedMemo = {
     /** Asset ID of the note. */
     assetId: bigint;
     /** Counterparty BabyJubJub Ax coordinate. Zero for shield/unshield notes. */
-    counterpartyPk: bigint;
+    sourcePk: bigint;
     /** ZK circuit version the note is spent under, recovered from the memo plaintext. */
     circuitVersion: number;
 };
@@ -70,7 +70,7 @@ export type NoteInput = {
      */
     recipientOwnerPk?: bigint;
     /** Counterparty BabyJubJub Ax coordinate. Zero for shield/unshield notes. Default 0n. */
-    counterpartyPk?: bigint;
+    sourcePk?: bigint;
     /** Circuit version to stamp on the note. Defaults to `CURRENT_CIRCUIT_VERSION`. */
     circuitVersion?: number;
     /**
@@ -141,7 +141,7 @@ export type ZkNote = {
      */
     memo: number[];
     /** Counterparty BabyJubJub Ax coordinate. Zero for shield/unshield notes. */
-    counterpartyPk: bigint;
+    sourcePk: bigint;
     /**
      * 56-byte outgoing-viewing-key blob (per-note in the domain object; becomes a
      * per-transaction field at submit, see the OVK plan §4.1). Present only on a
@@ -173,7 +173,7 @@ export type OutgoingNoteRecord = {
      *  recomputes the commitment — needed to rebuild a payment slip for the note. */
     blinding: bigint;
     /** Counterparty BabyJubJub Ax coordinate stamped in the memo. */
-    counterpartyPk: bigint;
+    sourcePk: bigint;
     /** Circuit version the sent note was created under. */
     circuitVersion: number;
 };

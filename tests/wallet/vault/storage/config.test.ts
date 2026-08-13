@@ -39,7 +39,7 @@ describe('buildConfig', () => {
     it('produce un VaultConfigRecord con id=main y v=4', () => {
         const cfg = buildConfig(null);
         expect(cfg.id).toBe('main');
-        expect(cfg.v).toBe(4);
+        expect(cfg.v).toBe(5);
     });
 
     it('stamps the version hosts pass as expectedSchemaVersion', () => {

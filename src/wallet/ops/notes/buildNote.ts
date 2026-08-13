@@ -51,7 +51,7 @@ export interface BuildNoteParams {
     /** Packed viewing public key of the RECIPIENT, from their privacy address. */
     viewingPublicKey?: Uint8Array | undefined;
     /** Counterparty ownerPk. Zero for shield/unshield notes. */
-    counterpartyPk?: bigint | undefined;
+    sourcePk?: bigint | undefined;
     /** Recipient's global ownerPk. With `viewingPublicKey`, enables stealth. */
     recipientOwnerPk?: bigint | undefined;
     /**
@@ -112,7 +112,7 @@ export async function buildZkNote(params: BuildNoteParams, deps: BuildNoteDeps):
         circuitVersion: params.circuitVersion,
         // Omitted rather than passed as undefined: the builder distinguishes an
         // absent recipient (a self note) from one explicitly set.
-        ...(params.counterpartyPk !== undefined && { counterpartyPk: params.counterpartyPk }),
+        ...(params.sourcePk !== undefined && { sourcePk: params.sourcePk }),
         ...(params.recipientOwnerPk !== undefined && {
             recipientOwnerPk: params.recipientOwnerPk,
         }),
