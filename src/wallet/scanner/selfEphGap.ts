@@ -49,7 +49,10 @@ export function resolveSelfEphCeiling(params: {
     windowSize?: number;
 }): number | null {
     const { notes, spendingKey, viewingKey, scanMaxIndex } = params;
-    const windowSize = params.windowSize ?? SELF_EPH_WINDOW;
+    const windowSize =
+        params.windowSize !== undefined && params.windowSize > 0
+            ? params.windowSize
+            : SELF_EPH_WINDOW;
     if (scanMaxIndex === null) return null;
     if (scanMaxIndex < windowSize - gapMargin(windowSize)) return scanMaxIndex;
 
@@ -78,11 +81,32 @@ export function resolveSelfEphCeiling(params: {
 }
 
 /**
+ * Ceiling on the precomputed window, in indexes.
+ *
+ * The window is an OPTIMISATION: every entry costs two EC muls to build and
+ * ~100 bytes of secret material to hold, and anything past the ceiling is found
+ * by trial decrypt instead — slower, but correct. Without a cap the counter
+ * doubles as a loop bound the scanner obeys, so a wallet reporting a billion
+ * used indexes asks for a billion-entry precompute and never finishes.
+ *
+ * Reaching this needs no corrupt vault, only a very long-lived wallet.
+ */
+export const MAX_EPH_WINDOW = SELF_EPH_WINDOW * 64;
+
+/**
  * Discovery window size for the next scan, given the persisted counter: at least
  * the default, rounded up so every index the wallet may already have used (plus
- * the gap margin) falls inside the fast path.
+ * the gap margin) falls inside the fast path, and never past `MAX_EPH_WINDOW`.
+ *
+ * The counter is read from a config that survives restores and hand-editing, so
+ * a non-finite value is treated as "no history" rather than propagated: `NaN`
+ * would make the builder's `i < from + count` false immediately and return an
+ * EMPTY window, silently disabling the fast path, while `Infinity` would make
+ * that same loop never terminate.
  */
 export function windowSizeForCounter(counter: number): number {
-    const needed = counter + gapMargin(SELF_EPH_WINDOW);
-    return Math.max(SELF_EPH_WINDOW, Math.ceil(needed / SELF_EPH_WINDOW) * SELF_EPH_WINDOW);
+    const used = Number.isFinite(counter) ? counter : 0;
+    const needed = used + gapMargin(SELF_EPH_WINDOW);
+    const rounded = Math.ceil(needed / SELF_EPH_WINDOW) * SELF_EPH_WINDOW;
+    return Math.min(MAX_EPH_WINDOW, Math.max(SELF_EPH_WINDOW, rounded));
 }

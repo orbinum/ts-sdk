@@ -13,6 +13,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { buildZkNote } from '../../../../src/wallet/ops/notes/buildNote';
 import { MemoryVaultStorage } from '../../../../src/index';
 import { deriveSelfEphSk } from '../../../../src/protocol/eph/selfEph';
+import { toHex } from '../../../../src/foundation/encoding/hex';
+import { buildConfig } from '../../../../src/wallet/vault/storage/config';
 import {
     derivePairwiseSharedSecret,
     derivePairwiseEphSk,
@@ -109,14 +111,72 @@ describe('buildZkNote', () => {
     });
 
     describe('paying a known privacy address', () => {
-        it('derives the ephemeral from the shared secret so the recipient can hash-lookup', async () => {
+        it('uses a RANDOM ephemeral on the first payment to a counterparty', async () => {
+            // The vault has no counter for them yet, and "no counter" is
+            // indistinguishable from "counter lost to a restore". Index 0 on a
+            // restored wallet republishes an ephPk, so the ambiguity is resolved
+            // the safe way: this payment costs the recipient a trial scan.
             await buildZkNote(
                 { value: 10n, circuitVersion: 1, viewingPublicKey: OTHER_IVK },
                 { keys: KEYS, storage }
             );
 
-            const expected = derivePairwiseEphSk(derivePairwiseSharedSecret(ivsk, OTHER_IVK), 0);
+            expect(buildArgs()['ephSkOverride']).toBeUndefined();
+        });
+
+        it('derives the ephemeral from the shared secret once the counter exists', async () => {
+            // Second payment onward: the entry is there, so the recipient gets
+            // the hash-lookup fast path back.
+            await buildZkNote(
+                { value: 10n, circuitVersion: 1, viewingPublicKey: OTHER_IVK },
+                { keys: KEYS, storage }
+            );
+            mocks.build.mockClear();
+
+            await buildZkNote(
+                { value: 20n, circuitVersion: 1, viewingPublicKey: OTHER_IVK },
+                { keys: KEYS, storage }
+            );
+
+            const expected = derivePairwiseEphSk(derivePairwiseSharedSecret(ivsk, OTHER_IVK), 1);
             expect(buildArgs()['ephSkOverride']).toEqual(expected);
+        });
+
+        it('THE LEAK: a restored vault never republishes an ephemeral it already used', async () => {
+            // The regression this change exists to prevent. Pay a counterparty
+            // twice, wipe the counter as a seed restore would, pay again — and
+            // the third note must not carry an ephSk either of the first two
+            // published. Reverting reservePairwiseIndex to return 0 makes this
+            // fail, which is the point.
+            await buildZkNote(
+                { value: 1n, circuitVersion: 1, viewingPublicKey: OTHER_IVK },
+                { keys: KEYS, storage }
+            );
+            await buildZkNote(
+                { value: 2n, circuitVersion: 1, viewingPublicKey: OTHER_IVK },
+                { keys: KEYS, storage }
+            );
+            const published = mocks.build.mock.calls
+                .map((c) => (c[0] as { ephSkOverride?: Uint8Array }).ephSkOverride)
+                .filter((e): e is Uint8Array => e !== undefined)
+                .map((e) => e.join(','));
+            expect(published.length).toBeGreaterThan(0);
+
+            // Restore: config survives, the counterparty entry does not.
+            const config = (await storage.getConfig())!;
+            delete config.pairwiseCounterparties![toHex(OTHER_IVK).toLowerCase()];
+            await storage.putConfig(config);
+            mocks.build.mockClear();
+
+            await buildZkNote(
+                { value: 3n, circuitVersion: 1, viewingPublicKey: OTHER_IVK },
+                { keys: KEYS, storage }
+            );
+
+            const after = buildArgs()['ephSkOverride'] as Uint8Array | undefined;
+            expect(after).toBeUndefined();
+            // And explicitly: whatever it uses, it is not one already on chain.
+            if (after) expect(published).not.toContain(after.join(','));
         });
 
         it('registers the counterparty, which makes the reverse direction cheap too', async () => {
@@ -145,6 +205,58 @@ describe('buildZkNote', () => {
             );
         });
 
+        it('falls back to random when the reservation throws', async () => {
+            // A locked or unreachable vault must not take index 0 either. The
+            // catch already did this; the test pins that null and throw share
+            // one outcome, so a future refactor cannot split them.
+            const broken = new MemoryVaultStorage();
+            await broken.putConfig(buildConfig(null));
+            broken.updateConfig = async () => {
+                throw new Error('storage unavailable');
+            };
+
+            await buildZkNote(
+                { value: 10n, circuitVersion: 1, viewingPublicKey: OTHER_IVK },
+                { keys: KEYS, storage: broken }
+            );
+
+            expect(buildArgs()['ephSkOverride']).toBeUndefined();
+        });
+
+        it('still registers the counterparty on the payment that returns null', async () => {
+            // The entry has to be written even though this payment goes random,
+            // or every payment to that address would stay on the slow path.
+            await buildZkNote(
+                { value: 10n, circuitVersion: 1, viewingPublicKey: OTHER_IVK },
+                { keys: KEYS, storage }
+            );
+
+            const parties = (await storage.getConfig())?.pairwiseCounterparties ?? {};
+            expect(parties[toHex(OTHER_IVK).toLowerCase()]?.nextIndex).toBe(1);
+        });
+
+        it('never derives index 0, which is the value a restore would collide on', async () => {
+            // Five payments to the same counterparty: the first goes random and
+            // the rest walk 1,2,3,4. Index 0 is not in the sequence at all.
+            for (let i = 0; i < 5; i++) {
+                await buildZkNote(
+                    { value: BigInt(i + 1), circuitVersion: 1, viewingPublicKey: OTHER_IVK },
+                    { keys: KEYS, storage }
+                );
+            }
+
+            const pairSecret = derivePairwiseSharedSecret(ivsk, OTHER_IVK);
+            const zero = derivePairwiseEphSk(pairSecret, 0).join(',');
+            const used = mocks.build.mock.calls
+                .map((c) => (c[0] as { ephSkOverride?: Uint8Array }).ephSkOverride)
+                .filter((e): e is Uint8Array => e !== undefined)
+                .map((e) => e.join(','));
+
+            expect(used).toHaveLength(4);
+            expect(used).not.toContain(zero);
+            expect(used[0]).toEqual(derivePairwiseEphSk(pairSecret, 1).join(','));
+        });
+
         it('keeps counters separate per counterparty', async () => {
             const third = deriveViewingPublicKey(deriveViewingSecretKey(777n));
 
@@ -156,11 +268,26 @@ describe('buildZkNote', () => {
                 { value: 10n, circuitVersion: 1, viewingPublicKey: third },
                 { keys: KEYS, storage }
             );
+            mocks.build.mockClear();
 
-            // Both are the first payment to their respective counterparty.
-            const second = mocks.build.mock.calls[1]?.[0] as { ephSkOverride: Uint8Array };
-            expect(second.ephSkOverride).toEqual(
-                derivePairwiseEphSk(derivePairwiseSharedSecret(ivsk, third), 0)
+            // A second payment to each: their counters must be independent, so
+            // both resume at index 1 rather than sharing one sequence.
+            await buildZkNote(
+                { value: 20n, circuitVersion: 1, viewingPublicKey: OTHER_IVK },
+                { keys: KEYS, storage }
+            );
+            await buildZkNote(
+                { value: 20n, circuitVersion: 1, viewingPublicKey: third },
+                { keys: KEYS, storage }
+            );
+
+            const toOther = mocks.build.mock.calls[0]?.[0] as { ephSkOverride: Uint8Array };
+            const toThird = mocks.build.mock.calls[1]?.[0] as { ephSkOverride: Uint8Array };
+            expect(toOther.ephSkOverride).toEqual(
+                derivePairwiseEphSk(derivePairwiseSharedSecret(ivsk, OTHER_IVK), 1)
+            );
+            expect(toThird.ephSkOverride).toEqual(
+                derivePairwiseEphSk(derivePairwiseSharedSecret(ivsk, third), 1)
             );
         });
 

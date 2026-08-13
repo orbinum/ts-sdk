@@ -5,7 +5,73 @@ All notable changes to the Orbinum TypeScript SDK will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.4.0] - 2026-08-12
+
+**A restored vault no longer republishes an ephemeral key.**
+
+`reservePairwiseIndex` returned `0` for a counterparty it had no record of,
+which is correct on a first payment and a privacy leak on a restored wallet:
+paying the same recipient again republished the ephPk of the first payment.
+That value travels in the clear in memo bytes 148-180 and is served as an
+indexer column, so anyone reading the public feed could group the two notes as
+sharing a sender and a recipient — the linkage stealth addresses exist to
+prevent.
+
+The counter cannot be recovered. Unlike `selfEphCounter`, whose notes this
+wallet decrypts and can therefore re-derive from a rescan, a pairwise index is
+published on a note encrypted toward someone else and never appears in the
+sender's own scan. Asking a server whether a given ephPk exists would reveal
+which notes are yours, which is the query the scan's download-everything design
+exists to avoid.
+
+So it is not recovered but detected: `reservePairwiseIndex` now returns `null`
+when it has no history for a counterparty, and `buildZkNote` degrades to a
+random ephemeral — the rule both files already documented, applied to the case
+that slipped through it.
+
+### Changed
+
+- **BREAKING (type):** `reservePairwiseIndex` returns `Promise<number | null>`.
+  `null` means "no history", and callers must degrade to a random ephemeral
+  rather than assume zero.
+- A first payment to any counterparty now uses a random ephemeral. The
+  recipient pays one full trial scan for it; every later payment to the same
+  address takes the fast path as before. Privacy is not recoverable after the
+  fact, performance is.
+
+### Fixed
+
+Both counters are read back from a config that survives restores, migrations,
+backups and hand-editing, so it returns whatever JSON was on disk rather than
+what this code wrote. Every value below corrupted an index SILENTLY instead of
+failing, and each is now rejected in favour of restarting the sequence:
+
+- a fractional index truncated on the u32 derivation write, so `2.5` and `2`
+  published the same ephPk;
+- a string concatenated instead of incrementing (`'3' + 1 === '31'`);
+- `NaN`/`Infinity` derived from a meaningless index;
+- a negative index wrapped to a huge one, leaving the note outside the
+  recipient's lookup window;
+- an index at `Number.MAX_SAFE_INTEGER` made the `+ 1` a no-op, freezing the
+  counter so every later payment reused one index forever.
+
+`reserveSelfEphIndex` shared all of the above and is sanitised the same way.
+
+- `mergeCounters` compared counters with `Math.max`, which does not prefer the
+  valid side: `Math.max(NaN, 9)` is `NaN`, so one corrupt side poisoned the
+  merged value and it was then persisted. `Math.max('50', 9)` is worse — the
+  string side won with an index that was never reserved. Non-numeric values on
+  either side are now ignored, and counterparty entries are validated as they
+  are read rather than only where they are compared, since an entry with no
+  counterpart on the other side was copied through untouched.
+- `windowSizeForCounter` turned the stored counter into a precompute bound with
+  no ceiling. A counter of `NaN` produced an EMPTY discovery window, silently
+  disabling the fast path for every note; `Infinity` made the window builder
+  loop forever. A merely LARGE counter — which a long-lived wallet reaches with
+  no corruption at all — asked for a window proportional to it, at two EC muls
+  per entry, and hung the scan. The size is now clamped to `MAX_EPH_WINDOW`
+  (64 windows); indexes past it are found by trial decrypt, which is slower and
+  correct.
 
 ## [1.3.1] - 2026-08-09
 
