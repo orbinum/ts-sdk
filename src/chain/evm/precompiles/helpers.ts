@@ -23,6 +23,43 @@ export function padTo32Multiple(data: Uint8Array): Uint8Array {
     return padded;
 }
 
+/**
+ * A `bytes32` slot from exactly 32 bytes.
+ *
+ * Never reshaped to fit: truncating a longer value or zero-padding a shorter
+ * one both yield a well-formed slot holding a DIFFERENT value. These bytes
+ * become commitments and nullifiers, where a changed value is not an error the
+ * chain reports but a note nobody can find or spend.
+ *
+ * Shared with the array encoder so the two cannot drift — a check that exists
+ * on the scalar and not on `bytes32[]` is the same bug with one caller.
+ */
+function bytes32Slot(value: Uint8Array): Uint8Array {
+    if (value.length !== 32) {
+        throw new Error(`encodeAbi: bytes32 needs 32 bytes, got ${value.length}`);
+    }
+    const slot = new Uint8Array(32);
+    slot.set(value);
+    return slot;
+}
+
+/**
+ * An `address` slot: 20 bytes right-aligned in 32.
+ *
+ * `padStart` only ever lengthens, so without the bound an over-long address
+ * reached `set(_, 12)` and failed with a `RangeError` from inside the encoder
+ * rather than a message naming the offending value.
+ */
+function addressSlot(address: string): Uint8Array {
+    const clean = address.startsWith('0x') ? address.slice(2) : address;
+    if (clean.length > 40) {
+        throw new Error(`encodeAbi: address needs at most 20 bytes, got ${clean.length / 2}`);
+    }
+    const slot = new Uint8Array(32);
+    slot.set(fromHex('0x' + clean.padStart(40, '0')), 12);
+    return slot;
+}
+
 export function encodeStaticParam(param: AbiParam): Uint8Array {
     const buf = new Uint8Array(32);
     switch (param.type) {
@@ -30,14 +67,10 @@ export function encodeStaticParam(param: AbiParam): Uint8Array {
             return bigintTo32Be(param.value);
         }
         case 'bytes32': {
-            buf.set(param.value.slice(0, 32));
-            return buf;
+            return bytes32Slot(param.value);
         }
         case 'address': {
-            const clean = param.value.startsWith('0x') ? param.value.slice(2) : param.value;
-            const bytes = fromHex('0x' + clean.padStart(40, '0'));
-            buf.set(bytes, 12);
-            return buf;
+            return addressSlot(param.value);
         }
         case 'bool': {
             buf[31] = param.value ? 1 : 0;
@@ -61,25 +94,13 @@ export function encodeDynamicParam(param: AbiParam): Uint8Array {
             return concat([bigintTo32Be(BigInt(data.length)), padTo32Multiple(data)]);
         }
         case 'bytes32[]': {
-            const n = param.value.length;
-            const parts: Uint8Array[] = [bigintTo32Be(BigInt(n))];
-            for (const b32 of param.value) {
-                const slot = new Uint8Array(32);
-                slot.set(b32.slice(0, 32));
-                parts.push(slot);
-            }
+            const parts: Uint8Array[] = [bigintTo32Be(BigInt(param.value.length))];
+            for (const b32 of param.value) parts.push(bytes32Slot(b32));
             return concat(parts);
         }
         case 'address[]': {
-            const n = param.value.length;
-            const parts: Uint8Array[] = [bigintTo32Be(BigInt(n))];
-            for (const addr of param.value) {
-                const slot = new Uint8Array(32);
-                const clean = addr.startsWith('0x') ? addr.slice(2) : addr;
-                const bytes = fromHex('0x' + clean.padStart(40, '0'));
-                slot.set(bytes, 12);
-                parts.push(slot);
-            }
+            const parts: Uint8Array[] = [bigintTo32Be(BigInt(param.value.length))];
+            for (const addr of param.value) parts.push(addressSlot(addr));
             return concat(parts);
         }
         case 'bytes[]': {

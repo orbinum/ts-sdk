@@ -309,3 +309,93 @@ describe('encodeHex', () => {
         expect(encodeHex(SEL, { type: 'uint', value: 1n }).length).toBe(74);
     });
 });
+
+// ─── The encoder refuses what it cannot represent ────────────────────────────
+//
+// The type says `bytes32` is "exactly 32 bytes", but a type is a promise the
+// caller makes, not one the encoder keeps. Silently reshaping a wrong-sized
+// value is the failure mode this whole module exists to remove: the bytes go on
+// chain as a commitment or a nullifier, where a changed value is not an error
+// but a note nobody can find or spend.
+
+describe('bytes32 is not silently reshaped', () => {
+    it('refuses more than 32 bytes instead of keeping the first 32', () => {
+        // The tail was dropped, so a 40-byte value encoded as a DIFFERENT
+        // 32-byte one that the chain accepts without complaint.
+        expect(() =>
+            encode(SEL, { type: 'bytes32', value: new Uint8Array(33).fill(0xaa) })
+        ).toThrow();
+        expect(() =>
+            encode(SEL, { type: 'bytes32', value: new Uint8Array(64).fill(0xaa) })
+        ).toThrow();
+    });
+
+    it('refuses fewer than 32 bytes instead of right-padding with zeros', () => {
+        // Zero-padding a short value produces a well-formed slot for a value
+        // nobody asked to encode.
+        expect(() => encode(SEL, { type: 'bytes32', value: new Uint8Array(31) })).toThrow();
+        expect(() =>
+            encode(SEL, { type: 'bytes32', value: new Uint8Array([1, 2, 3]) })
+        ).toThrow();
+        expect(() => encode(SEL, { type: 'bytes32', value: new Uint8Array(0) })).toThrow();
+    });
+
+    it('still encodes exactly 32 bytes unchanged', () => {
+        const value = new Uint8Array(32).fill(0xab);
+        const out = encode(SEL, { type: 'bytes32', value });
+
+        expect(out.slice(4)).toEqual(value);
+    });
+});
+
+describe('bytes32[] holds the same rule as bytes32', () => {
+    it('refuses a wrong-sized element anywhere in the array', () => {
+        // The array encoder had its own copy of the slot logic, so the scalar
+        // check did not cover it: every nullifier and commitment in a private
+        // transfer goes through this path.
+        expect(() =>
+            encode(SEL, {
+                type: 'bytes32[]',
+                value: [new Uint8Array(32), new Uint8Array(33).fill(0xaa)],
+            })
+        ).toThrow();
+        expect(() =>
+            encode(SEL, { type: 'bytes32[]', value: [new Uint8Array(31)] })
+        ).toThrow();
+    });
+
+    it('still encodes an array of exact 32-byte elements', () => {
+        const a = new Uint8Array(32).fill(0x11);
+        const b = new Uint8Array(32).fill(0x22);
+        const out = encode(SEL, { type: 'bytes32[]', value: [a, b] });
+
+        // selector + head offset + length + two elements
+        expect(out.length).toBe(4 + 32 + 32 + 64);
+        expect(out.slice(-64, -32)).toEqual(a);
+        expect(out.slice(-32)).toEqual(b);
+    });
+});
+
+describe('address is not silently reshaped', () => {
+    it('refuses more than 20 bytes rather than throwing a RangeError', () => {
+        // `padStart(40)` never shortens, so an over-long address reached
+        // `buf.set(bytes, 12)` and overflowed the slot — a RangeError from deep
+        // inside the encoder instead of a message naming the problem.
+        expect(() => encode(SEL, { type: 'address', value: '0x' + 'ab'.repeat(21) })).toThrow(
+            /address/i
+        );
+    });
+
+    it('still right-aligns a 20-byte address in the low bytes', () => {
+        const out = encode(SEL, { type: 'address', value: '0x' + 'cd'.repeat(20) });
+
+        expect(out.slice(4, 16)).toEqual(new Uint8Array(12));
+        expect(out.slice(16)).toEqual(new Uint8Array(20).fill(0xcd));
+    });
+
+    it('still left-pads a short address', () => {
+        const out = encode(SEL, { type: 'address', value: '0x01' });
+
+        expect(out[35]).toBe(1);
+    });
+});
