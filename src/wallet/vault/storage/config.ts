@@ -125,9 +125,45 @@ export function mergeCounters(
     } as EphemeralCounters;
 }
 
-/** The further-along of two monotonic counters, or whichever one exists. */
-const higher = (a?: number, b?: number): number | undefined =>
-    a === undefined ? b : b === undefined ? a : Math.max(a, b);
+/**
+ * A counter value, or undefined when it is not one.
+ *
+ * Both sides of a merge come from outside this module — one from whatever JSON
+ * was on disk, one from a caller's snapshot — so either can be corrupt. That
+ * matters more here than it looks, because `Math.max` does not simply prefer
+ * the good side: `Math.max(NaN, 9)` is `NaN`, so one bad value POISONS the
+ * result and gets persisted as the wallet's counter. `Math.max('50', 9)` is
+ * worse still — the string side wins with an index never reserved.
+ *
+ * Dropping the bad side leaves the good one; dropping both restarts the
+ * sequence, the same repair `reserveSelfEphIndex` applies.
+ */
+const counterOrNone = (value: unknown): number | undefined =>
+    typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+
+/** The further-along of two monotonic counters, ignoring any that is not one. */
+const higher = (a?: number, b?: number): number | undefined => {
+    const x = counterOrNone(a);
+    const y = counterOrNone(b);
+    return x === undefined ? y : y === undefined ? x : Math.max(x, y);
+};
+
+/**
+ * A counterparty entry with both fields usable, or undefined when the index is
+ * not a counter — a hand-edited backup can leave anything under a key, down to
+ * a string or no object at all.
+ *
+ * A corrupt `addedAt` does NOT discard the entry: it is metadata about when the
+ * wallet met that counterparty, so it is repaired to the current time while the
+ * index, which is the part that decides an ephemeral, is kept.
+ */
+function usableEntry(entry: unknown): { nextIndex: number; addedAt: number } | undefined {
+    if (typeof entry !== 'object' || entry === null) return undefined;
+    const { nextIndex, addedAt } = entry as { nextIndex?: unknown; addedAt?: unknown };
+    const index = counterOrNone(nextIndex);
+    if (index === undefined) return undefined;
+    return { nextIndex: index, addedAt: counterOrNone(addedAt) ?? Date.now() };
+}
 
 /**
  * Union of two counterparty maps, each key taking the higher `nextIndex`.
@@ -136,6 +172,12 @@ const higher = (a?: number, b?: number): number | undefined =>
  * already stored must never move backwards. `addedAt` takes the EARLIER value:
  * it records when the wallet first met that counterparty, so the older stamp is
  * the true one.
+ *
+ * Entries are validated on the way IN rather than only where they are compared,
+ * because an unmatched key is copied straight through — so a corrupt entry on
+ * one side would otherwise survive untouched whenever the other side has no
+ * counterparty by that name. A dropped entry costs the recipient one trial
+ * scan; a persisted `NaN` costs an index.
  *
  * Returns undefined when neither side has any, so the caller can omit the key
  * rather than store an empty object.
@@ -146,10 +188,14 @@ function mergePairwise(
 ): VaultConfigRecord['pairwiseCounterparties'] {
     if (!current && !fallback) return undefined;
 
-    const merged: NonNullable<VaultConfigRecord['pairwiseCounterparties']> = {
-        ...(fallback ?? {}),
-    };
-    for (const [key, entry] of Object.entries(current ?? {})) {
+    const merged: NonNullable<VaultConfigRecord['pairwiseCounterparties']> = {};
+    for (const [key, entry] of Object.entries(fallback ?? {})) {
+        const usable = usableEntry(entry);
+        if (usable) merged[key] = usable;
+    }
+    for (const [key, raw] of Object.entries(current ?? {})) {
+        const entry = usableEntry(raw);
+        if (!entry) continue;
         const prev = merged[key];
         merged[key] = prev
             ? {

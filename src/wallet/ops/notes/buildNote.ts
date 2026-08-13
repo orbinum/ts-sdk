@@ -13,9 +13,11 @@
  *     secret.
  *   - **anything else**: random, and the recipient pays for a full trial scan.
  *
- * A failed reservation always degrades to random rather than to index zero:
- * a reused index republishes an ephPk and links the two notes as sharing a
- * creator, which is a worse outcome than a slow scan.
+ * A reservation that cannot name an index always degrades to random rather than
+ * to index zero: a reused index republishes an ephPk and links the two notes as
+ * sharing a creator, which is a worse outcome than a slow scan. That covers a
+ * failed reservation AND a counterparty this vault has no counter for, since a
+ * restored wallet cannot tell a first payment from a counter it lost.
  */
 import { NoteBuilder } from '../../../protocol/note/index';
 import { randomBlinding } from '../../../foundation/crypto/blinding';
@@ -87,11 +89,13 @@ export async function buildZkNote(params: BuildNoteParams, deps: BuildNoteDeps):
     } else if (params.viewingPublicKey && storage && keys.viewingSecretKey) {
         try {
             const index = await reservePairwiseIndex(storage, toHex(params.viewingPublicKey));
-            const pairSecret = derivePairwiseSharedSecret(
-                keys.viewingSecretKey,
-                params.viewingPublicKey
-            );
-            ephSkOverride = derivePairwiseEphSk(pairSecret, index);
+            if (index !== null) {
+                const pairSecret = derivePairwiseSharedSecret(
+                    keys.viewingSecretKey,
+                    params.viewingPublicKey
+                );
+                ephSkOverride = derivePairwiseEphSk(pairSecret, index);
+            }
         } catch {
             // Vault unreachable, or a key that is not a curve point — random
             // ephemeral. The note is still recoverable, just the slow way.
