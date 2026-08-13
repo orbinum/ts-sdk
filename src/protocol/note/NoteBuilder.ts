@@ -1,10 +1,10 @@
 import { CURRENT_CIRCUIT_VERSION, type NoteInput, type ZkNote } from '../types';
 import { EncryptedMemo, ENCRYPTED_MEMO_SIZE } from '../memo/EncryptedMemo';
-import { sealOutgoingBlob, OVK_BLOB_SIZE } from '../memo/OutgoingBlob';
 import { deriveStealthOwnerPk } from '../../foundation/crypto/stealth';
 import { recoverOwnerPkPoint } from '../../foundation/crypto/bjj';
 import { toHex } from '../../foundation/encoding/hex';
 import { bigintTo32Le, bytesToBigintLE } from '../../foundation/encoding/bytes';
+import { randomBlinding } from '../../foundation/crypto/blinding';
 import { mulPointEscalar, unpackPoint } from '@zk-kit/baby-jubjub';
 import { randomBytes } from '@noble/ciphers/utils.js';
 import { BABYJUB_SUBORDER } from '../../foundation/crypto/constants';
@@ -50,9 +50,9 @@ export class NoteBuilder {
         const value = input.value;
         const assetId = input.assetId ?? 0n;
         const ownerPk = input.ownerPk ?? 0n;
-        const blinding = input.blinding ?? BigInt(Date.now());
+        const blinding = input.blinding ?? randomBlinding();
         const spendingKey = input.spendingKey ?? 0n;
-        const counterpartyPk = input.counterpartyPk ?? 0n;
+        const sourcePk = input.sourcePk ?? 0n;
         const circuitVersion = input.circuitVersion ?? CURRENT_CIRCUIT_VERSION;
 
         const useStealth =
@@ -64,8 +64,15 @@ export class NoteBuilder {
             const recipientOwnerPk = input.recipientOwnerPk!;
             const recipientIvkPacked = input.viewingPublicKey!;
 
-            // Generate one ephSk shared between memo encryption and stealth derivation.
-            const ephSk = randomBytes(32);
+            // One ephSk, shared between memo encryption and stealth derivation.
+            // Honour a caller-supplied override (the pairwise-derived ephSk that
+            // lets the recipient find this note by hash lookup instead of a full
+            // trial scan); fall back to random only when none was passed.
+            // Dropping the override here silently kills pairwise fast-scan while
+            // the caller still burns a counter index for it.
+            if (input.ephSkOverride !== undefined && input.ephSkOverride.length !== 32)
+                throw new Error('NoteBuilder.build: ephSkOverride must be 32 bytes');
+            const ephSk = input.ephSkOverride ?? randomBytes(32);
 
             // Derive sharedSecret from the ephSk and the recipient's ivk.
             const ivkPackedBigint = bytesToBigintLE(recipientIvkPacked);
@@ -102,7 +109,7 @@ export class NoteBuilder {
                     Number(assetId),
                     stealthCommitmentBytes,
                     recipientIvkPacked,
-                    bigintTo32Le(counterpartyPk),
+                    bigintTo32Le(sourcePk),
                     circuitVersion,
                     ephSk
                 )
@@ -118,27 +125,6 @@ export class NoteBuilder {
                     `NoteBuilder.build: invariant violated — memo must be ${ENCRYPTED_MEMO_SIZE} bytes, got ${memo.length}`
                 );
 
-            // OVK: wrap the shared secret so the SENDER can recover this transfer.
-            // Only on the stealth path, and only when an ovk is supplied — the ⊥
-            // default (random blob) is the app's job at submit, never invented here.
-            // The ephPk is sliced from the memo we just built (bytes 148..180), so
-            // it is byte-identical to what goes on chain (raw-bytes-in-KDF rule).
-            let ovkBlob: number[] | undefined;
-            if (input.outgoingViewingKey !== undefined) {
-                const ephPkBytes = Uint8Array.from(memo.slice(148, 180));
-                const sealed = sealOutgoingBlob(
-                    input.outgoingViewingKey,
-                    sharedSecret,
-                    stealthCommitmentBytes,
-                    ephPkBytes
-                );
-                if (sealed.length !== OVK_BLOB_SIZE)
-                    throw new Error(
-                        `NoteBuilder.build: invariant violated — ovkBlob must be ${OVK_BLOB_SIZE} bytes, got ${sealed.length}`
-                    );
-                ovkBlob = Array.from(sealed);
-            }
-
             return {
                 value,
                 assetId,
@@ -153,8 +139,7 @@ export class NoteBuilder {
                 commitmentHex: toHex(commitmentBytes),
                 nullifierHex: toHex(nullifierBytes),
                 memo,
-                counterpartyPk,
-                ...(ovkBlob ? { ovkBlob } : {}),
+                sourcePk,
             };
         }
 
@@ -174,7 +159,7 @@ export class NoteBuilder {
                           Number(assetId),
                           commitmentBytes,
                           input.viewingPublicKey,
-                          bigintTo32Le(counterpartyPk),
+                          bigintTo32Le(sourcePk),
                           circuitVersion,
                           input.ephSkOverride
                       )
@@ -200,7 +185,7 @@ export class NoteBuilder {
             commitmentHex: toHex(commitmentBytes),
             nullifierHex: toHex(nullifierBytes),
             memo,
-            counterpartyPk,
+            sourcePk,
         };
     }
 
@@ -213,13 +198,14 @@ export class NoteBuilder {
      * @param note                    The ZkNote whose fields populate the plaintext.
      * @param recipientIvkPacked      32-byte LE packed BJJ viewing public key of the recipient.
      *                                Pass `new Uint8Array(32)` (default) for a public/dummy memo.
-     * @param counterpartyPk          32-byte counterparty BabyJubJub Ax.
-     *                                Pass `new Uint8Array(32)` (default) for no counterparty.
+     * @param sourcePk                32-byte source pk (a ONE-TIME stealth key, see
+     *                                `NoteInput.sourcePk`). Pass `new Uint8Array(32)`
+     *                                (default) for a shield/unshield note.
      */
     static buildMemo(
         note: ZkNote,
         recipientIvkPacked?: Uint8Array,
-        counterpartyPk?: Uint8Array
+        sourcePk?: Uint8Array
     ): Uint8Array {
         return EncryptedMemo.encrypt(
             note.value,
@@ -228,7 +214,7 @@ export class NoteBuilder {
             Number(note.assetId),
             bigintTo32Le(note.commitment),
             recipientIvkPacked ?? new Uint8Array(32),
-            counterpartyPk ?? bigintTo32Le(note.counterpartyPk ?? 0n),
+            sourcePk ?? bigintTo32Le(note.sourcePk ?? 0n),
             note.circuitVersion
         );
     }

@@ -21,6 +21,7 @@ import { ensureCreatedAt, type NoteWithMeta, type TxKind } from '../notes/meta';
 import { requireSessionKeys, type WalletSession } from '../session/WalletSession';
 import { decryptStoredNotes, detectCommitmentMismatch, resetVaultToEmpty } from './unlock';
 import type { NotesCache } from '../notes/cache';
+import type { NoteProvenanceRecord } from '../../provenance/types';
 import type {
     EncryptedTxRecord,
     NoteStorage,
@@ -351,7 +352,7 @@ export class VaultStore {
      * shielded transfer — so the record is the only account of it. The body is
      * encrypted; only the transaction hash stays plaintext, as the storage key.
      */
-    async saveTxRecord<T extends { id: string }>(record: T): Promise<void> {
+    async saveTxRecord(record: NoteProvenanceRecord): Promise<void> {
         const { cryptoKey } = this.keys();
         const { iv, ciphertext } = await encryptJson(cryptoKey, record);
         const stored: EncryptedTxRecord = {
@@ -370,7 +371,7 @@ export class VaultStore {
      * they are leftovers from a previous key, and one of them must not make the
      * whole history unreadable.
      */
-    async getTxRecords<T>(): Promise<T[]> {
+    async getTxRecords<T = NoteProvenanceRecord>(): Promise<T[]> {
         const { cryptoKey } = this.keys();
         const stored = await this.deps.storage.getAllTxRecords();
         const records: T[] = [];

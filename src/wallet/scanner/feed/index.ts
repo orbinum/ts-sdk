@@ -18,4 +18,5 @@ export type {
     ExtrinsicRecord,
     TransferFactsSource,
     TransferFactsRow,
+    TransferOutputRow,
 } from './sources';

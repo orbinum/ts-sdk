@@ -289,6 +289,9 @@ describe('unshieldNote — stealth change', () => {
         const saved = deps.vault.save.mock.calls[0]?.[0] as Record<string, unknown>;
         expect(saved['spendingKey']).toBe(424242n);
         expect(saved['createdTxHash']).toBe('0xtx');
+        // Not a shield deposit — it used to read as one, since both carry
+        // sourcePk = 0n and the origin was inferred from that alone.
+        expect(saved['origin']).toBe('unshield-change');
     });
 
     it('persists nothing when the memo does not open with our keys', async () => {

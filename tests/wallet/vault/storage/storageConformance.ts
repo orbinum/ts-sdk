@@ -20,7 +20,7 @@ import type {
 
 export const emptyConfig = (): VaultConfigRecord => ({
     id: 'main',
-    v: 4,
+    v: 5,
     createdAt: 1000,
     updatedAt: 1000,
 });

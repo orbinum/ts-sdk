@@ -17,7 +17,7 @@ Three stores, one contract (`VaultStorage`), split by concern:
 | Notes           | one encrypted record per note, keyed by blind tag                  | `NoteStorage`    |
 | Config          | schema version, chain fingerprint, scan cursor, ephemeral counters | `NoteStorage`    |
 | Nullifier cache | the downloaded spent set, for local intersection                   | `NullifierCache` |
-| Tx history      | outgoing records only the submitting client could know             | `TxHistoryStore` |
+| Tx history      | outgoing records, richest at spend time and thinner after a restore | `TxHistoryStore` |
 
 Two implementations ship: `IndexedDbVaultStorage` (browser, in the
 `storage/indexeddb` subpath) and `MemoryVaultStorage` (tests, servers, and any
@@ -49,8 +49,8 @@ record = {
   `normalizeNote` repairs them — and **throws** on a scalar it cannot read
   rather than defaulting to zero. A zeroed `blinding` or `spendingKey` rebuilds
   a commitment that matches no leaf: a note that sits in the balance and can
-  never move. The one exception is `counterpartyPk`, where absent genuinely
-  means zero (shield/unshield notes have no counterparty).
+  never move. The one exception is `sourcePk`, where absent genuinely means
+  zero (a shield/unshield note has no other party to record).
 
 ### The blind index
 
@@ -164,7 +164,7 @@ mismatch rule above catches any real conflict.
 
 - **Query the chain.** It is pure storage plus cache; reconciliation is the
   scanner's and the spend lifecycle's job.
-- **Store who you paid.** A change note's `counterpartyPk` is the recipient's
+- **Store who you paid.** A change note's `sourcePk` is the recipient's
   one-time stealth key, never their stable identifier.
 - **Trust its own contents over the chain.** `markSpent`, purges and resets all
   flow _from_ chain observations _toward_ the vault.

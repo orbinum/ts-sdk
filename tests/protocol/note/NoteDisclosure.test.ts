@@ -303,6 +303,41 @@ describe('decodeNoteDisclosureKey', () => {
         expect(result).not.toHaveProperty('spendingKey');
         expect(result).not.toHaveProperty('nullifier');
     });
+
+    // Poseidon reduces its inputs mod r, so a crafted `value = real + r` hashes
+    // to the SAME commitment — the preimage check alone would pass and the
+    // verifier would show a value no on-chain note can hold. The range check
+    // must reject it before that.
+    it('rejects an out-of-range value that hashes to a valid commitment', () => {
+        const BN254_R =
+            21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+        const note = makeNote({ value: 500n, assetId: 0n, ownerPk: 42n, blinding: 7n });
+        const key = createNoteDisclosureKey(note);
+        const b64 = key.slice('orbdisc:'.length).replace(/-/g, '+').replace(/_/g, '/');
+        const payload = JSON.parse(atob(b64));
+        // value + r reduces to the same field element → same Poseidon output.
+        payload.val = '0x' + (500n + BN254_R).toString(16);
+        const forged = btoa(JSON.stringify(payload))
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=+$/, '');
+        expect(decodeNoteDisclosureKey('orbdisc:' + forged)).toBeNull();
+    });
+
+    it('rejects an out-of-range ownerPk (≥ r)', () => {
+        const BN254_R =
+            21888242871839275222246405745257275088548364400416034343698204186575808495617n;
+        const note = makeNote();
+        const key = createNoteDisclosureKey(note);
+        const b64 = key.slice('orbdisc:'.length).replace(/-/g, '+').replace(/_/g, '/');
+        const payload = JSON.parse(atob(b64));
+        payload.opk = '0x' + (note.ownerPk + BN254_R).toString(16);
+        const forged = btoa(JSON.stringify(payload))
+            .replace(/\+/g, '-')
+            .replace(/\//g, '_')
+            .replace(/=+$/, '');
+        expect(decodeNoteDisclosureKey('orbdisc:' + forged)).toBeNull();
+    });
 });
 
 // ─── Round-trip ───────────────────────────────────────────────────────────────

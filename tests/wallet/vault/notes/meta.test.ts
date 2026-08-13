@@ -10,14 +10,41 @@ import {
     noteTxKind,
     stampCreatedTxHash,
     stampSpentTxHash,
+    stampOrigin,
 } from '../../../../src/wallet/vault/notes/meta';
 
 const note = (over: Partial<ZkNote>): ZkNote => ({ sourcePk: 0n, ...over }) as ZkNote;
 
 describe('noteMeta', () => {
-    it('origin: zero counterpartyPk → shield, non-zero → private-transfer', () => {
-        expect(noteOrigin(note({ counterpartyPk: 0n }))).toBe('shield');
-        expect(noteOrigin(note({ counterpartyPk: 123n }))).toBe('private-transfer');
+    it('origin: a stamped note reports exactly what produced it', () => {
+        expect(noteOrigin(stampOrigin(note({}), 'unshield-change'))).toBe('unshield-change');
+        expect(noteOrigin(stampOrigin(note({}), 'fee-claim'))).toBe('fee-claim');
+        expect(noteOrigin(stampOrigin(note({}), 'transfer-change'))).toBe('transfer-change');
+    });
+
+    it('origin: an unshield-change note is NOT reported as a shield deposit', () => {
+        // The bug this field removes: both carry sourcePk = 0n, so the old
+        // inference called an unshield's change (and a claimed fee) a "Shield".
+        const unshieldChange = stampOrigin(note({ sourcePk: 0n }), 'unshield-change');
+        const feeClaim = stampOrigin(note({ sourcePk: 0n }), 'fee-claim');
+
+        expect(noteOrigin(unshieldChange)).not.toBe('shield');
+        expect(noteOrigin(feeClaim)).not.toBe('shield');
+    });
+
+    it('origin: falls back to inference for notes stamped before the field existed', () => {
+        expect(noteOrigin(note({ sourcePk: 0n }))).toBe('shield');
+        expect(noteOrigin(note({ sourcePk: 123n }))).toBe('transfer-in');
+    });
+
+    it('origin: a stamped value always wins over what inference would say', () => {
+        // sourcePk is zero here, so inference would answer 'shield'.
+        expect(noteOrigin(stampOrigin(note({ sourcePk: 0n }), 'fee-claim'))).toBe('fee-claim');
+    });
+
+    it('origin: survives a spread, like the other meta fields', () => {
+        const stamped = stampOrigin(note({}), 'transfer-change');
+        expect(noteOrigin({ ...stamped })).toBe('transfer-change');
     });
 
     it('createdAt: absent → null, stamped → value, survives spread', () => {

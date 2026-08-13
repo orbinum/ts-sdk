@@ -5,9 +5,7 @@ import {
     deriveViewingSecretKey,
     deriveViewingPublicKey,
     deriveOwnerPk,
-    deriveOutgoingViewingKey,
 } from '../../../src/protocol/keys/PrivacyKeys';
-import { openOutgoingBlob } from '../../../src/protocol/memo/OutgoingBlob';
 
 // ─── NoteBuilder.build ────────────────────────────────────────────────────────
 
@@ -252,75 +250,13 @@ describe('NoteBuilder.build — stealth path', () => {
         expect(ownNote.ownerPk).toBe(ownPk);
     });
 
-    // ─── OVK blob emission (Fase 3) ──────────────────────────────────────────
 
-    const senderMaster = new Uint8Array(32).fill(0x5a);
-    const senderOvk = deriveOutgoingViewingKey(senderMaster);
-
-    it('stealth build with outgoingViewingKey → 56-byte ovkBlob', async () => {
-        const note = await NoteBuilder.build({
-            value: 500n,
-            blinding: 1n,
-            ownerPk: recipientOwnerPk,
-            viewingPublicKey: recipientViewingPublicKey,
-            recipientOwnerPk,
-            outgoingViewingKey: senderOvk,
-        });
-        expect(note.ovkBlob).toBeDefined();
-        expect(note.ovkBlob).toHaveLength(56);
-    });
-
-    it('stealth build without outgoingViewingKey → ovkBlob undefined', async () => {
-        const note = await NoteBuilder.build({
-            value: 500n,
-            blinding: 1n,
-            ownerPk: recipientOwnerPk,
-            viewingPublicKey: recipientViewingPublicKey,
-            recipientOwnerPk,
-        });
-        expect(note.ovkBlob).toBeUndefined();
-    });
-
-    it('non-stealth build never produces an ovkBlob, even with an ovk', async () => {
-        const note = await NoteBuilder.build({
-            value: 500n,
-            blinding: 1n,
-            ownerPk: recipientOwnerPk,
-            outgoingViewingKey: senderOvk,
-            // no viewingPublicKey/recipientOwnerPk → non-stealth
-        });
-        expect(note.ovkBlob).toBeUndefined();
-    });
-
-    it('the ovkBlob is sealed against the memo ephPk (bytes 148..180) and commitment', async () => {
-        const note = await NoteBuilder.build({
-            value: 777n,
-            blinding: 5n,
-            ownerPk: recipientOwnerPk,
-            viewingPublicKey: recipientViewingPublicKey,
-            recipientOwnerPk,
-            outgoingViewingKey: senderOvk,
-        });
-        const ephPkBytes = Uint8Array.from(note.memo.slice(148, 180));
-        const commitmentBytes = Uint8Array.from(
-            (note.commitmentHex.slice(2).match(/.{2}/g) ?? []).map((b) => parseInt(b, 16))
-        );
-        // Opening with the sender ovk against the on-chain ephPk + commitment must
-        // succeed and yield a 32-byte shared secret.
-        const ss = openOutgoingBlob(
-            senderOvk,
-            Uint8Array.from(note.ovkBlob!),
-            commitmentBytes,
-            ephPkBytes
-        );
-        expect(ss).not.toBeNull();
-        expect(ss).toHaveLength(32);
-    });
-
-    it('the ovk does not perturb the note shape: same 180-byte memo, only ovkBlob added', async () => {
-        // The stealth path generates its own random ephSk (ephSkOverride is
-        // ignored here), so the two memos differ by ephemeral key — but both must
-        // still be exactly 180 bytes, and only the ovk build carries a blob.
+    it('the stealth path HONOURS ephSkOverride (pairwise fast-scan)', async () => {
+        // Regression: the stealth branch used to always randomBytes(32) and drop
+        // the override, silently killing pairwise discovery while the caller
+        // still burned a counter index. A fixed override must produce a
+        // deterministic ephPk (memo bytes 148..180).
+        const ephSk = new Uint8Array(32).fill(9);
         const base = {
             value: 500n,
             blinding: 1n,
@@ -328,11 +264,45 @@ describe('NoteBuilder.build — stealth path', () => {
             viewingPublicKey: recipientViewingPublicKey,
             recipientOwnerPk,
         };
-        const withOvk = await NoteBuilder.build({ ...base, outgoingViewingKey: senderOvk });
-        const withoutOvk = await NoteBuilder.build(base);
-        expect(withOvk.memo).toHaveLength(ENCRYPTED_MEMO_SIZE);
-        expect(withoutOvk.memo).toHaveLength(ENCRYPTED_MEMO_SIZE);
-        expect(withOvk.ovkBlob).toBeDefined();
-        expect(withoutOvk.ovkBlob).toBeUndefined();
+        const a = await NoteBuilder.build({ ...base, ephSkOverride: ephSk });
+        const b = await NoteBuilder.build({ ...base, ephSkOverride: ephSk });
+        expect(a.memo.slice(148, 180)).toEqual(b.memo.slice(148, 180));
+        // A different override must move the ephPk.
+        const c = await NoteBuilder.build({
+            ...base,
+            ephSkOverride: new Uint8Array(32).fill(11),
+        });
+        expect(c.memo.slice(148, 180)).not.toEqual(a.memo.slice(148, 180));
+    });
+
+    it('rejects a non-32-byte ephSkOverride on the stealth path', async () => {
+        await expect(
+            NoteBuilder.build({
+                value: 500n,
+                blinding: 1n,
+                ownerPk: recipientOwnerPk,
+                viewingPublicKey: recipientViewingPublicKey,
+                recipientOwnerPk,
+                ephSkOverride: new Uint8Array(16),
+            })
+        ).rejects.toThrow('ephSkOverride must be 32 bytes');
+    });
+
+    it('every stealth build emits exactly 180 memo bytes', async () => {
+        // Each build gets its own random ephSk, so the two memos differ by
+        // ephemeral key — but the length is the wire format and must not vary.
+        // A memo of any other size is unopenable by the recipient.
+        const base = {
+            value: 500n,
+            blinding: 1n,
+            ownerPk: recipientOwnerPk,
+            viewingPublicKey: recipientViewingPublicKey,
+            recipientOwnerPk,
+        };
+        const a = await NoteBuilder.build(base);
+        const b = await NoteBuilder.build(base);
+        expect(a.memo).toHaveLength(ENCRYPTED_MEMO_SIZE);
+        expect(b.memo).toHaveLength(ENCRYPTED_MEMO_SIZE);
+        expect(a.memo).not.toEqual(b.memo);
     });
 });

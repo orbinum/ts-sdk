@@ -98,8 +98,6 @@ async function main() {
         storage: new MemoryVaultStorage(),
         ...sources(feed),
         pool: createDecryptPool({ factory: null }),
-        // Pinned rather than read from a chain, since this example has none.
-        // A real wallet passes `zkVerifier` and the version is read fail-closed.
         circuitVersion: CIRCUIT_VERSION,
     });
 

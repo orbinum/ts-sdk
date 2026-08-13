@@ -100,6 +100,11 @@ export * from './wallet/vault/index';
 // server sees is identical regardless of which notes the caller holds.
 export * from './wallet/scanner/index';
 
+// NoteProvenance — the private history of one's own notes. The memo's
+// `sourcePk` and an on-chain lookup are two providers of the same fact; this is the
+// vocabulary both speak, and where a host reads a transfer's history from.
+export * from './wallet/provenance/index';
+
 // Spending — plans, guards and the three operations. Each takes a `submit`
 // callback: the SDK owns protocol, the host owns transport.
 export * from './wallet/ops/index';

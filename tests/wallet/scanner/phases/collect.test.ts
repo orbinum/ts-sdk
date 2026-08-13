@@ -266,22 +266,84 @@ describe('collectScanEntries — sealed chunks', () => {
     it('falls back to pagination when the chunk path breaks mid-way', async () => {
         const { source } = chunkedSource(20, 10, [hintAt(20)]);
         const warnings: string[] = [];
+        // Chunk 0 returns its full promised range; chunk 1 fails outright.
         source.chunks!.chunk = vi
             .fn()
-            .mockResolvedValueOnce([hintAt(0), hintAt(1)])
+            .mockResolvedValueOnce(Array.from({ length: 10 }, (_, j) => hintAt(j)))
             .mockRejectedValue(new Error('reseal race'));
 
         const outcome = await run({ source, onWarning: (m) => warnings.push(m) });
 
         // Chunk 0's hints survive, and paging resumes after the last leaf seen.
-        expect(outcome.scanned).toBe(3);
+        expect(outcome.scanned).toBe(11);
         expect(warnings[0]).toContain('sealed-chunk path failed');
+    });
+
+    it('a short chunk is refused rather than counted partially', async () => {
+        // Previously a truncated chunk (a reseal race, or a trimming proxy) had
+        // its surviving hints counted as if the range were complete, so the
+        // scan advanced its cursor past leaves it never saw.
+        const { source } = chunkedSource(20, 10, [hintAt(20)]);
+        const warnings: string[] = [];
+        source.chunks!.chunk = vi.fn().mockResolvedValue([hintAt(0), hintAt(1)]);
+
+        const outcome = await run({ source, onWarning: (m) => warnings.push(m) });
+
+        expect(warnings[0]).toContain('sealed-chunk path failed');
+        expect(outcome.scanned).toBe(1); // only the tail
     });
 
     it('pages the whole window when the source has no chunk support', async () => {
         const outcome = await run({ source: pagedSource(7) });
 
         expect(outcome.scanned).toBe(7);
+    });
+
+    // ── a sealed chunk is checked, not trusted ────────────────────────────────
+    //
+    // The note crypto cannot catch omission: a feed cannot forge a note (each is
+    // rebound to its on-chain commitment via Poseidon), but dropping one is
+    // invisible — the wallet simply never learns the money exists. A sealed
+    // chunk covers an exact dense leaf range, so the check is free.
+
+    it('rejects a chunk with a hint removed, instead of silently losing the note', async () => {
+        const { source } = chunkedSource(20, 10, [hintAt(20)]);
+        const warnings: string[] = [];
+        // Chunk 0 comes back one hint short — leaf 5 has been dropped.
+        source.chunks!.chunk = vi.fn(async (idx: number) => {
+            const full = Array.from({ length: 10 }, (_, j) => hintAt(idx * 10 + j));
+            return idx === 0 ? full.filter((h) => h.leafIndex !== 5) : full;
+        });
+
+        const outcome = await run({ source, onWarning: (m) => warnings.push(m) });
+
+        expect(warnings[0]).toContain('sealed-chunk path failed');
+        // The censored chunk is refused wholesale rather than counted short.
+        expect(outcome.scanned).toBe(1); // only the tail hint survives
+    });
+
+    it('rejects a chunk whose leaves are not the range the manifest promised', async () => {
+        const { source } = chunkedSource(10, 10, [hintAt(10)]);
+        const warnings: string[] = [];
+        // Right COUNT, wrong leaves: a duplicate stands in for a real one.
+        source.chunks!.chunk = vi.fn(async () =>
+            Array.from({ length: 10 }, (_, j) => hintAt(j === 5 ? 4 : j))
+        );
+
+        const outcome = await run({ source, onWarning: (m) => warnings.push(m) });
+
+        expect(warnings[0]).toContain('sealed-chunk path failed');
+        expect(outcome.scanned).toBe(1);
+    });
+
+    it('accepts a chunk that matches the manifest exactly', async () => {
+        const { source } = chunkedSource(20, 10);
+        const warnings: string[] = [];
+
+        const outcome = await run({ source, onWarning: (m) => warnings.push(m) });
+
+        expect(warnings).toHaveLength(0);
+        expect(outcome.scanned).toBe(20);
     });
 });
 

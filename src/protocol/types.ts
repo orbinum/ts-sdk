@@ -38,8 +38,16 @@ export type DecryptedMemo = {
     blinding: bigint;
     /** Asset ID of the note. */
     assetId: bigint;
-    /** Counterparty BabyJubJub Ax coordinate. Zero for shield/unshield notes. */
-    counterpartyPk: bigint;
+    /**
+     * The other party's BabyJubJub Ax coordinate, as stamped in the memo. Zero
+     * for shield/unshield notes.
+     *
+     * ALWAYS a one-time stealth key, never a stable identity — see `NoteInput.sourcePk`.
+     * On the wire this field is `counterparty_pk` at plaintext bytes [84,116);
+     * `sourcePk` is its domain name and the two must not be conflated when
+     * touching the serialisation layer.
+     */
+    sourcePk: bigint;
     /** ZK circuit version the note is spent under, recovered from the memo plaintext. */
     circuitVersion: number;
 };
@@ -69,8 +77,17 @@ export type NoteInput = {
      * transaction unlinkable even when the same privacy address is reused.
      */
     recipientOwnerPk?: bigint;
-    /** Counterparty BabyJubJub Ax coordinate. Zero for shield/unshield notes. Default 0n. */
-    counterpartyPk?: bigint;
+    /**
+     * The other party's BabyJubJub Ax coordinate, stamped in the memo. Zero for
+     * shield/unshield notes. Default 0n.
+     *
+     * ALWAYS a one-time stealth key, never a stable identity. A recipient note
+     * carrying the sender's global pk would link every payment that sender ever
+     * made, and would leak him if the recipient later discloses the note. The
+     * way to let a recipient pay back is a payment slip, which the sender opts
+     * into and shares out of band.
+     */
+    sourcePk?: bigint;
     /** Circuit version to stamp on the note. Defaults to `CURRENT_CIRCUIT_VERSION`. */
     circuitVersion?: number;
     /**
@@ -80,13 +97,6 @@ export type NoteInput = {
      * generates its own coordinated ephSk). Default: random.
      */
     ephSkOverride?: Uint8Array;
-    /**
-     * Sender's 32-byte outgoing viewing key (ovk). When present on the stealth
-     * path, `build()` seals the memo's shared secret into a 56-byte `ovkBlob` so
-     * the sender can recover this transfer after a cold restore. Absent → no blob
-     * (the app applies the ⊥ default at submit time, never the SDK).
-     */
-    outgoingViewingKey?: Uint8Array;
 };
 
 /**
@@ -140,40 +150,38 @@ export type ZkNote = {
      * Always populated: uses a dummy memo when no viewingPublicKey is provided.
      */
     memo: number[];
-    /** Counterparty BabyJubJub Ax coordinate. Zero for shield/unshield notes. */
-    counterpartyPk: bigint;
-    /**
-     * 56-byte outgoing-viewing-key blob (per-note in the domain object; becomes a
-     * per-transaction field at submit, see the OVK plan §4.1). Present only on a
-     * stealth recipient note built with an `outgoingViewingKey`. It wraps the
-     * memo's shared secret under the sender's ovk so the sender can recover the
-     * transfer; the recipient never needs it. Not persisted in the vault.
-     */
-    ovkBlob?: number[];
+    /** The other party's BabyJubJub Ax (one-time stealth key). Zero for shield/unshield notes. */
+    sourcePk: bigint;
 };
 
 /**
- * A sender's record of a note they SENT, recovered via the OVK blob. Not a
- * spendable note: it deliberately carries no `spendingKey`, no `nullifier`, no
- * `spent` flag — the sender does not own the recipient's note, only the memory of
- * having sent it. Used to rebuild the outgoing history after a cold restore.
+ * What a sender can still say about a note they sent but do not own.
+ *
+ * Every field here is PUBLIC on chain. That is the whole point: a sender cannot
+ * reopen a memo sealed toward someone else, so anything secret — the value, the
+ * blinding, the recipient's stealth key — is unavailable to them by design.
+ * These facts are looked up by commitment, not decrypted.
+ *
+ * It is enough to re-issue a payment slip, which is what makes the slip
+ * recoverable after a lost device: a slip carries the commitment, the memo, and
+ * the leaf index, and forwarding a memo needs no ability to read it. The
+ * recipient opens it with their own viewing key exactly as they always would.
+ *
+ * Deliberately NOT spendable, and not even viewable: no `spendingKey`, no
+ * `nullifier`, no `value`. The sender holds the memory of having sent
+ * something, not a claim on it.
  */
-export type OutgoingNoteRecord = {
+export type NoteFacts = {
     /** 0x-prefixed 32-byte LE commitment hex of the recipient output. */
     commitmentHex: string;
-    /** Global Merkle leaf index, when the hint carried one. */
+    /** Global Merkle leaf index, when known. */
     leafIndex?: number;
-    /** Amount sent, in planck. */
-    value: bigint;
-    /** Asset ID of the sent note. */
-    assetId: bigint;
-    /** The recipient's one-time stealth owner public key (BJJ Ax). */
-    recipientStealthPk: bigint;
-    /** Blinding scalar of the recipient output. With value/assetId/stealthPk it
-     *  recomputes the commitment — needed to rebuild a payment slip for the note. */
-    blinding: bigint;
-    /** Counterparty BabyJubJub Ax coordinate stamped in the memo. */
-    counterpartyPk: bigint;
-    /** Circuit version the sent note was created under. */
-    circuitVersion: number;
+    /**
+     * The note's 180-byte encrypted memo, 0x-prefixed, exactly as published.
+     *
+     * Carried verbatim, never decrypted here — the sender has no key for it.
+     * Handing it back to the recipient inside a fresh slip is what re-issuing a
+     * slip means.
+     */
+    encryptedMemo: string;
 };

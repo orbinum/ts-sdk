@@ -1,4 +1,21 @@
 /**
+ * Is `value` a 0x-prefixed hex string of exactly `byteLen` bytes?
+ *
+ * A total predicate on `unknown`, for validating values that crossed a trust
+ * boundary — a decoded payment slip, an indexer response, a pasted string.
+ * Those arrive as `unknown` or as a `string` the type system already believes,
+ * and a bare `typeof === 'string'` check admits script tags, URLs and megabyte
+ * payloads into fields the wallet later stores and renders.
+ *
+ * Returns a boolean rather than throwing: callers at a boundary usually want to
+ * drop the value or reject the message, not unwind. Use `fromHex` when a throw
+ * is the right answer.
+ */
+export function isHexOfLength(value: unknown, byteLen: number): value is string {
+    return typeof value === 'string' && new RegExp(`^0x[0-9a-fA-F]{${byteLen * 2}}$`).test(value);
+}
+
+/**
  * Converts a Uint8Array or number[] to a 0x-prefixed lowercase hex string.
  */
 export function toHex(bytes: Uint8Array | number[]): string {
@@ -13,11 +30,16 @@ export function fromHex(hex: string): Uint8Array {
     if (clean.length % 2 !== 0) {
         throw new Error(`Invalid hex string — odd length: "${hex}"`);
     }
+    // Reject non-hex up front. `parseInt(_, 16)` accepts a valid prefix and
+    // drops the rest ("1z" → 1, "-1" → -1), so a per-pair NaN check lets
+    // near-hex from an untrusted source (indexer memo/commitment/blob) decode
+    // into attacker-chosen bytes instead of throwing.
+    if (!/^[0-9a-fA-F]*$/.test(clean)) {
+        throw new Error('Invalid hex string — non-hex characters');
+    }
     const bytes = new Uint8Array(clean.length / 2);
     for (let i = 0; i < bytes.length; i++) {
-        const byte = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
-        if (isNaN(byte)) throw new Error(`Invalid hex character at position ${i * 2}`);
-        bytes[i] = byte;
+        bytes[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
     }
     return bytes;
 }

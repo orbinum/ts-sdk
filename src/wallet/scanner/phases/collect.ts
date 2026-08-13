@@ -285,6 +285,42 @@ async function runPrefetched<T>(
  * checkpoint callbacks stay persisted, and the caller resumes paging right
  * after the last processed leaf.
  */
+/**
+ * Checks a downloaded chunk against what the manifest said it would be.
+ *
+ * A sealed chunk is an exact, dense leaf range — the indexer refuses to seal
+ * one that is short or holds a duplicate index — so these are properties the
+ * feed already guarantees, restated where a wallet can act on them.
+ *
+ * This is the gap the note crypto leaves open. A hostile or broken feed cannot
+ * forge a note (every recovered note is rebound to its on-chain commitment via
+ * Poseidon before it counts), but it CAN drop one, and the effect is silent:
+ * the wallet never learns that money exists. Throwing sends the scan down the
+ * paginated-tail fallback instead of quietly under-reporting a balance.
+ */
+function assertChunkIsWellFormed(
+    hints: ScanHint[],
+    info: { idx: number; count: number },
+    chunkSize: number
+): void {
+    if (hints.length !== info.count) {
+        throw new Error(
+            `scan chunk ${info.idx}: expected ${info.count} hints, got ${hints.length}`
+        );
+    }
+    // Chunk i covers exactly [i·chunkSize, i·chunkSize + count).
+    const firstLeaf = info.idx * chunkSize;
+    for (let i = 0; i < hints.length; i++) {
+        const leaf = hints[i]!.leafIndex;
+        if (leaf !== firstLeaf + i) {
+            throw new Error(
+                `scan chunk ${info.idx}: leaf index ${String(leaf)} at position ${i}, ` +
+                    `expected ${firstLeaf + i} — the range is not dense`
+            );
+        }
+    }
+}
+
 async function processSealedChunks(
     ctx: ScanContext,
     source: ScanHintSource,
@@ -306,7 +342,18 @@ async function processSealedChunks(
     // Leaves are dense, so the remaining work (sealed + tail) is total - startLeaf.
     const total = Math.max(manifest.total - startLeaf, 0);
 
-    const fetchChunk = (i: number) => source.chunks!.chunk(pending[i]!.idx, pending[i]!.digest);
+    // Fetch and CHECK. A sealed chunk covers an exact, dense leaf range, so a
+    // missing hint is detectable for free — and it is the one attack the memo
+    // crypto cannot catch: a server cannot forge a note (every note is bound to
+    // its on-chain commitment through Poseidon), but it can OMIT one, and the
+    // wallet would simply never see that money. Verified before the cursor
+    // filter below, which would otherwise hide a gap at the start of a chunk.
+    const fetchChunk = async (i: number) => {
+        const info = pending[i]!;
+        const hints = await source.chunks!.chunk(info.idx, info.digest);
+        assertChunkIsWellFormed(hints, info, manifest.chunkSize);
+        return hints;
+    };
 
     await runPrefetched(pending.length, fetchChunk, ctx.signal, (hints) =>
         // The first chunk may straddle the cursor — drop already-scanned leaves.

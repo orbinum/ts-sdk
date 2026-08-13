@@ -164,6 +164,18 @@ export interface TransferFactsRow {
     matchedCommitments?: string[];
 }
 
+/** One transfer output row, as served for targeted outgoing recovery. */
+export interface TransferOutputRow {
+    blockNumber: number;
+    extrinsicIndex: number | null;
+    /** 0x-prefixed 32-byte commitment hex. */
+    commitmentHex: string;
+    /** Global Merkle leaf index. */
+    leafIndex: number;
+    /** 0x-prefixed encrypted memo hex, or null. */
+    encryptedMemo: string | null;
+}
+
 /**
  * Where history reconstruction reads transfer shapes from.
  *
@@ -176,4 +188,13 @@ export interface TransferFactsRow {
 export interface TransferFactsSource {
     byNullifiers(nullifiers: string[]): Promise<TransferFactsRow[]>;
     byCommitments(commitments: string[]): Promise<TransferFactsRow[]>;
+    /**
+     * Every transfer output of the given extrinsics, with its memo.
+     * Optional: without it, outgoing reconstruction falls back to inference
+     * from the change note. Only ever called for extrinsics the wallet already
+     * surfaced via `byNullifiers`, so it adds no incremental server linkage.
+     */
+    outputsByExtrinsics?(
+        keys: Array<{ blockNumber: number; extrinsicIndex: number }>
+    ): Promise<TransferOutputRow[]>;
 }

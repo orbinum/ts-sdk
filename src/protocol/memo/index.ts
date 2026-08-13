@@ -8,16 +8,11 @@
 export { EncryptedMemo, ENCRYPTED_MEMO_SIZE, bytesToBjjScalar } from './EncryptedMemo';
 export { serializeMemo, deriveViewTag } from './plaintext';
 
-// Outgoing viewing key: the sender-side blob that wraps a memo's shared secret.
-export {
-    OVK_BLOB_SIZE,
-    deriveOutgoingCipherKey,
-    sealOutgoingBlob,
-    openOutgoingBlob,
-    randomOutgoingBlob,
-} from './OutgoingBlob';
-
 // Payment slip: the sealed handoff a sender gives a recipient to skip scanning.
+//
+// This is also how a sender re-hands a slip after losing their device: a slip
+// carries only the commitment, the memo, and the leaf index — all public — so
+// re-issuing one needs no ability to reopen the memo, only to forward it.
 export {
     sealPaymentSlip,
     openPaymentSlip,

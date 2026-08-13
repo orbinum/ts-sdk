@@ -103,6 +103,8 @@ describe('claimFees', () => {
             commitmentHex: NOTE.commitmentHex,
             createdTxHash: '0xok',
             txKind: 'substrate',
+            // Same ambiguity as unshield change: zero sourcePk, but not a shield.
+            origin: 'fee-claim',
         });
     });
 

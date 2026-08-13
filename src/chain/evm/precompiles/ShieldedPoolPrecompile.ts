@@ -7,9 +7,45 @@ import type {
 } from '../../pallet/shielded-pool/extrinsicParams';
 import type { EvmSigner } from './types';
 import { EncryptedMemo } from '../../../protocol/memo/index';
-import { fromHex } from '../../../foundation/encoding/hex';
+import { fromHex, isHexOfLength } from '../../../foundation/encoding/hex';
 import { encodeHex } from './abi';
 import { PRECOMPILE_ADDR, SP_SEL } from './addresses';
+
+// ─── Encoding guards ─────────────────────────────────────────────────────────
+//
+// The ABI encoder is total: it left-pads whatever it is handed into a 32-byte
+// word. That makes silent corruption the default failure mode — an empty string
+// becomes 32 zero bytes, and a number past 2^32 becomes a word the node reads
+// back truncated. Both produce calldata the chain rejects for reasons the user
+// cannot act on, so they are refused here where the field name is still known.
+
+/**
+ * A `bytes32` ABI slot, from exactly 32 bytes.
+ *
+ * Throws rather than returning null, unlike the boundary checks in `protocol/`:
+ * this is the wallet's own outgoing calldata, so a bad value is a bug in the
+ * caller, not hostile input to tolerate.
+ */
+function bytes32(hex: string, field: string): Uint8Array {
+    if (!isHexOfLength(hex, 32)) {
+        throw new Error(`${field}: expected a 0x-prefixed 32-byte hex string, got ${hex}`);
+    }
+    return fromHex(hex);
+}
+
+/**
+ * A `uint32` ABI slot, checked against the width the chain actually decodes.
+ *
+ * The slot is 32 bytes wide, so an oversized value encodes cleanly and is then
+ * truncated on the far side: `2^32` reads back as `0`. For `circuitVersion`
+ * that silently selects a DIFFERENT verifying key than the caller asked for.
+ */
+function uint32(value: number, field: string): bigint {
+    if (!Number.isInteger(value) || value < 0 || value > 0xffff_ffff) {
+        throw new Error(`${field}: expected a uint32 (0..4294967295), got ${value}`);
+    }
+    return BigInt(value);
+}
 
 // ─── ShieldedPoolPrecompile ───────────────────────────────────────────────────
 
@@ -43,10 +79,10 @@ export class ShieldedPoolPrecompile {
      */
     buildShieldCalldata(params: ShieldParams): string {
         EncryptedMemo.validate(params.encryptedMemo, 'buildShieldCalldata.encryptedMemo');
-        const commitment = fromHex(params.commitment);
+        const commitment = bytes32(params.commitment, 'buildShieldCalldata.commitment');
         return encodeHex(
             SP_SEL.SHIELD,
-            { type: 'uint', value: BigInt(params.assetId) },
+            { type: 'uint', value: uint32(params.assetId, 'buildShieldCalldata.assetId') },
             { type: 'bytes32', value: commitment },
             { type: 'bytes', value: params.encryptedMemo }
         );
@@ -77,11 +113,18 @@ export class ShieldedPoolPrecompile {
     /**
      * Returns the ABI-encoded calldata for
      * `privateTransfer(bytes, bytes32, bytes32[], bytes32[], bytes[], uint32, uint256, uint32)`.
-     * The trailing `uint32` is the circuit version the input notes were created under.
+     *
+     * Eight arguments, ending in the circuit version the input notes were
+     * created under. The argument count is part of the selector: a ninth would
+     * change it, and the precompile answers only to `0x66ed2cd4`.
      */
     buildPrivateTransferCalldata(params: PrivateTransferParams): string {
-        const nullifiers = params.inputs.map((i) => fromHex(i.nullifier));
-        const commitments = params.outputs.map((o) => fromHex(o.commitment));
+        const nullifiers = params.inputs.map((i, n) =>
+            bytes32(i.nullifier, `buildPrivateTransferCalldata.inputs[${n}].nullifier`)
+        );
+        const commitments = params.outputs.map((o, n) =>
+            bytes32(o.commitment, `buildPrivateTransferCalldata.outputs[${n}].commitment`)
+        );
         const memos = params.outputs.map((o, i) => {
             EncryptedMemo.validate(
                 o.encryptedMemo,
@@ -89,7 +132,7 @@ export class ShieldedPoolPrecompile {
             );
             return o.encryptedMemo;
         });
-        const root = fromHex(params.merkleRoot);
+        const root = bytes32(params.merkleRoot, 'buildPrivateTransferCalldata.merkleRoot');
 
         return encodeHex(
             SP_SEL.PRIVATE_TRANSFER,
@@ -98,9 +141,12 @@ export class ShieldedPoolPrecompile {
             { type: 'bytes32[]', value: nullifiers },
             { type: 'bytes32[]', value: commitments },
             { type: 'bytes[]', value: memos },
-            { type: 'uint', value: BigInt(params.assetId) },
+            { type: 'uint', value: uint32(params.assetId, 'buildPrivateTransferCalldata.assetId') },
             { type: 'uint', value: params.fee ?? 0n },
-            { type: 'uint', value: BigInt(params.circuitVersion) }
+            {
+                type: 'uint',
+                value: uint32(params.circuitVersion, 'buildPrivateTransferCalldata.circuitVersion'),
+            }
         );
     }
 
@@ -125,8 +171,8 @@ export class ShieldedPoolPrecompile {
      */
     buildUnshieldCalldata(params: UnshieldParams): string {
         const proof = params.proof;
-        const root = fromHex(params.merkleRoot);
-        const nullifier = fromHex(params.nullifier);
+        const root = bytes32(params.merkleRoot, 'buildUnshieldCalldata.merkleRoot');
+        const nullifier = bytes32(params.nullifier, 'buildUnshieldCalldata.nullifier');
 
         // recipient must be exactly 32 bytes (AccountId32 encoded as bytes32)
         const recipientRaw = params.recipientAddress.startsWith('0x')
@@ -137,7 +183,10 @@ export class ShieldedPoolPrecompile {
         );
 
         const changeCommitmentHex = params.changeCommitment ?? '0x' + '00'.repeat(32);
-        const changeCommitment = fromHex(changeCommitmentHex);
+        const changeCommitment = bytes32(
+            changeCommitmentHex,
+            'buildUnshieldCalldata.changeCommitment'
+        );
 
         // changeEncryptedMemo: 180 bytes or empty (0-length) for total unshield
         const changeEncryptedMemo = params.changeEncryptedMemo ?? new Uint8Array();
@@ -147,13 +196,16 @@ export class ShieldedPoolPrecompile {
             { type: 'bytes', value: proof },
             { type: 'bytes32', value: root },
             { type: 'bytes32', value: nullifier },
-            { type: 'uint', value: BigInt(params.assetId) },
+            { type: 'uint', value: uint32(params.assetId, 'buildUnshieldCalldata.assetId') },
             { type: 'uint', value: params.amount },
             { type: 'bytes32', value: recipientBytes },
             { type: 'uint', value: params.fee ?? 0n },
             { type: 'bytes32', value: changeCommitment },
             { type: 'bytes', value: changeEncryptedMemo },
-            { type: 'uint', value: BigInt(params.circuitVersion) }
+            {
+                type: 'uint',
+                value: uint32(params.circuitVersion, 'buildUnshieldCalldata.circuitVersion'),
+            }
         );
     }
 
@@ -239,17 +291,26 @@ export class ShieldedPoolPrecompile {
             );
         }
 
-        const commitment = fromHex(params.commitment);
+        const commitment = bytes32(params.commitment, 'buildClaimShieldedFeesCalldata.commitment');
 
         return encodeHex(
             SP_SEL.CLAIM_SHIELDED_FEES,
             { type: 'bytes32', value: commitment },
             { type: 'uint', value: params.amount },
-            { type: 'uint', value: BigInt(params.assetId) },
+            {
+                type: 'uint',
+                value: uint32(params.assetId, 'buildClaimShieldedFeesCalldata.assetId'),
+            },
             { type: 'bytes', value: params.encryptedMemo },
             { type: 'bytes', value: params.proof },
             { type: 'bytes', value: params.publicSignals },
-            { type: 'uint', value: BigInt(params.circuitVersion) }
+            {
+                type: 'uint',
+                value: uint32(
+                    params.circuitVersion,
+                    'buildClaimShieldedFeesCalldata.circuitVersion'
+                ),
+            }
         );
     }
 

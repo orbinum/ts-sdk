@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { VaultStore } from '../../../../src/wallet/vault/store/VaultStore';
 import { MemoryVaultStorage } from '../../../../src/wallet/vault/storage/MemoryVaultStorage';
+import { VAULT_SCHEMA_VERSION } from '../../../../src/wallet/vault/storage/config';
 import { createNotesCache } from '../../../../src/wallet/vault/notes/cache';
 import { createWalletSession } from '../../../../src/wallet/vault/session/WalletSession';
 import { deriveVaultKey, deriveVaultBlindKey } from '../../../../src/wallet/vault/crypto/keys';
@@ -16,6 +17,7 @@ import { VaultLockedError } from '../../../../src/wallet/vault/session/errors';
 import { deriveOwnerPk } from '../../../../src/protocol/keys/PrivacyKeys';
 import type { ZkNote } from '../../../../src/protocol/types';
 import type { ObservableNotesCache } from '../../../../src/wallet/vault/notes/cache';
+import type { NoteProvenanceRecord } from '../../../../src/wallet/provenance/types';
 
 const SPENDING_KEY = 12345678901234567890n;
 
@@ -52,7 +54,7 @@ describe('VaultStore', () => {
 
         const master = new Uint8Array(32).fill(9);
         session.open(await deriveVaultKey(master), await deriveVaultBlindKey(master));
-        await storage.putConfig({ id: 'main', v: 4, createdAt: 1, updatedAt: 1 });
+        await storage.putConfig({ id: 'main', v: VAULT_SCHEMA_VERSION, createdAt: 1, updatedAt: 1 });
     });
 
     describe('locked vault', () => {
@@ -285,24 +287,45 @@ describe('VaultStore', () => {
     });
 
     describe('tx history', () => {
-        it('round-trips an encrypted record', async () => {
-            await store.saveTxRecord({ id: '0xtx', amount: '100' });
+        /** Minimal valid provenance record — `saveTxRecord` takes the real shape. */
+        const txRecord = (id: string, value: bigint): NoteProvenanceRecord => ({
+            id,
+            hash: id,
+            blockNumber: 7,
+            timestampMs: 1_000,
+            direction: 'out',
+            kind: 'private_transfer',
+            origin: 'transfer-change',
+            source: 'witnessed',
+            peer: null,
+            amount: { value, exact: true },
+            assetId: 0n,
+            status: 'success',
+        });
 
-            expect(await store.getTxRecords()).toEqual([{ id: '0xtx', amount: '100' }]);
+        // Also the guard for the vault's bigint-safe JSON: `amount.value` and
+        // `assetId` must come back as bigints, not strings.
+        it('round-trips an encrypted record', async () => {
+            await store.saveTxRecord(txRecord('0xtx', 100n));
+
+            expect(await store.getTxRecords()).toEqual([txRecord('0xtx', 100n)]);
         });
 
         it('stores only the hash in plaintext', async () => {
-            await store.saveTxRecord({ id: '0xtx', amount: '100' });
+            await store.saveTxRecord(txRecord('0xtx', 100n));
 
             const [stored] = await storage.getAllTxRecords();
             expect(stored?.id).toBe('0xtx');
-            expect(JSON.stringify(stored)).not.toContain('100');
+            // Structural, not sentinel-based: random ciphertext (or a wall-clock
+            // updatedAt) can coincidentally contain any digit string, so assert
+            // the stored row carries NO field beyond the key and the crypto.
+            expect(Object.keys(stored!).sort()).toEqual(['ciphertext', 'id', 'iv', 'updatedAt']);
         });
 
         // One leftover row from a previous key must not make the whole history
         // unreadable.
         it('skips rows encrypted under a different key', async () => {
-            await store.saveTxRecord({ id: '0xgood', amount: '1' });
+            await store.saveTxRecord(txRecord('0xgood', 1n));
             await storage.addTxRecord({
                 id: '0xforeign',
                 iv: 'AAAAAAAAAAAAAAAA',
@@ -310,7 +333,7 @@ describe('VaultStore', () => {
                 updatedAt: 1,
             });
 
-            expect(await store.getTxRecords()).toEqual([{ id: '0xgood', amount: '1' }]);
+            expect(await store.getTxRecords()).toEqual([txRecord('0xgood', 1n)]);
         });
     });
 
@@ -336,24 +359,35 @@ describe('VaultStore', () => {
 
             await store.unlock(session.cryptoKey!, { expectedSchemaVersion: 4 });
 
-            expect((await storage.getConfig())?.v).toBe(4);
+            expect((await storage.getConfig())?.v).toBe(VAULT_SCHEMA_VERSION);
         });
 
         it('resets on a NEWER stored version too', async () => {
             // A downgrade — the user opened a build older than the one that wrote
             // the vault. Just as unreadable as the other direction.
             await store.save(note('0xa'));
-            await storage.putConfig({ id: 'main', v: 5, createdAt: 1, updatedAt: 1 });
+            await storage.putConfig({
+                id: 'main',
+                v: VAULT_SCHEMA_VERSION + 1,
+                createdAt: 1,
+                updatedAt: 1,
+            });
 
             expect(
-                (await store.unlock(session.cryptoKey!, { expectedSchemaVersion: 4 })).wasReset
+                (
+                    await store.unlock(session.cryptoKey!, {
+                        expectedSchemaVersion: VAULT_SCHEMA_VERSION,
+                    })
+                ).wasReset
             ).toBe(true);
         });
 
         it('keeps the vault when the version matches', async () => {
             await store.save(note('0xa'));
 
-            const result = await store.unlock(session.cryptoKey!, { expectedSchemaVersion: 4 });
+            const result = await store.unlock(session.cryptoKey!, {
+                expectedSchemaVersion: VAULT_SCHEMA_VERSION,
+            });
 
             expect(result.wasReset).toBe(false);
             expect(store.getAll().map((n) => n.commitmentHex)).toEqual(['0xa']);
@@ -382,7 +416,7 @@ describe('VaultStore', () => {
         it('resets when the vault belongs to another chain', async () => {
             await storage.putConfig({
                 id: 'main',
-                v: 4,
+                v: VAULT_SCHEMA_VERSION,
                 chainFingerprint: '0xchain-a',
                 createdAt: 1,
                 updatedAt: 1,
@@ -463,7 +497,7 @@ describe('unspendable notes are reported on every write path', () => {
         store = new VaultStore({ storage, session, notes: createNotesCache() });
         const master = new Uint8Array(32).fill(9);
         session.open(await deriveVaultKey(master), await deriveVaultBlindKey(master));
-        await storage.putConfig({ id: 'main', v: 4, createdAt: 1, updatedAt: 1 });
+        await storage.putConfig({ id: 'main', v: VAULT_SCHEMA_VERSION, createdAt: 1, updatedAt: 1 });
         warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     });
 

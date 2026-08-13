@@ -14,6 +14,7 @@ import {
     decryptStoredNotes,
 } from '../../../../src/wallet/vault/store/unlock';
 import { MemoryVaultStorage } from '../../../../src/wallet/vault/storage/MemoryVaultStorage';
+import { VAULT_SCHEMA_VERSION } from '../../../../src/wallet/vault/storage/config';
 import { VaultStore } from '../../../../src/wallet/vault/store/VaultStore';
 import { createNotesCache } from '../../../../src/wallet/vault/notes/cache';
 import { createWalletSession } from '../../../../src/wallet/vault/session/WalletSession';
@@ -60,7 +61,10 @@ describe('resetVaultToEmpty', () => {
         await resetVaultToEmpty(storage, null, '0xchain');
 
         expect(clearNotes).not.toHaveBeenCalled();
-        expect(await storage.getConfig()).toMatchObject({ chainFingerprint: '0xchain', v: 4 });
+        expect(await storage.getConfig()).toMatchObject({
+            chainFingerprint: '0xchain',
+            v: VAULT_SCHEMA_VERSION,
+        });
     });
 
     it('clears the stored notes when a config already existed', async () => {

@@ -2,21 +2,17 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import {
     tryDecryptNote,
     tryDecryptNoteVerbose,
-    tryRecoverOutgoing,
     computeNullifier,
     computeNoteCommitment,
     commitmentHexOf,
     type ScanCommitment,
-    type OutgoingHint,
 } from '../../../src/protocol/note/NoteDecryptor';
 import { NoteBuilder } from '../../../src/protocol/note/NoteBuilder';
 import {
     deriveViewingSecretKey,
     deriveViewingPublicKey,
     deriveOwnerPk,
-    deriveOutgoingViewingKey,
 } from '../../../src/protocol/keys/PrivacyKeys';
-import { randomOutgoingBlob } from '../../../src/protocol/memo/OutgoingBlob';
 import { toHex, fromHex } from '../../../src/foundation/encoding/hex';
 import { bytesToBigintLE, bigintTo32Le } from '../../../src/foundation/encoding/bytes';
 import { CURRENT_CIRCUIT_VERSION, type ZkNote } from '../../../src/protocol/types';
@@ -643,114 +639,3 @@ describe('commitmentHexOf', () => {
     });
 });
 
-// ─── tryRecoverOutgoing (OVK, sender-side recovery) ──────────────────────────
-
-describe('tryRecoverOutgoing', () => {
-    const SENDER_MASTER = new Uint8Array(32).fill(0x5a);
-    const RECIPIENT_SK = 33333333333333333n;
-    let senderOvk: Uint8Array;
-    let senderOwnerPk: bigint;
-    let recipientOwnerPk: bigint;
-    let recipientVpk: Uint8Array;
-    let sentNote: ZkNote;
-    let hint: OutgoingHint;
-
-    beforeAll(async () => {
-        senderOvk = deriveOutgoingViewingKey(SENDER_MASTER);
-        senderOwnerPk = deriveOwnerPk(44444444444444444n);
-        recipientOwnerPk = deriveOwnerPk(RECIPIENT_SK);
-        recipientVpk = deriveViewingPublicKey(deriveViewingSecretKey(RECIPIENT_SK));
-
-        sentNote = await NoteBuilder.build({
-            value: 5000n,
-            blinding: 88n,
-            ownerPk: recipientOwnerPk,
-            counterpartyPk: senderOwnerPk,
-            viewingPublicKey: recipientVpk,
-            recipientOwnerPk,
-            outgoingViewingKey: senderOvk,
-        });
-        hint = {
-            commitmentHex: sentNote.commitmentHex,
-            leafIndex: 3,
-            encryptedMemo: toHex(new Uint8Array(sentNote.memo)),
-            ovkBlob: toHex(new Uint8Array(sentNote.ovkBlob!)),
-        };
-    });
-
-    it('recovers value, recipient stealth pk, counterparty and circuit version', () => {
-        const rec = tryRecoverOutgoing(hint, senderOvk);
-        expect(rec).not.toBeNull();
-        expect(rec!.value).toBe(5000n);
-        expect(rec!.assetId).toBe(0n);
-        expect(rec!.recipientStealthPk).toBe(sentNote.ownerPk); // the stealth owner
-        expect(rec!.counterpartyPk).toBe(senderOwnerPk);
-        expect(rec!.circuitVersion).toBe(sentNote.circuitVersion);
-        expect(rec!.leafIndex).toBe(3);
-    });
-
-    it('recovers blinding, so the sender can recompute the commitment', () => {
-        const rec = tryRecoverOutgoing(hint, senderOvk)!;
-        expect(rec.blinding).toBe(sentNote.blinding);
-        // value/assetId/stealthPk/blinding must hash back to the on-chain commitment.
-        const recomputed = computeNoteCommitment(
-            rec.value,
-            rec.assetId,
-            rec.recipientStealthPk,
-            rec.blinding
-        );
-        expect(commitmentHexOf(recomputed)).toBe(sentNote.commitmentHex);
-    });
-
-    it('returns a record with NO spendingKey and NO nullifier (not a spendable note)', () => {
-        const rec = tryRecoverOutgoing(hint, senderOvk)!;
-        expect('spendingKey' in rec).toBe(false);
-        expect('nullifier' in rec).toBe(false);
-        expect('spent' in rec).toBe(false);
-    });
-
-    it('wrong ovk → null', () => {
-        const otherOvk = deriveOutgoingViewingKey(new Uint8Array(32).fill(0x99));
-        expect(tryRecoverOutgoing(hint, otherOvk)).toBeNull();
-    });
-
-    it('hint without ovkBlob (pre-OVK) → null, no throw', () => {
-        const { ovkBlob: _drop, ...noBlob } = hint;
-        expect(tryRecoverOutgoing(noBlob, senderOvk)).toBeNull();
-    });
-
-    it('random ⊥ blob → null, no throw', () => {
-        const withRandom = { ...hint, ovkBlob: toHex(randomOutgoingBlob()) };
-        expect(tryRecoverOutgoing(withRandom, senderOvk)).toBeNull();
-    });
-
-    it('not transplantable: valid blob + another output’s commitment/memo → null (§3.4 layer 1)', async () => {
-        const otherNote = await NoteBuilder.build({
-            value: 1n,
-            blinding: 999n,
-            ownerPk: recipientOwnerPk,
-            viewingPublicKey: recipientVpk,
-            recipientOwnerPk,
-            outgoingViewingKey: senderOvk,
-        });
-        const crossed: OutgoingHint = {
-            commitmentHex: otherNote.commitmentHex,
-            leafIndex: 4,
-            encryptedMemo: toHex(new Uint8Array(otherNote.memo)),
-            ovkBlob: hint.ovkBlob!, // blob from the first note
-        };
-        expect(tryRecoverOutgoing(crossed, senderOvk)).toBeNull();
-    });
-
-    it('tampered memo (one bit) → null (§3.4 layer 2/3)', () => {
-        const memoBytes = new Uint8Array(sentNote.memo);
-        memoBytes[20] = (memoBytes[20] ?? 0) ^ 0x01;
-        const tampered = { ...hint, encryptedMemo: toHex(memoBytes) };
-        expect(tryRecoverOutgoing(tampered, senderOvk)).toBeNull();
-    });
-
-    it('wrong commitmentHex (another note) → null (§3.4 layer 3)', () => {
-        const wrong = { ...hint, commitmentHex: commitmentHexOf(0xabcdn) };
-        expect(tryRecoverOutgoing(wrong, senderOvk)).toBeNull();
-    });
-});

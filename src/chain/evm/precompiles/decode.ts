@@ -106,8 +106,9 @@ export function decodePrecompileCalldata(address: string, input: string): Decode
         }
     }
 
-    // privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32)
-    // ABI head after selector:
+    // privateTransfer(bytes,bytes32,bytes32[],bytes32[],bytes[],uint32,uint256,uint32[,bytes])
+    // ABI head after selector (both the legacy 8-slot and current 9-slot layout —
+    // every field read below sits at the same offset in both):
     // [0-31] offset→proof | [32-63] root | [64-95] offset→nullifiers
     // [96-127] offset→commitments | [128-159] offset→memos
     // [160-191] assetId (uint32) | [192-223] fee (uint256) | [224-255] circuit_version (uint32)

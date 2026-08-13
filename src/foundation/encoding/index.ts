@@ -4,7 +4,15 @@
  * The bottom of the utility stack — no dependencies outside this directory, and
  * every layer above reaches bytes through it.
  */
-export { toHex, fromHex, ensureHexPrefix, hexToNumber, hexToBigint, scalarToHex } from './hex';
+export {
+    toHex,
+    fromHex,
+    isHexOfLength,
+    ensureHexPrefix,
+    hexToNumber,
+    hexToBigint,
+    scalarToHex,
+} from './hex';
 export {
     bigintTo32Le,
     bigintTo32Be,

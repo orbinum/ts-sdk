@@ -24,12 +24,7 @@
  */
 
 import { sha256 } from '@noble/hashes/sha2.js';
-import {
-    deriveViewingSecretKey,
-    deriveViewingPublicKey,
-    deriveOwnerPk,
-    deriveOutgoingViewingKey,
-} from './PrivacyKeys';
+import { deriveViewingSecretKey, deriveViewingPublicKey, deriveOwnerPk } from './PrivacyKeys';
 import { toHex, scalarToHex } from '../../foundation/encoding/hex';
 import { bigintTo32Le } from '../../foundation/encoding/bytes';
 import { BABYJUB_SUBORDER } from '../../foundation/crypto/constants';
@@ -60,8 +55,6 @@ interface PrivacyKeyState {
     /** 32-byte LE-encoded packed BJJ viewing public key (ivk). Embedded in privacy addresses. */
     viewingPublicKeyPacked: Uint8Array | null;
     ownerPk: bigint | null;
-    /** 32-byte outgoing viewing key (ovk). Wraps outgoing shared secrets; never in addresses. */
-    outgoingViewingKey: Uint8Array | null;
 }
 
 // ─── PrivacyKeyManager ────────────────────────────────────────────────────────
@@ -73,7 +66,6 @@ export class PrivacyKeyManager {
         viewingSecretKey: null,
         viewingPublicKeyPacked: null,
         ownerPk: null,
-        outgoingViewingKey: null,
     };
 
     /**
@@ -89,26 +81,34 @@ export class PrivacyKeyManager {
         const viewingSecretKey = deriveViewingSecretKey(spendingKey);
         const viewingPublicKeyPacked = deriveViewingPublicKey(viewingSecretKey);
         const ownerPk = deriveOwnerPk(spendingKey);
-        const outgoingViewingKey = deriveOutgoingViewingKey(masterBytes);
         this._state = {
             spendingKey,
-            masterBytes,
+            // Own copy — clear() zeroes this buffer, and it must never zero
+            // memory the caller still holds a reference to.
+            masterBytes: masterBytes.slice(),
             viewingSecretKey,
             viewingPublicKeyPacked,
             ownerPk,
-            outgoingViewingKey,
         };
     }
 
-    /** Clear all key material from memory. Call on vault lock / sign-out. */
+    /** Clear all key material from memory. Call on vault lock / sign-out.
+     *  Secret byte buffers are zeroed before the references drop — JS cannot
+     *  guarantee erasure (copies, GC), but this shrinks the window in which a
+     *  heap snapshot or a shared reference still reads the live key.
+     *
+     *  NOTE: the byte getters return the LIVE buffer (hot path, no per-call
+     *  copy). A caller that must keep a secret past a clear() has to copy it
+     *  (`.slice()`) — otherwise this zeroes the value out from under it. */
     clear(): void {
+        this._state.masterBytes?.fill(0);
+        this._state.viewingSecretKey?.fill(0);
         this._state = {
             spendingKey: null,
             masterBytes: null,
             viewingSecretKey: null,
             viewingPublicKeyPacked: null,
             ownerPk: null,
-            outgoingViewingKey: null,
         };
     }
 
@@ -157,17 +157,6 @@ export class PrivacyKeyManager {
             throw new Error('PrivacyKeyManager: no key loaded. Call load() first.');
         }
         return this._state.ownerPk;
-    }
-
-    /**
-     * Returns the 32-byte outgoing viewing key (ovk). Throws if not loaded.
-     * Used to seal/open the outgoing blob that lets the sender recover a transfer.
-     */
-    getOutgoingViewingKey(): Uint8Array {
-        if (this._state.outgoingViewingKey === null) {
-            throw new Error('PrivacyKeyManager: no key loaded. Call load() first.');
-        }
-        return this._state.outgoingViewingKey;
     }
 
     /** Returns the spending key as a 32-byte little-endian Uint8Array. Throws if not loaded. */

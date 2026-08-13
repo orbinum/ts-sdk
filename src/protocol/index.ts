@@ -25,6 +25,6 @@ export type {
     DecryptedMemo,
     NoteInput,
     ZkNote,
-    OutgoingNoteRecord,
+    NoteFacts,
 } from './types';
 export { CURRENT_CIRCUIT_VERSION } from './types';

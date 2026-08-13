@@ -36,10 +36,10 @@ describe('normalizeChainFingerprint', () => {
 // ─── buildConfig ──────────────────────────────────────────────────────────────
 
 describe('buildConfig', () => {
-    it('produce un VaultConfigRecord con id=main y v=4', () => {
+    it('produce un VaultConfigRecord con id=main y la version actual', () => {
         const cfg = buildConfig(null);
         expect(cfg.id).toBe('main');
-        expect(cfg.v).toBe(4);
+        expect(cfg.v).toBe(VAULT_SCHEMA_VERSION);
     });
 
     it('stamps the version hosts pass as expectedSchemaVersion', () => {

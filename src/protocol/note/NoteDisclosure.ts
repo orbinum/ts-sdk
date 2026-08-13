@@ -23,6 +23,7 @@
 
 import { poseidon4 } from 'poseidon-lite';
 import { base64UrlEncode, base64UrlDecode } from '../../foundation/encoding/base64url';
+import { BN254_R } from '../../foundation/crypto/constants';
 import type { ZkNote } from '../types';
 
 const PREFIX = 'orbdisc:';
@@ -118,6 +119,17 @@ export function decodeNoteDisclosureKey(key: string): NoteDisclosure | null {
             ownerPk: fromHex(payload.opk),
             blinding: fromHex(payload.bld),
         };
+
+        // Range checks BEFORE the preimage check. Poseidon reduces its inputs
+        // mod r, so without these a crafted key could claim value = -5 (or
+        // value + r) and still hash to a self-consistent commitment — the
+        // verifier would display a figure no on-chain note can hold. Bounds
+        // mirror the circuit's: value is u128, assetId u32, scalars in [0, r).
+        if (disclosure.value < 0n || disclosure.value >= 1n << 128n) return null;
+        if (disclosure.assetId < 0n || disclosure.assetId >= 1n << 32n) return null;
+        if (disclosure.ownerPk < 0n || disclosure.ownerPk >= BN254_R) return null;
+        if (disclosure.blinding < 0n || disclosure.blinding >= BN254_R) return null;
+        if (disclosure.commitment < 0n || disclosure.commitment >= BN254_R) return null;
 
         // Cryptographic preimage verification
         const recomputed = poseidon4([

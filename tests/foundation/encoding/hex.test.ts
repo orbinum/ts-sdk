@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
     toHex,
     fromHex,
+    isHexOfLength,
     ensureHexPrefix,
     hexToNumber,
     hexToBigint,
@@ -51,6 +52,15 @@ describe('fromHex', () => {
 
     it('throws on invalid hex character', () => {
         expect(() => fromHex('0xzz')).toThrow();
+    });
+
+    // Regression: parseInt(_, 16) accepts a valid prefix and drops the rest, so
+    // these used to decode into attacker-chosen bytes instead of throwing.
+    it('rejects near-hex that parseInt would silently truncate', () => {
+        expect(() => fromHex('0x1z')).toThrow(/non-hex/);
+        expect(() => fromHex('0x-1')).toThrow(/non-hex/);
+        expect(() => fromHex('0x 1')).toThrow(/non-hex/);
+        expect(() => fromHex('0xg0')).toThrow(/non-hex/);
     });
 
     it('decodes full byte range 0x00–0xff', () => {
@@ -169,5 +179,61 @@ describe('scalarToHex', () => {
     it('is big-endian — the low byte lands last', () => {
         // Commitments and nullifiers travel LITTLE-endian and must NOT use this.
         expect(scalarToHex(0x1234n).endsWith('1234')).toBe(true);
+    });
+});
+
+describe('isHexOfLength', () => {
+    // The guard every trust boundary leans on: a decoded slip, an indexer row,
+    // a pasted string. What it must reject is exactly what a bare
+    // `typeof === 'string'` lets through.
+
+    it('accepts a 0x-prefixed hex string of the exact byte length', () => {
+        expect(isHexOfLength('0x' + 'ab'.repeat(32), 32)).toBe(true);
+        expect(isHexOfLength('0x' + 'AB'.repeat(32), 32)).toBe(true); // case-insensitive
+        expect(isHexOfLength('0x', 0)).toBe(true);
+    });
+
+    it('rejects the wrong length, off by a single nibble', () => {
+        expect(isHexOfLength('0x' + 'ab'.repeat(31), 32)).toBe(false);
+        expect(isHexOfLength('0x' + 'ab'.repeat(33), 32)).toBe(false);
+        expect(isHexOfLength('0x' + 'ab'.repeat(32) + 'c', 32)).toBe(false);
+    });
+
+    it('requires the 0x prefix', () => {
+        expect(isHexOfLength('ab'.repeat(32), 32)).toBe(false);
+        expect(isHexOfLength('0X' + 'ab'.repeat(32), 32)).toBe(false);
+    });
+
+    it('rejects non-hex characters that parseInt would silently accept', () => {
+        // `parseInt('1z', 16)` is 1 — near-hex must never decode into
+        // attacker-chosen bytes.
+        expect(isHexOfLength('0x' + 'zz'.repeat(32), 32)).toBe(false);
+        expect(isHexOfLength('0x' + 'ab'.repeat(31) + 'g0', 32)).toBe(false);
+    });
+
+    it('rejects anything that is not a string, without throwing', () => {
+        for (const v of [null, undefined, 42, true, {}, [], new Uint8Array(32)]) {
+            expect(() => isHexOfLength(v, 32)).not.toThrow();
+            expect(isHexOfLength(v, 32)).toBe(false);
+        }
+    });
+
+    it('rejects the injection shapes a rendered field would carry', () => {
+        for (const v of [
+            '<script>alert(1)</script>',
+            'javascript:alert(1)',
+            'https://evil.example',
+            'x'.repeat(100_000),
+            '',
+        ]) {
+            expect(isHexOfLength(v, 32)).toBe(false);
+        }
+    });
+
+    it('anchors both ends — no prefix or suffix smuggling', () => {
+        const valid = 'ab'.repeat(32);
+        expect(isHexOfLength(`0x${valid}<script>`, 32)).toBe(false);
+        expect(isHexOfLength(`prefix0x${valid}`, 32)).toBe(false);
+        expect(isHexOfLength(`0x${valid}\n0x${valid}`, 32)).toBe(false);
     });
 });

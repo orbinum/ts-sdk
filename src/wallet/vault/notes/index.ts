@@ -8,6 +8,7 @@
 export { applyNoteStatus, encryptNote, decryptNoteRecord, noteBlindTag } from './record';
 export {
     noteOrigin,
+    stampOrigin,
     noteCreatedAt,
     noteCreatedTxHash,
     noteSpentTxHash,

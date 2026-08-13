@@ -11,6 +11,7 @@
  * one rebuilt from its memo, simply carries less.
  */
 import type { ZkNote } from '../../../protocol/types';
+import type { NoteOrigin } from '../../provenance/types';
 
 /**
  * Which explorer route a note's tx hashes resolve under.
@@ -35,12 +36,32 @@ export type NoteWithMeta = ZkNote & {
     spentTxHash?: string | null;
     /** Explorer route for both hashes above. Absent means substrate. */
     txKind?: TxKind;
+    /** Which operation produced this note. Absent on notes written before this
+     * field existed, and on notes rebuilt from a memo — `noteOrigin` falls back
+     * to inferring it. */
+    origin?: NoteOrigin;
 };
 
-/** Shield deposit vs PrivateTransfer output (received or change) — the memo's
- * counterpartyPk is zero only for shield/unshield-built notes. */
-export function noteOrigin(note: ZkNote): 'shield' | 'private-transfer' {
-    return note.counterpartyPk === 0n ? 'shield' : 'private-transfer';
+/**
+ * Which operation produced a note.
+ *
+ * Reads the stamped `origin` when the note carries one. The fallback is the old
+ * inference from `sourcePk === 0n`, kept for notes written before the field
+ * existed — but note what that inference cannot see: a zero `sourcePk` covers
+ * shield, unshield-change AND fee-claim notes (all come back `'shield'`), and a
+ * non-zero one covers both received notes and transfer change (all come back
+ * `'transfer-in'`). That is exactly the ambiguity the stamped field removes,
+ * and why a stamped note is never re-inferred.
+ */
+export function noteOrigin(note: ZkNote): NoteOrigin {
+    const stamped = (note as NoteWithMeta).origin;
+    if (stamped) return stamped;
+    return note.sourcePk === 0n ? 'shield' : 'transfer-in';
+}
+
+/** Stamp the operation that produced a note. */
+export function stampOrigin(note: ZkNote, origin: NoteOrigin): NoteWithMeta {
+    return { ...note, origin };
 }
 
 export function noteCreatedAt(note: ZkNote): number | null {

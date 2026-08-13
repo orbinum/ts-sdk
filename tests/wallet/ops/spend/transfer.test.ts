@@ -60,7 +60,7 @@ function makeNote(value: bigint, blinding = 9n, circuitVersion = 1): ZkNote {
         commitmentHex: toHex(new Uint8Array(bigintTo32LeArr(commitment))),
         nullifierHex: toHex(new Uint8Array(bigintTo32LeArr(blinding * 1000n))),
         memo: [],
-        counterpartyPk: 0n,
+        sourcePk: 0n,
         circuitVersion,
         spent: false,
         spentAt: null,
@@ -321,11 +321,14 @@ describe('transferNotes — root reconciliation', () => {
 
 describe('transferNotes — output construction', () => {
     it('builds recipient and change with the documented key wiring', async () => {
-        const deps = makeDeps();
+        const deps = makeDeps({ selfOwnerPk: OWNER_PK } as Partial<TransferDeps>);
         const ivk = new Uint8Array(32).fill(3);
+        // A stealth-received input, so `sourcePk` is genuinely one-time and the
+        // wiring below is exercised with the values a real transfer carries.
+        const input = { ...makeNote(50n), ownerPk: 0xbeefn } as ZkNote;
 
         await transferNotes(asDeps(deps), {
-            inputNotes: [makeNote(50n)],
+            inputNotes: [input],
             transferAmount: 30n,
             recipientPk: 99n,
             recipientViewingPublicKey: ivk,
@@ -339,7 +342,8 @@ describe('transferNotes — output construction', () => {
             value: 30n,
             ownerPk: 99n,
             recipientOwnerPk: 99n,
-            counterpartyPk: OWNER_PK,
+            // The spent note's one-time pk — never the wallet's own identity.
+            sourcePk: 0xbeefn,
         });
         expect(recipientCall!['viewingPublicKey']).toBe(ivk);
 
@@ -348,12 +352,135 @@ describe('transferNotes — output construction', () => {
         // recipient's ONE-TIME key — never their stable global identifier.
         expect(changeCall).toMatchObject({
             value: 20n,
-            ownerPk: OWNER_PK,
+            // Change goes back to the SPENT note's owner, so a stealth-received
+            // input keeps its one-time key here too.
+            ownerPk: 0xbeefn,
             spendingKey: SPENDING_KEY,
-            counterpartyPk: builtNote(99n, 30n).ownerPk,
+            sourcePk: builtNote(99n, 30n).ownerPk,
         });
         expect(changeCall!['viewingPublicKey']).toEqual(SENDER_IVK);
         expect('recipientOwnerPk' in changeCall!).toBe(false);
+    });
+
+    // ── sourcePk must never carry a stable identity ──────────────────────────
+    //
+    // `sourcePk` is documented as "ALWAYS a one-time stealth key, never a stable
+    // identity". The code used to stamp the spent note's `ownerPk`
+    // unconditionally, relying on that note having arrived by stealth — which a
+    // SHIELD note never does: a shield is self-addressed with no stealth
+    // derivation, so its ownerPk IS the wallet's global pk. Spending a shield
+    // therefore handed the recipient a stable identifier for the sender, on the
+    // shield→transfer path every new user takes for their first payment.
+
+    it('does NOT stamp the sender global pk when spending a self-owned (shield) note', async () => {
+        const ivk = new Uint8Array(32).fill(3);
+        // The wallet knows its own identity, and the input note is owned by it —
+        // exactly the shape a shield produces.
+        const deps = makeDeps({ selfOwnerPk: OWNER_PK } as Partial<TransferDeps>);
+
+        await transferNotes(asDeps(deps), {
+            inputNotes: [makeNote(50n)],
+            transferAmount: 30n,
+            recipientPk: 99n,
+            recipientViewingPublicKey: ivk,
+        });
+
+        const [recipientCall] = deps.buildNote.mock.calls.map(
+            (c) => c[0] as Record<string, unknown>
+        );
+        expect(recipientCall!['sourcePk']).not.toBe(OWNER_PK);
+        // Zero is what a shield/unshield note already carries — the recipient
+        // reads it as "no counterparty" rather than as a wrong identity.
+        expect(recipientCall!['sourcePk']).toBe(0n);
+    });
+
+    it('still stamps the spent pk when it is genuinely one-time (stealth-received note)', async () => {
+        const ivk = new Uint8Array(32).fill(3);
+        // Wallet identity differs from the note's owner: the note arrived by
+        // stealth, so its ownerPk is a per-transfer key and safe to stamp.
+        const deps = makeDeps({ selfOwnerPk: 12345n } as Partial<TransferDeps>);
+
+        await transferNotes(asDeps(deps), {
+            inputNotes: [makeNote(50n)],
+            transferAmount: 30n,
+            recipientPk: 99n,
+            recipientViewingPublicKey: ivk,
+        });
+
+        const [recipientCall] = deps.buildNote.mock.calls.map(
+            (c) => c[0] as Record<string, unknown>
+        );
+        expect(recipientCall!['sourcePk']).toBe(OWNER_PK);
+    });
+
+    it('fails CLOSED when the wallet identity is unknown (cannot prove one-time)', async () => {
+        const ivk = new Uint8Array(32).fill(3);
+        // selfOwnerPk null → no way to tell whether the spent note is ours.
+        // Withhold rather than stamp: defaulting to "stamp" would leak exactly
+        // when the wallet knows least about itself.
+        const deps = makeDeps({ selfOwnerPk: null } as Partial<TransferDeps>);
+
+        await transferNotes(asDeps(deps), {
+            inputNotes: [makeNote(50n)],
+            transferAmount: 30n,
+            recipientPk: 99n,
+            recipientViewingPublicKey: ivk,
+        });
+
+        const [recipientCall] = deps.buildNote.mock.calls.map(
+            (c) => c[0] as Record<string, unknown>
+        );
+        expect(recipientCall!['sourcePk']).toBe(0n);
+    });
+
+    it('withholds when EITHER input is self-owned, whatever the input order', async () => {
+        const ivk = new Uint8Array(32).fill(3);
+        // A stealth-received note (one-time owner) paired with a self-owned
+        // shield. The sender picks the order, so the outcome must not depend on
+        // which note lands in slot 0.
+        const stealthNote = { ...makeNote(30n), ownerPk: 777n } as ZkNote;
+        const shieldNote = makeNote(30n); // ownerPk === OWNER_PK (self)
+
+        for (const inputs of [
+            [stealthNote, shieldNote],
+            [shieldNote, stealthNote],
+        ] as Array<[ZkNote, ZkNote]>) {
+            const deps = makeDeps({ selfOwnerPk: OWNER_PK } as Partial<TransferDeps>);
+
+            await transferNotes(asDeps(deps), {
+                inputNotes: inputs,
+                transferAmount: 30n,
+                recipientPk: 99n,
+                recipientViewingPublicKey: ivk,
+            });
+
+            const [recipientCall] = deps.buildNote.mock.calls.map(
+                (c) => c[0] as Record<string, unknown>
+            );
+            expect(recipientCall!['sourcePk']).toBe(0n);
+        }
+    });
+
+    it('keeps recording the payee on the CHANGE note — it is ours and history needs it', async () => {
+        // Asymmetry with the recipient note, deliberately: the change is sealed
+        // to our own viewing key, `NoteDisclosure` does not carry `sourcePk`,
+        // and `reconstruct.ts` reads exactly this field to name the payee when
+        // the sealed memo is unreadable to us. Blanking it breaks that recovery.
+        const deps = makeDeps({ selfOwnerPk: OWNER_PK } as Partial<TransferDeps>);
+
+        await transferNotes(asDeps(deps), {
+            inputNotes: [makeNote(50n)],
+            transferAmount: 30n,
+            recipientPk: 99n,
+            // no recipient viewing key — the payee pk is global here, and the
+            // change still records it: nobody else can read this note.
+        });
+
+        const [, changeCall] = deps.buildNote.mock.calls.map(
+            (c) => c[0] as Record<string, unknown>
+        );
+        expect(changeCall!['sourcePk']).toBe(builtNote(99n, 30n).ownerPk);
+        expect(changeCall!['sourcePk']).not.toBe(0n);
     });
 
     it('returns a payment slip for a transfer to another user (real recipient ivk)', async () => {
@@ -400,21 +527,52 @@ describe('transferNotes — output construction', () => {
         expect('viewingPublicKey' in recipientCall).toBe(false);
     });
 
-    it('uses an explicit senderPk for both outputs when provided', async () => {
-        const deps = makeDeps();
+    it('stamps the SPENT note’s pk as sourcePk ONLY when it is one-time', async () => {
+        // The privacy invariant, replacing the removed `senderPk` override: what
+        // reaches the recipient's memo is the pk of the note being spent — but
+        // only when that note arrived by stealth, so the pk is per-transfer. A
+        // global identity here would link every payment this sender ever made,
+        // and would expose them if the recipient later disclosed the note.
+        //
+        // This test used to spend a SELF-owned note and assert its pk was
+        // stamped, which is exactly the leak: `makeNote` owns its note under
+        // OWNER_PK, the wallet's own identity.
+        const deps = makeDeps({ selfOwnerPk: OWNER_PK } as Partial<TransferDeps>);
+        const stealthInput = { ...makeNote(50n), ownerPk: 0xbeefn } as ZkNote;
 
         await transferNotes(asDeps(deps), {
-            inputNotes: [makeNote(50n)],
+            inputNotes: [stealthInput],
             transferAmount: 30n,
             recipientPk: 99n,
-            senderPk: 777n,
         });
 
         const [recipientCall, changeCall] = deps.buildNote.mock.calls.map(
             (c) => c[0] as Record<string, unknown>
         );
-        expect(recipientCall!['counterpartyPk']).toBe(777n);
-        expect(changeCall!['ownerPk']).toBe(777n);
+        expect(recipientCall!['sourcePk']).toBe(0xbeefn);
+        expect(recipientCall!['sourcePk']).not.toBe(OWNER_PK);
+        expect(changeCall!['ownerPk']).toBe(stealthInput.ownerPk);
+    });
+
+    it('a stealth-received input carries ITS one-time pk into the next transfer', async () => {
+        // Spending a note that arrived by stealth: its ownerPk is that transfer's
+        // one-time key, so that is what the next recipient sees. Nothing links
+        // the two payments back to a single identity.
+        // `selfOwnerPk` is supplied because the rule fails closed without it —
+        // proving the key is one-time requires knowing which key is ours.
+        const stealthInput = { ...makeNote(50n), ownerPk: 0xbeefn } as ZkNote;
+        const deps = makeDeps({ selfOwnerPk: OWNER_PK } as Partial<TransferDeps>);
+
+        await transferNotes(asDeps(deps), {
+            inputNotes: [stealthInput],
+            transferAmount: 30n,
+            recipientPk: 99n,
+        });
+
+        const recipientCall = deps.buildNote.mock.calls[0]?.[0] as Record<string, unknown>;
+        expect(recipientCall['sourcePk']).toBe(0xbeefn);
+        // Never the wallet's global identity.
+        expect(recipientCall['sourcePk']).not.toBe(OWNER_PK);
     });
 });
 
@@ -498,6 +656,8 @@ describe('transferNotes — persistence', () => {
         expect(saved['value']).toBe(20n);
         expect(saved['createdTxHash']).toBe('0xtx');
         expect(saved['txKind']).toBe('evm');
+        // Stamped at creation, so the UI never has to infer it from sourcePk.
+        expect(saved['origin']).toBe('transfer-change');
     });
 
     it('saves no change note on an exact-amount transfer', async () => {

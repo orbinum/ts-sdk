@@ -12,7 +12,15 @@ const mocks = {
     getAll: vi.fn(),
     getTxRecords: vi.fn(),
     saveTxRecord: vi.fn(),
+    collectOutgoingFacts: vi.fn(),
 };
+
+// Real crypto stays; only the fact lookup is stubbed so the targeted-recovery
+// wiring can be tested without sealing real blobs.
+vi.mock('../../../../src/protocol/note/index', async (importOriginal) => ({
+    ...(await importOriginal<object>()),
+    collectOutgoingFacts: (...args: unknown[]) => mocks.collectOutgoingFacts(...args),
+}));
 
 /** Stand-in for the app's configured minimum — any nonzero base works here. */
 const MIN_GASLESS_FEE = 1_000_000_000_000n;
@@ -40,7 +48,7 @@ function note(over: Partial<ZkNote>): ZkNote {
         commitmentHex: '0xc',
         nullifierHex: '0xn',
         memo: [],
-        counterpartyPk: 0n,
+        sourcePk: 0n,
         spent: false,
         spentAt: null,
         ...over,
@@ -60,7 +68,7 @@ const CHANGE = note({
     commitmentHex: '0xc-change',
     nullifierHex: '0xn-change',
     value: 1_000_000_000_000_000n,
-    counterpartyPk: 0xabcn,
+    sourcePk: 0xabcn,
     spent: false,
 });
 
@@ -136,27 +144,32 @@ describe('reconstructOutgoingTxRecords', () => {
         const expectedAmount = INPUT.value - CHANGE.value - REAL_FEE;
         expect(mocks.saveTxRecord).toHaveBeenCalledExactlyOnceWith({
             id: '0xhash-100-2',
-            type: 'private_transfer',
-            blockNumber: 100,
             hash: '0xhash-100-2',
-            assetId: '0',
-            amount: expectedAmount.toString(),
-            recipientPkHex: '0x' + 'abc'.padStart(64, '0'),
-            status: 'success',
-            feePlanck: REAL_FEE.toString(),
+            blockNumber: 100,
             timestampMs: 1_000,
+            direction: 'out',
+            kind: 'private_transfer',
+            origin: 'transfer-change',
+            source: 'inferred',
+            // Inferred from the change note, so a ONE-TIME key either way.
+            peer: { pk: 0xabcn, scope: 'stealth' },
+            // Derived, but the fee resolved — so the figure IS exact.
+            amount: { value: expectedAmount, exact: true },
+            assetId: 0n,
+            status: 'success',
+            feePlanck: REAL_FEE,
         });
         // Regresión: con el fee asumido el monto salía MIN_GASLESS_FEE*2 más alto.
         expect(mocks.saveTxRecord).not.toHaveBeenCalledWith(
             expect.objectContaining({
-                amount: (INPUT.value - CHANGE.value - MIN_GASLESS_FEE).toString(),
+                amount: { value: INPUT.value - CHANGE.value - MIN_GASLESS_FEE, exact: true },
             })
         );
     });
 
     it('salta transfers cuyo LocalTxRecord ya tiene recipient conocido', async () => {
         mocks.getTxRecords.mockResolvedValue([
-            { hash: '0xhash-100-2', recipientPkHex: '0x' + 'abc'.padStart(64, '0') },
+            { hash: '0xhash-100-2', peer: { pk: 0xabcn, scope: 'stealth' } },
         ]);
 
         await reconstructOutgoingTxRecords(makeIndexer());
@@ -164,25 +177,31 @@ describe('reconstructOutgoingTxRecords', () => {
         expect(mocks.saveTxRecord).not.toHaveBeenCalled();
     });
 
-    it('backfillea el pk en un record existente con pk cero, sin tocar otros campos', async () => {
+    it('backfillea el pk en un record witnessed sin pisar sus hechos (y rellena el fee ausente)', async () => {
         const existing = {
             id: '0xhash-100-2',
             hash: '0xhash-100-2',
-            type: 'private_transfer',
             blockNumber: 100,
-            assetId: '0',
-            amount: '12345',
-            recipientPkHex: '0x' + '00'.repeat(32),
-            status: 'success',
             timestampMs: 1_000,
+            direction: 'out' as const,
+            kind: 'private_transfer' as const,
+            origin: 'transfer-change' as const,
+            source: 'witnessed' as const,
+            peer: null,
+            amount: { value: 12345n, exact: true },
+            assetId: 0n,
+            status: 'success' as const,
         };
         mocks.getTxRecords.mockResolvedValue([existing]);
 
         await reconstructOutgoingTxRecords(makeIndexer());
 
+        // El monto/estado witnessed quedan intactos (una fuente débil no los
+        // pisa); el peer y el fee, que faltaban, se rellenan por la regla 2.
         expect(mocks.saveTxRecord).toHaveBeenCalledExactlyOnceWith({
             ...existing,
-            recipientPkHex: '0x' + 'abc'.padStart(64, '0'),
+            peer: { pk: 0xabcn, scope: 'stealth' },
+            feePlanck: REAL_FEE,
         });
     });
 
@@ -193,13 +212,13 @@ describe('reconstructOutgoingTxRecords', () => {
         await reconstructOutgoingTxRecords(makeIndexer());
 
         expect(mocks.saveTxRecord).toHaveBeenCalledExactlyOnceWith(
-            expect.objectContaining({ recipientPkHex: '0x' + 'abc'.padStart(64, '0') })
+            expect.objectContaining({ peer: { pk: 0xabcn, scope: 'stealth' } })
         );
     });
 
     it('record existente sin pk y change note sin counterparty → no reescribe nada', async () => {
         mocks.getTxRecords.mockResolvedValue([{ hash: '0xhash-100-2' }]);
-        mocks.getAll.mockReturnValue([INPUT, { ...CHANGE, counterpartyPk: 0n }]);
+        mocks.getAll.mockReturnValue([INPUT, { ...CHANGE, sourcePk: 0n }]);
 
         await reconstructOutgoingTxRecords(makeIndexer());
 
@@ -236,8 +255,8 @@ describe('reconstructOutgoingTxRecords', () => {
         const expectedAmount = INPUT.value - REAL_FEE;
         expect(mocks.saveTxRecord).toHaveBeenCalledExactlyOnceWith(
             expect.objectContaining({
-                amount: expectedAmount.toString(),
-                recipientPkHex: '0x' + '00'.repeat(32),
+                amount: { value: expectedAmount, exact: true },
+                peer: null,
             })
         );
     });
@@ -286,10 +305,10 @@ describe('reconstructOutgoingTxRecords', () => {
                 await reconstructOutgoingTxRecords(makeIndexer({}, extrinsics));
 
                 const saved = mocks.saveTxRecord.mock.calls[0]![0];
-                expect(saved.amountApproximate).toBe(true);
+                expect(saved.amount.exact).toBe(false);
                 expect(saved.feePlanck).toBeUndefined();
                 // Sin fee que restar el monto es la cota superior, no una cifra inventada.
-                expect(saved.amount).toBe((INPUT.value - CHANGE.value).toString());
+                expect(saved.amount.value).toBe(INPUT.value - CHANGE.value);
             }
         );
 
@@ -300,8 +319,8 @@ describe('reconstructOutgoingTxRecords', () => {
 
             expect(mocks.saveTxRecord).toHaveBeenCalledExactlyOnceWith(
                 expect.objectContaining({
-                    feePlanck: '12345',
-                    amount: (INPUT.value - CHANGE.value - 12345n).toString(),
+                    feePlanck: 12345n,
+                    amount: { value: INPUT.value - CHANGE.value - 12345n, exact: true },
                 })
             );
         });
@@ -310,7 +329,7 @@ describe('reconstructOutgoingTxRecords', () => {
             await reconstructOutgoingTxRecords(makeIndexer());
 
             const saved = mocks.saveTxRecord.mock.calls[0]![0];
-            expect(saved.amountApproximate).toBeUndefined();
+            expect(saved.amount.exact).toBe(true);
         });
 
         it('consulta el extrinsic una sola vez por transfer', async () => {
@@ -342,5 +361,64 @@ describe('reconstructOutgoingTxRecords', () => {
         expect(mocks.saveTxRecord).toHaveBeenCalledExactlyOnceWith(
             expect.objectContaining({ status: 'success' })
         );
+    });
+
+    // ─── Recuperación de hechos públicos (targeted) ───────────────────────────
+
+    describe('public-facts recovery', () => {
+        const RECIPIENT_OUTPUT = {
+            blockNumber: 100,
+            extrinsicIndex: 2,
+            commitmentHex: '0xc-recipient',
+            leafIndex: 42,
+            encryptedMemo: '0xmemo',
+        };
+
+        function makeFactsIndexer(): ReconstructDeps {
+            return makeIndexer({
+                outputsByExtrinsics: vi
+                    .fn()
+                    .mockResolvedValue([
+                        RECIPIENT_OUTPUT,
+                        { ...RECIPIENT_OUTPUT, commitmentHex: '0xc-change' },
+                    ]),
+            });
+        }
+
+        it('records the memo so a slip can be re-issued, with source: chain', async () => {
+            mocks.collectOutgoingFacts.mockReturnValue({
+                commitmentHex: '0xc-recipient',
+                leafIndex: 42,
+                encryptedMemo: '0xmemo',
+            });
+
+            await reconstructOutgoingTxRecords(makeFactsIndexer());
+
+            const saved = mocks.saveTxRecord.mock.calls[0]![0];
+            expect(saved.source).toBe('chain');
+            expect(saved.note).toMatchObject({ encryptedMemo: '0xmemo' });
+        });
+
+        it('carries no amount — a sender cannot read the sealed memo', async () => {
+            // The load-bearing distinction: the memo is carried for
+            // forwarding, never decrypted, so nothing secret comes back with it.
+            mocks.collectOutgoingFacts.mockReturnValue({
+                commitmentHex: '0xc-recipient',
+                leafIndex: 42,
+                encryptedMemo: '0xmemo',
+            });
+
+            await reconstructOutgoingTxRecords(makeFactsIndexer());
+
+            const saved = mocks.saveTxRecord.mock.calls[0]![0];
+            expect(saved.note).not.toHaveProperty('value');
+            expect(saved.note).not.toHaveProperty('recipientStealthPk');
+        });
+
+        it('only OUR extrinsics are looked up — never a blind sweep', async () => {
+            const deps = makeFactsIndexer();
+            await reconstructOutgoingTxRecords(deps);
+            expect(deps.transfers.outputsByExtrinsics).toHaveBeenCalled();
+        });
     });
 });

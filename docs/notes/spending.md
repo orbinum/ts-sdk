@@ -98,9 +98,16 @@ is a chain under load, and retrying harder makes that worse.
 - **Change note** — back to the sender, and two details are load-bearing:
     - its viewing key derives from the **input's** spending key, so a rescan
       under the same identity always reopens it;
-    - its `counterpartyPk` records the recipient's **one-time stealth key**,
+    - its `sourcePk` records the recipient's **one-time stealth key**,
       never their stable identifier — the vault must not become a ledger of who
       was paid.
+
+  That stamp is also the **only** copy of the payee a sender can still open: the
+  recipient's own memo is sealed toward them, not toward the sender. Blanking it
+  would leave history reconstruction unable to name who was paid at all. An
+  exact-amount transfer produces no change note, so it has no such record —
+  which is the point at which a restored wallet knows a transfer happened but
+  not to whom.
 
 ### Self-transfers (step 8)
 

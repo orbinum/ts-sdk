@@ -16,9 +16,18 @@
  * recipient's viewing key (stealth when they shared a privacy address); the
  * change note goes back to the sender under a viewing key derived from the
  * INPUT's spending key, so a rescan under the same identity can always reopen
- * it. The change note's counterpartyPk records the recipient's ONE-TIME
- * stealth key rather than their global one, so the vault never stores a stable
- * identifier of who was paid.
+ * it.
+ *
+ * **What each note records about the other party.** The two are deliberately
+ * asymmetric, because they travel to different places:
+ *
+ *   - the RECIPIENT's note leaves this wallet, so it carries the spent note's
+ *     pk only when that pk is one-time. Anything durable there would identify
+ *     the sender to the recipient forever;
+ *   - the CHANGE note never leaves: it is sealed to our own viewing key, and
+ *     `NoteDisclosure` does not carry `sourcePk`. It always records who was
+ *     paid, because it is the only way `reconstruct.ts` can name the payee
+ *     after a vault loss.
  */
 import { generateTransferProof } from '../../../protocol/proving/transfer';
 import { buildDummyTransferInput } from '../../../protocol/spend/index';
@@ -30,7 +39,7 @@ import { bigintTo32LeArr } from '../../../foundation/encoding/bytes';
 import { checkSpendableInputs, treeOf } from './guards';
 import { failed, refuseIfAlreadySpent, markInputsSpent } from './lifecycle';
 import type { SpendPrivacyReads, SpendVault } from './lifecycle';
-import { stampCreatedTxHash } from '../../vault/index';
+import { stampCreatedTxHash, stampOrigin } from '../../vault/index';
 import type { TxKind } from '../../vault/index';
 import type { ZkNote } from '../../../protocol/types';
 import type { CircuitVersionResolver } from '../../../protocol/circuit-version/index';
@@ -68,7 +77,7 @@ export interface TransferDeps {
         assetId: bigint;
         ownerPk: bigint;
         spendingKey?: bigint;
-        counterpartyPk: bigint;
+        sourcePk: bigint;
         viewingPublicKey?: Uint8Array;
         recipientOwnerPk?: bigint;
     }) => Promise<ZkNote>;
@@ -93,7 +102,6 @@ export interface TransferParams {
     recipientPk: bigint;
     /** Packed viewing key from the recipient's privacy address. Omitted → dummy memo, they must scan. */
     recipientViewingPublicKey?: Uint8Array | undefined;
-    senderPk?: bigint | undefined;
     fee?: bigint | undefined;
 }
 
@@ -119,7 +127,7 @@ export async function transferNotes(
     params: TransferParams,
     onProgress?: (step: TransferStep) => void
 ): Promise<TransferResult> {
-    const { inputNotes, transferAmount, recipientPk, recipientViewingPublicKey, senderPk } = params;
+    const { inputNotes, transferAmount, recipientPk, recipientViewingPublicKey } = params;
     const effectiveFee = params.fee ?? 0n;
     const [noteA, noteB_] = inputNotes;
     const isDummy = !noteB_;
@@ -182,7 +190,6 @@ export async function transferNotes(
 
     // ── 3. Output notes ───────────────────────────────────────────────────────
     onProgress?.('building-output-notes');
-    const effectiveSenderPk = senderPk ?? noteA.ownerPk;
 
     // The change must be reopenable by a rescan under the sender's identity, so
     // its viewing key derives from the INPUT's spending key.
@@ -190,11 +197,45 @@ export async function transferNotes(
         deriveViewingSecretKey(noteA.spendingKey)
     );
 
+    // What the recipient's memo may carry about us: the spent note's `ownerPk`,
+    // but ONLY when it is a one-time key.
+    //
+    // A note that arrived by stealth has a per-transfer owner, so stamping it
+    // reveals nothing durable. A note we shielded to ourselves does NOT: a
+    // shield is self-addressed with no stealth derivation, so its `ownerPk` IS
+    // this wallet's global identity. Stamping that would put a stable
+    // identifier in the recipient's note — every payment we ever made from a
+    // shielded note would link to the same pk, a recipient could match it
+    // against our public privacy address, and a recipient disclosing one note
+    // would expose us without our consent. Zcash puts nothing about the sender
+    // in the recipient's note for exactly this reason.
+    //
+    // The condition was previously only asserted in a comment ("one-time by
+    // construction when that note arrived by stealth") while the code stamped
+    // `noteA.ownerPk` unconditionally — so the common shield→transfer path,
+    // which is every new user's first payment, leaked the sender's identity.
+    // Zero is the same value a shield/unshield note carries, and the recipient
+    // already treats it as "no other party". The way to let a recipient pay
+    // back is a payment slip, which the sender opts into and shares out of band.
+    //
+    // FAIL CLOSED. Two ways this can be unable to prove the key is one-time,
+    // and both must withhold rather than stamp:
+    //   - `selfOwnerPk` is null (keys not loaded): we cannot compare, so we
+    //     cannot claim the key is not ours. Defaulting to "stamp" would leak
+    //     precisely when the wallet knows least.
+    //   - EITHER input is self-owned: the sender picks the input order, so a
+    //     rule that only inspected `noteA` made the leak depend on which note
+    //     landed in slot 0 — the same pair of notes could be spent two ways
+    //     with different privacy.
+    const inputsSpent = isDummy ? [noteA] : [noteA, noteB_!];
+    const spentNoteIsOneTime =
+        deps.selfOwnerPk !== null && inputsSpent.every((n) => n.ownerPk !== deps.selfOwnerPk);
+
     const recipientNote = await deps.buildNote({
         value: transferAmount,
         assetId: noteA.assetId,
         ownerPk: recipientPk,
-        counterpartyPk: effectiveSenderPk,
+        sourcePk: spentNoteIsOneTime ? noteA.ownerPk : 0n,
         // Undefined → dummy memo; the recipient finds the note by scanning.
         ...(recipientViewingPublicKey !== undefined
             ? { viewingPublicKey: recipientViewingPublicKey }
@@ -205,14 +246,29 @@ export async function transferNotes(
 
     // No stealth for the change: the circuit validates the eventual spend by
     // BabyPbk(spendingKey).Ax === ownerPk, so the pair must be the sender's
-    // real one. counterpartyPk records the recipient's ONE-TIME stealth key —
-    // never their stable global identifier.
+    // real one.
+    //
+    // The change DOES record who we paid, and unlike the recipient note it is
+    // not subject to the one-time rule — the asymmetry is the point:
+    //
+    //   - the recipient's note travels to SOMEONE ELSE, so anything durable in
+    //     it identifies us to them (and to anyone they disclose it to);
+    //   - the change note is ours, sealed to our own viewing key. Nobody else
+    //     can open it, and `NoteDisclosure` does not carry `sourcePk`, so
+    //     disclosing a note never exposes it either.
+    //
+    // It is also the ONLY way to reconstruct the payee after a vault loss: the
+    // recipient's own memo is sealed toward them, so this stamp on our change
+    // note is the sole copy a sender can still open, and `reconstruct.ts` reads
+    // exactly this field. Blanking it to 0n would make
+    // `hasSourcePk` treat the change as having no other party, so history
+    // reconstruction would silently stop naming who was paid.
     const changeNote = await deps.buildNote({
         value: changeValue,
         assetId: noteA.assetId,
-        ownerPk: effectiveSenderPk,
+        ownerPk: noteA.ownerPk,
         spendingKey: noteA.spendingKey,
-        counterpartyPk: recipientNote.ownerPk,
+        sourcePk: recipientNote.ownerPk,
         viewingPublicKey: senderViewingPublicKey,
     });
 
@@ -297,18 +353,32 @@ export async function transferNotes(
         // The change is ours — persist now, or the balance misses it until the
         // next rescan.
         if (changeValue > 0n) {
-            await deps.vault.save(stampCreatedTxHash(changeNote, txResult.txHash, txKind));
+            await deps.vault.save(
+                stampOrigin(
+                    stampCreatedTxHash(changeNote, txResult.txHash, txKind),
+                    'transfer-change'
+                )
+            );
         }
+
+        const isSelf = deps.selfOwnerPk !== null && recipientPk === deps.selfOwnerPk;
 
         // Self-transfer: the recipient output is a stealth note only a rescan
         // would normally recover. We authored its memo, so recovering here makes
         // it spendable immediately. Recovery MUST use the wallet's global keys
         // (inside recoverStealth), never noteA's — an input received via an
         // earlier stealth transfer carries stealth keys that derive garbage.
-        if (deps.selfOwnerPk !== null && recipientPk === deps.selfOwnerPk) {
+        if (isSelf) {
             const selfNote = deps.recoverStealth(recipientNote);
             if (selfNote) {
-                await deps.vault.save(stampCreatedTxHash(selfNote, txResult.txHash, txKind));
+                // A self-transfer's recipient output is a note we RECEIVED,
+                // even though we also sent it.
+                await deps.vault.save(
+                    stampOrigin(
+                        stampCreatedTxHash(selfNote, txResult.txHash, txKind),
+                        'transfer-in'
+                    )
+                );
             }
         }
 
@@ -318,7 +388,6 @@ export async function transferNotes(
         // omitted — the recipient re-fetches the Merkle proof at spend time.
         // Best-effort: a slip is a convenience, so a failure to seal it must never
         // fail the transfer, which already landed on chain.
-        const isSelf = deps.selfOwnerPk !== null && recipientPk === deps.selfOwnerPk;
         if (recipientViewingPublicKey !== undefined && !isSelf) {
             try {
                 const envelope = sealPaymentSlip(recipientViewingPublicKey, {

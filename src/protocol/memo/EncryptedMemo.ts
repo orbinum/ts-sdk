@@ -58,6 +58,15 @@ export function bytesToBjjScalar(bytes: Uint8Array): bigint {
 /**
  * Decrypt the 120-byte plaintext from nonce+ciphertext bytes and parse fields.
  * Returns null if decryption fails (wrong key, bad MAC).
+ *
+ * The offsets below are the wire format — frozen, and pinned by a golden vector.
+ * THIS file is the normative definition: the chain stores the memo as an opaque
+ * blob, so no runtime code constrains the layout.
+ *
+ * Bytes [84,116) appear as `counterparty_pk` in older material. Same 32 bytes,
+ * a name dropped here because it reads like a stable identifier for the other
+ * party when the field holds a key used for exactly one transfer — which is what
+ * makes transfers unlinkable.
  */
 function parsePlaintext(
     nonce: Uint8Array,

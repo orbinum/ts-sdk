@@ -15,52 +15,13 @@
 
 import { poseidon2, poseidon4 } from 'poseidon-lite';
 import { EncryptedMemo, ENCRYPTED_MEMO_SIZE } from '../memo/EncryptedMemo';
-import { openOutgoingBlob, OVK_BLOB_SIZE } from '../memo/OutgoingBlob';
 import { isValidLeafIndex } from '../spend/coinSelection';
 import { deriveStealthOwnerPk, deriveStealthSk } from '../../foundation/crypto/stealth';
 import { recoverOwnerPkPoint } from '../../foundation/crypto/bjj';
-import { fromHex, toHex } from '../../foundation/encoding/hex';
+import { fromHex, toHex, isHexOfLength } from '../../foundation/encoding/hex';
 import { bigintTo32Le, bytesToBigintLE } from '../../foundation/encoding/bytes';
-import {
-    type ScanCommitment,
-    type ZkNote,
-    type DecryptedMemo,
-    type OutgoingNoteRecord,
-} from '../types';
+import { type ScanCommitment, type ZkNote, type NoteFacts } from '../types';
 export type { ScanCommitment };
-
-/**
- * Shared decrypt-and-verify step, used by BOTH the recipient path
- * (`tryDecryptNoteVerbose`) and the sender path (`tryRecoverOutgoing`) — the OVK
- * plan's requirement #7: one note-decryption routine in the whole system.
- *
- * Decrypts the memo with an already-known shared secret, then binds the result
- * to the tree: `poseidon4(value, assetId, effectiveOwnerPk, blinding)` must equal
- * the on-chain commitment. A plaintext that is "plausible but lying" fails here
- * because it would have to be a Poseidon preimage of a real commitment.
- *
- * `effectiveOwnerPk` is the owner the caller expects in the commitment: the
- * recipient path passes the stealthOwnerPk it derived; the sender path passes
- * `null`, meaning "use the decrypted memo's own ownerPk" (it is already the
- * recipient's stealth owner on an outgoing note).
- */
-function decryptAndVerifyPlaintext(
-    memoBytes: Uint8Array,
-    commitmentBytes: Uint8Array,
-    sharedSecret: Uint8Array,
-    effectiveOwnerPk: bigint | null
-): DecryptedMemo | null {
-    const plaintext = EncryptedMemo.decryptWithSharedSecret(
-        memoBytes,
-        commitmentBytes,
-        sharedSecret
-    );
-    if (!plaintext) return null;
-    const ownerPk = effectiveOwnerPk ?? plaintext.ownerPk;
-    const recomputed = poseidon4([plaintext.value, plaintext.assetId, ownerPk, plaintext.blinding]);
-    if (recomputed !== bytesToBigintLE(commitmentBytes)) return null;
-    return plaintext;
-}
 
 // ─── Exported helpers ─────────────────────────────────────────────────────────
 
@@ -254,100 +215,50 @@ export function tryDecryptNoteVerbose(
             commitmentHex: toHex(bigintTo32Le(recomputed)),
             nullifierHex: toHex(bigintTo32Le(nullifier)),
             memo: Array.from(memoBytes),
-            counterpartyPk: plaintext.counterpartyPk,
+            sourcePk: plaintext.sourcePk,
         },
     };
 }
-
-// ─── Outgoing recovery (OVK) ───────────────────────────────────────────────────
-
-/** A scan hint plus the per-transaction OVK blob the indexer serves alongside it. */
-export type OutgoingHint = ScanCommitment & { ovkBlob?: string | null };
+// ─── Outgoing facts ──────────────────────────────────────────────────────────
 
 /**
- * Recover a note the caller SENT, using their outgoing viewing key (ovk).
+ * A commitment the wallet sent but does not own, as served by the indexer.
  *
- * The sender's memo was encrypted toward the RECIPIENT, so they cannot reopen it
- * directly. Instead the ovk blob wraps the memo's shared secret; unwrapping it
- * gives the same secret the recipient gets via ECDH, and feeding it to the shared
- * decrypt-and-verify step rebuilds the sent note's public facts.
- *
- * Returns an OutgoingNoteRecord (value, recipient stealth pk, counterparty,
- * circuit version) — NEVER a spendable note: no spendingKey, no nullifier. The
- * sender does not own this note. Never throws (runs in recovery loops).
- *
- * Security (OVK plan §3.4), in three non-algebraic but sound layers:
- *  1. The blob MAC (openOutgoingBlob) proves whoever wrote it knew the ovk, and
- *     the ock binds it to THIS (commitment, ephPk) — blobs are not transplantable.
- *  2. The memo MAC (inside decryptAndVerifyPlaintext) proves this shared secret
- *     is the one that encrypted this memo — the same secret the recipient derives.
- *  3. The commitment check ties the recovered fields to the note in the tree.
- * Not verifiable by the sender: that `sharedSecret` corresponds to `ephPk` — that
- * needs the recipient's ivsk. Residual: a leaked ovk lets an attacker fabricate a
- * self-consistent (commitment, memo, blob) and plant false outgoing history. It
- * moves no funds; Zcash accepts the same residual. Mitigated in the app by only
- * running this over commitments from extrinsics that spent our own nullifiers.
- *
- * @param hint  scan hint with commitmentHex, encryptedMemo, and ovkBlob.
- * @param ovk   the sender's 32-byte outgoing viewing key.
- * @param opts  viewTagActivationLeaf gates the view-tag check for legacy memos.
+ * Only public fields: the sender cannot reopen a memo sealed toward someone
+ * else, so nothing here is decrypted.
  */
-export function tryRecoverOutgoing(
-    hint: OutgoingHint,
-    ovk: Uint8Array,
-    opts?: { viewTagActivationLeaf?: number }
-): OutgoingNoteRecord | null {
-    // 1. Blob present and well-formed?
-    if (!hint.ovkBlob || !hint.encryptedMemo) return null;
+export type OutgoingHint = ScanCommitment;
 
-    let commitmentBytes: Uint8Array;
-    let memoBytes: Uint8Array;
-    let blobBytes: Uint8Array;
-    try {
-        commitmentBytes = fromHex(hint.commitmentHex);
-        memoBytes = fromHex(hint.encryptedMemo);
-        blobBytes = fromHex(hint.ovkBlob);
-    } catch {
-        return null;
-    }
-    if (memoBytes.length !== ENCRYPTED_MEMO_SIZE) return null;
-    if (blobBytes.length !== OVK_BLOB_SIZE) return null;
-
-    // 2. ephPk = raw bytes 148..180 of the memo (never recomputed — §2.2).
-    const ephPkBytes = memoBytes.subarray(148, 180);
-
-    // 3. Unwrap the shared secret. MAC failure → not ours / ⊥ / corrupt.
-    const sharedSecret = openOutgoingBlob(ovk, blobBytes, commitmentBytes, ephPkBytes);
-    if (!sharedSecret) return null;
-    // From here the blob MAC has proven the writer knew our ovk.
-
-    // 4. View-tag gate, mirroring the recipient path: only enforced at/after the
-    //    activation leaf, since legacy memos carry a random byte there.
-    const activation = opts?.viewTagActivationLeaf;
-    if (
-        activation !== undefined &&
-        isValidLeafIndex(hint.leafIndex) &&
-        hint.leafIndex >= activation &&
-        !EncryptedMemo.checkViewTag(memoBytes, sharedSecret)
-    ) {
-        return null;
-    }
-
-    // 5. Decrypt + verify commitment via the SHARED routine (requirement #7).
-    //    On an outgoing note the memo's ownerPk is already the recipient's stealth
-    //    owner pk, so the verifier binds against plaintext.ownerPk itself — passing
-    //    `null` tells the helper to use the decrypted owner as the expected owner.
-    const plaintext = decryptAndVerifyPlaintext(memoBytes, commitmentBytes, sharedSecret, null);
-    if (!plaintext) return null;
+/**
+ * Collect what a sender can still say about a note they sent.
+ *
+ * There is no decryption on this path and no key involved. The memo travels
+ * verbatim, exactly as published — the point is to FORWARD it to the recipient
+ * inside a fresh payment slip, not to read it. The recipient opens it with
+ * their own viewing key as they always would.
+ *
+ * That is what makes a slip recoverable after a lost device: re-issuing one
+ * needs the commitment, the memo, and the leaf index, all of them public.
+ *
+ * What is NOT recoverable this way is the amount and the recipient, which live
+ * inside the sealed memo. A sender restoring from a seed alone gets working
+ * slips, not their outgoing history.
+ *
+ * Never throws (runs in recovery loops).
+ *
+ * @param hint  scan hint carrying commitmentHex and encryptedMemo.
+ */
+export function collectOutgoingFacts(hint: OutgoingHint): NoteFacts | null {
+    // Shape-check both fields rather than trusting the server. These facts are
+    // forwarded into a payment slip, which enforces the SAME sizes when opened —
+    // a value that slipped through here would fail on the RECIPIENT's device,
+    // where nothing explains which server supplied it.
+    if (!isHexOfLength(hint.commitmentHex, 32)) return null;
+    if (!isHexOfLength(hint.encryptedMemo, ENCRYPTED_MEMO_SIZE)) return null;
 
     return {
         commitmentHex: hint.commitmentHex,
         ...(isValidLeafIndex(hint.leafIndex) ? { leafIndex: hint.leafIndex } : {}),
-        value: plaintext.value,
-        assetId: plaintext.assetId,
-        recipientStealthPk: plaintext.ownerPk,
-        blinding: plaintext.blinding,
-        counterpartyPk: plaintext.counterpartyPk,
-        circuitVersion: plaintext.circuitVersion,
+        encryptedMemo: hint.encryptedMemo,
     };
 }

@@ -182,3 +182,21 @@ queries do send the wallet's own identifiers to the server. That is the
 documented linkage trade-off of history reconstruction — a host that prefers
 not to make it simply does not implement the source. Discovery itself never
 requires it.
+
+### What a sender can and cannot recover
+
+The amount and the recipient live inside a memo sealed toward the **recipient**.
+A sender cannot reopen it, so a wallet restored from seed alone gets the derived
+figure above — never the exact one — and names the payee only from the
+`sourcePk` stamped on its own change note.
+
+What does survive is the **payment slip**. A slip carries the commitment, the
+memo, and the leaf index, all of them public, so re-issuing one needs no ability
+to read the memo — only to forward it. `collectOutgoingFacts` looks those fields
+up by commitment and `regeneratePaymentSlip` seals a fresh envelope around them;
+the recipient opens it with their own viewing key exactly as they always would.
+
+The re-issued slip is not the original bytes — a fresh ephemeral key and nonce
+make every envelope different — but it opens to the same fields. So a sender who
+wiped their device can still hand the recipient a working slip, even though they
+can no longer tell you what they sent.

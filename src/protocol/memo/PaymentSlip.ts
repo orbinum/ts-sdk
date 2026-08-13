@@ -35,14 +35,14 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { packPoint, unpackPoint } from '@zk-kit/baby-jubjub';
 import { fastMulBase, fastMulPoint } from '../../foundation/crypto/bjj-fast';
 import { bigintTo32Le, bytesToBigintLE } from '../../foundation/encoding/bytes';
-import { toHex } from '../../foundation/encoding/hex';
+import { toHex, isHexOfLength } from '../../foundation/encoding/hex';
 import { base64UrlEncode, base64UrlDecode } from '../../foundation/encoding/base64url';
-import { bytesToBjjScalar } from './EncryptedMemo';
+import { bytesToBjjScalar, ENCRYPTED_MEMO_SIZE } from './EncryptedMemo';
 
 // ─── Frozen format constants ─────────────────────────────────────────────────
 // Do NOT change after launch without versioning — the golden vector fixes them.
 
-/** HKDF info for the slip cipher key. Distinct domain from the memo and the ovk blob. */
+/** HKDF info for the slip cipher key. Distinct domain from the memo's. */
 const SLIP_DOMAIN = new TextEncoder().encode('orbinum-payment-slip-v1');
 /** 4-byte constant nonce prefix, not transmitted — domain separation at the nonce level. */
 const NONCE_PREFIX = new TextEncoder().encode('SLP1');
@@ -98,7 +98,14 @@ export function sealPaymentSlip(
     const ivkPoint = unpackPoint(bytesToBigintLE(recipientIvkPacked));
     if (!ivkPoint) throw new Error('PaymentSlip: invalid recipient viewing public key');
 
-    // Ephemeral keypair for this slip (same ECDH shape as the memo).
+    // A fresh ephemeral keypair PER SLIP, never a caller-supplied one.
+    //
+    // This is what makes the 8-byte nonce suffix safe. Eight random bytes alone
+    // would collide by the birthday bound around 2^32 slips, but the key is
+    // derived from this ephSk, so every envelope encrypts under a different
+    // key — the (key, nonce) pair that ChaCha20-Poly1305 actually requires to
+    // be unique cannot repeat. The random suffix is the second layer, not the
+    // first. Accepting an ephSk override here would collapse both at once.
     const ephSkScalar = bytesToBjjScalar(randomBytes(32));
     const ephPkPacked = bigintTo32Le(packPoint(fastMulBase(ephSkScalar)) as bigint);
 
@@ -142,11 +149,37 @@ export function openPaymentSlip(
         const cipher = chacha20poly1305(slipKey, buildNonce(suffix));
         const plaintext = cipher.decrypt(sealed); // throws on MAC failure
 
-        const fields = JSON.parse(new TextDecoder().decode(plaintext)) as PaymentSlipFields;
-        if (typeof fields.commitmentHex !== 'string' || typeof fields.encryptedMemo !== 'string') {
+        const parsed = JSON.parse(new TextDecoder().decode(plaintext)) as Record<string, unknown>;
+
+        // Rebuild the object field by field instead of returning the parsed one.
+        //
+        // The MAC proves the sender knew the recipient's viewing key. It does
+        // NOT make them honest: whoever was handed a privacy address can seal a
+        // slip, so every field below is attacker-chosen data that merely arrived
+        // authenticated. Shape is checked here, at the boundary, because past
+        // this point the fields are indistinguishable from scanned ones.
+        if (!isHexOfLength(parsed['commitmentHex'], 32)) return null;
+        if (!isHexOfLength(parsed['encryptedMemo'], ENCRYPTED_MEMO_SIZE)) return null;
+
+        const leafIndex = parsed['leafIndex'];
+        if (leafIndex !== undefined && (!Number.isInteger(leafIndex) || (leafIndex as number) < 0))
             return null;
-        }
-        return fields;
+
+        // A tx hash is displayed — typically as a link into a block explorer —
+        // so an unconstrained string here is a script/URL injection that reaches
+        // the UI wearing the authority of a decrypted slip. Constrained to the
+        // one shape a real hash has; anything else drops the field rather than
+        // failing the slip, since the hash is informational and the note behind
+        // it is still valid.
+        const rawTxHash = parsed['txHash'];
+        const txHash = isHexOfLength(rawTxHash, 32) ? (rawTxHash as string) : undefined;
+
+        return {
+            commitmentHex: parsed['commitmentHex'] as string,
+            encryptedMemo: parsed['encryptedMemo'] as string,
+            ...(leafIndex !== undefined ? { leafIndex: leafIndex as number } : {}),
+            ...(txHash !== undefined ? { txHash } : {}),
+        };
     } catch {
         return null;
     }

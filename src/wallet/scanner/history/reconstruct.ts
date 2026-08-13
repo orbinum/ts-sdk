@@ -10,39 +10,33 @@
  * is left absent rather than guessed.
  */
 import { fetchExtrinsicFacts } from './extrinsicFacts';
-import { scalarToHex } from '../../../foundation/encoding/hex';
-import type { TransferFactsRow, TransferFactsSource, TxFactsSource } from '../feed/sources';
+import { collectOutgoingFacts } from '../../../protocol/note/index';
+import { selectDescribingNoteByCommitment, mergeProvenance } from '../../provenance/index';
+import type { NoteProvenanceRecord, ProvenancePeer } from '../../provenance/index';
+import type {
+    TransferFactsRow,
+    TransferFactsSource,
+    TransferOutputRow,
+    TxFactsSource,
+} from '../feed/sources';
 import type { VaultStore } from '../../vault/index';
-import type { ZkNote } from '../../../protocol/types';
-
-/** An unknown recipient: the protocol identity is a pk, so absence is all-zero. */
-const ZERO_PK = '0x' + '00'.repeat(32);
+import type { NoteFacts, ZkNote } from '../../../protocol/types';
 
 /**
- * The record this reconstruction writes. A host's own history type may carry
- * more fields; anything extra on an EXISTING record survives the backfill,
- * which only ever adds the recipient.
+ * The record this reconstruction writes.
+ *
+ * It is the shared `NoteProvenanceRecord` — the same shape a host writes at
+ * submit time — so a backfill and a witnessed record can be merged by rule
+ * (`mergeProvenance`) instead of by a spread expression and good intentions.
  */
-export interface ReconstructedTxRecord {
-    /** Tx hash, or "{block}-{index}" when the extrinsic was not decoded. */
-    id: string;
-    type: 'private_transfer';
-    blockNumber: number;
-    hash: string;
-    assetId: string;
-    amount: string;
-    recipientPkHex: string;
-    status: 'success' | 'failed';
-    feePlanck?: string;
-    /** Set when the fee was unreadable — the amount overstates by exactly it. */
-    amountApproximate?: true;
-    timestampMs: number;
-}
+export type ReconstructedTxRecord = NoteProvenanceRecord;
 
 export interface ReconstructDeps {
     vault: Pick<VaultStore, 'getAll' | 'getTxRecords' | 'saveTxRecord'>;
     transfers: TransferFactsSource;
     txFacts: TxFactsSource;
+    /** View-tag activation leaf, mirroring the recipient scan's gating. */
+    viewTagActivationLeaf?: number | null;
     /** Injectable clock — reconstruction stamps rows whose block time is unknown. */
     now?: () => number;
 }
@@ -52,29 +46,73 @@ function extrinsicKey(row: Pick<TransferFactsRow, 'blockNumber' | 'extrinsicInde
     return `${row.blockNumber}:${row.extrinsicIndex ?? 'null'}`;
 }
 
-/** A 0x-prefixed 64-char pk, or ZERO_PK when the note carries no counterparty. */
-function toPkHex(counterpartyPk: bigint | null | undefined): string {
-    return counterpartyPk != null && counterpartyPk !== 0n ? scalarToHex(counterpartyPk) : ZERO_PK;
-}
-
 /**
  * The change note of a transfer: a note WE own produced by the same extrinsic.
  *
  * It may itself be spent by now (chained transfers), so unspent is not
- * required. A candidate with a stamped counterparty pk wins — that is the
- * change note, and in a self-transfer the recipient note qualifies too since
- * either identifies us.
+ * required. The selection rule lives in `provenance/selectDescribingNote` —
+ * shared with the app's incoming-transfer path, which used to carry its own
+ * copy of it.
  */
-function findChangeNote(
-    commitments: string[],
+const findChangeNote = selectDescribingNoteByCommitment<ZkNote>;
+
+/**
+ * Targeted lookup — random access over our own extrinsics, never a blind sweep.
+ *
+ * The sender already knows its outgoing extrinsics (they spent its own
+ * nullifiers), so the lookup is restricted to THEIR outputs. A commitment
+ * planted by someone else is never reached, and no key leaves the wallet.
+ *
+ * Returns the outputs of each outgoing extrinsic, keyed by extrinsicKey.
+ * Empty map when the source capability is absent (inference path).
+ */
+async function fetchOutgoingOutputs(
+    deps: ReconstructDeps,
+    outgoing: TransferFactsRow[]
+): Promise<Map<string, TransferOutputRow[]>> {
+    const byKey = new Map<string, TransferOutputRow[]>();
+    if (!deps.transfers.outputsByExtrinsics) return byKey;
+
+    const keys = outgoing
+        .filter((t): t is TransferFactsRow & { extrinsicIndex: number } => t.extrinsicIndex != null)
+        .map((t) => ({ blockNumber: t.blockNumber, extrinsicIndex: t.extrinsicIndex }));
+    if (keys.length === 0) return byKey;
+
+    try {
+        const rows = await deps.transfers.outputsByExtrinsics(keys);
+        for (const row of rows) {
+            const key = extrinsicKey(row);
+            const list = byKey.get(key);
+            if (list) list.push(row);
+            else byKey.set(key, [row]);
+        }
+    } catch {
+        // Recovery is best-effort; the inference path still runs.
+    }
+    return byKey;
+}
+
+/**
+ * Collect the public facts of one extrinsic's recipient output.
+ *
+ * The recipient's output is the one that is NOT among our own notes — our
+ * change note we can already open, theirs we never can. Nothing is decrypted
+ * here; the memo is carried verbatim so a payment slip can be re-issued from it.
+ */
+function collectFactsFor(
+    outputs: TransferOutputRow[],
     noteByCommitment: Map<string, ZkNote>
-): ZkNote | undefined {
-    const candidates = commitments
-        .map((h) => noteByCommitment.get(h))
-        .filter((n): n is ZkNote => n !== undefined);
-    return (
-        candidates.find((n) => n.counterpartyPk != null && n.counterpartyPk !== 0n) ?? candidates[0]
-    );
+): NoteFacts | null {
+    for (const output of outputs) {
+        if (noteByCommitment.has(output.commitmentHex)) continue;
+        const facts = collectOutgoingFacts({
+            commitmentHex: output.commitmentHex,
+            leafIndex: output.leafIndex,
+            encryptedMemo: output.encryptedMemo,
+        });
+        if (facts) return facts;
+    }
+    return null;
 }
 
 /** Local records keyed by tx hash; an unavailable history reads as empty. */
@@ -113,12 +151,14 @@ export async function reconstructOutgoingTxRecords(deps: ReconstructDeps): Promi
     );
 
     const existingByHash = await loadExistingRecords(vault);
+    const outputsByExtrinsic = await fetchOutgoingOutputs(deps, outgoingTransfers);
 
     for (const transfer of outgoingTransfers) {
-        // Already recorded WITH a known recipient → idempotent skip. A zero pk
-        // falls through so the recipient can be backfilled once known.
+        // Settled: peer known AND amount exact — no recovery path can improve
+        // it, so skip before doing any work. A record missing either falls
+        // through, since the peer can still be backfilled from the change note.
         const existing = transfer.hash ? existingByHash.get(transfer.hash) : undefined;
-        if (existing?.recipientPkHex && existing.recipientPkHex !== ZERO_PK) continue;
+        if (existing?.peer && existing.amount?.exact === true) continue;
 
         // The input notes this extrinsic spent — ours only.
         const inputNotes = (transfer.matchedNullifiers ?? [])
@@ -126,48 +166,64 @@ export async function reconstructOutgoingTxRecords(deps: ReconstructDeps): Promi
             .filter((n): n is ZkNote => n !== undefined);
         if (inputNotes.length === 0) continue; // spent by someone else
 
-        // Recipient = the change note's counterparty pk; per protocol the
-        // stealth address is the identity.
+        // Public facts about the recipient output: commitment, memo, leaf index.
+        // Nothing is decrypted — the memo is sealed toward the recipient — so
+        // this yields no amount and no recipient. It is what re-issuing a
+        // payment slip needs, and nothing more.
+        const facts = collectFactsFor(
+            outputsByExtrinsic.get(extrinsicKey(transfer)) ?? [],
+            noteByCommitment
+        );
+
+        // Inference fallback: the peer is the change note's stamped sourcePk.
         const changeNote = findChangeNote(
             commitmentsByExtrinsic.get(extrinsicKey(transfer)) ?? [],
             noteByCommitment
         );
-        const recipientPkHex = toPkHex(changeNote?.counterpartyPk);
+        // A ONE-TIME stealth key, never a stable identity: read back off our own
+        // change note, the only copy a sender can still open.
+        const peerPk = changeNote?.sourcePk;
+        const peer: ProvenancePeer | null =
+            peerPk != null && peerPk !== 0n ? { pk: peerPk, scope: 'stealth' } : null;
 
-        // Backfill: the record exists but its recipient was unknown — update in
-        // place, keeping every other field.
-        if (existing) {
-            if (recipientPkHex === ZERO_PK) continue; // still unknown
-            await vault.saveTxRecord({ ...existing, recipientPkHex });
-            continue;
-        }
+        // An existing record is only rewritten when this run actually learned
+        // something: a slip-bearing memo, or a peer it was missing. Otherwise a
+        // transfer would be re-saved on every scan to arrive at the same record.
+        if (existing && !facts && (!peer || existing.peer)) continue;
 
         // One lookup yields both the fee the sender chose and the on-chain
         // outcome, so a failed transfer is recorded as failed instead of
         // silently joining the history as a success.
         const { fee, success } = await fetchExtrinsicFacts(deps.txFacts, transfer.hash);
 
-        // With no fee to subtract the amount overstates by exactly that fee, so
-        // it ships MARKED: a visibly approximate amount beats a precise-looking
-        // wrong one.
+        // The amount is always derived: it lives in a memo the sender cannot
+        // reopen. With no fee to subtract it overstates by exactly that fee,
+        // which is what `exact: false` tells the UI to mark.
         const totalInputValue = inputNotes.reduce((sum, n) => sum + n.value, 0n);
-        const transferAmount = totalInputValue - (changeNote?.value ?? 0n) - (fee ?? 0n);
-        if (transferAmount <= 0n) continue;
+        const value = totalInputValue - (changeNote?.value ?? 0n) - (fee ?? 0n);
+        if (value <= 0n) continue;
 
         const record: ReconstructedTxRecord = {
             id: transfer.hash ?? `${transfer.blockNumber}-${transfer.extrinsicIndex ?? 0}`,
-            type: 'private_transfer',
-            blockNumber: transfer.blockNumber,
             hash: transfer.hash ?? '',
-            assetId: inputNotes[0]!.assetId.toString(),
-            amount: transferAmount.toString(),
-            recipientPkHex,
-            status: success ? 'success' : 'failed',
-            ...(fee !== null
-                ? { feePlanck: fee.toString() }
-                : { amountApproximate: true as const }),
+            blockNumber: transfer.blockNumber,
             timestampMs: transfer.timestampMs ?? now(),
+            direction: 'out',
+            kind: 'private_transfer',
+            origin: 'transfer-change',
+            source: facts ? 'chain' : 'inferred',
+            peer,
+            // Exactness is a property of the FIGURE, not of the source: an
+            // inferred amount with a readable fee is exact too.
+            amount: { value, exact: fee !== null },
+            assetId: inputNotes[0]!.assetId,
+            status: success ? 'success' : 'failed',
+            ...(fee !== null ? { feePlanck: fee } : {}),
+            ...(facts ? { note: facts } : {}),
         };
-        await vault.saveTxRecord(record);
+        // Merge by rule, never by spread: a weaker source cannot overwrite what
+        // the wallet witnessed, so the amount and recipient it recorded at
+        // submit time survive a later thin `chain` record.
+        await vault.saveTxRecord(existing ? mergeProvenance(existing, record) : record);
     }
 }

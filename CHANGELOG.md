@@ -7,6 +7,118 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**The sender stops leaking their identity into the recipient's note, and the
+OVK comes out entirely.** Every payment made from a shielded note used to stamp
+the sender's *global* `ownerPk` into the recipient's memo — so a recipient could
+match it against the sender's public privacy address, link every payment that
+sender ever made, and expose them by disclosing a single note. The condition
+that would have made this safe ("one-time by construction") was asserted only in
+a comment while the code stamped unconditionally. Now the key is stamped only
+when it is provably one-time, and the check fails closed. The outgoing viewing
+key is gone with it: a sender recovers what they sent by looking the facts up on
+chain and re-issuing a payment slip, which needs no ability to reopen a memo
+sealed toward someone else.
+
+### Removed
+
+- **BREAKING** — the outgoing viewing key (`ovk`) and its blob, in full:
+  `deriveOutgoingViewingKey`, `PrivacyKeyManager.getOutgoingViewingKey()`, the
+  `OutgoingBlob` module (`OVK_BLOB_SIZE`, `deriveOutgoingCipherKey`,
+  `sealOutgoingBlob`, `openOutgoingBlob`, `randomOutgoingBlob`),
+  `NoteInput.outgoingViewingKey` and `ZkNote.ovkBlob`. The `orbinum-ovk-v1` HKDF
+  domain is retired. Outgoing recovery is now the provenance module's job.
+- **BREAKING** — `OutgoingNoteRecord`, replaced by `NoteFacts`. The old shape
+  claimed to carry `value`, `blinding` and `recipientStealthPk`; none of them are
+  recoverable by a sender, who cannot reopen a memo sealed toward the recipient.
+  `NoteFacts` carries only what is genuinely public — commitment, memo,
+  leaf index — which is exactly enough to re-issue a slip.
+- **BREAKING** — `TransferParams.senderPk`. It let a caller choose what to stamp
+  as the sender; that is now derived and guarded internally.
+
+### Added
+
+- `wallet/provenance` — one vocabulary for "where did this note come from, and
+  where did it go", replacing three overlapping shapes (the app's
+  `LocalTxRecord`, the scanner's `ReconstructedTxRecord`, per-note lookup facts).
+  Exports `NoteProvenanceRecord`, `NoteOrigin`, `ProvenanceSource`, `PkScope`,
+  `ProvenancePeer`, `ProvenanceAmount`.
+- `regeneratePaymentSlip(facts, recipientIvkPacked, txHash?)` — re-issues a
+  working slip for a transfer recovered from history, after the sender lost their
+  device. The bytes differ from the original (fresh ephemeral key and nonce) but
+  open to the same fields. Re-issuing still requires the recipient's viewing key,
+  so nobody else can do it.
+- `mergeProvenance` / `outranks` — records merge by source rank
+  (`witnessed` > `memo` > `chain` > `inferred`), and absence never overwrites
+  presence. A thin `chain` record can no longer clobber the amount and recipient
+  a `witnessed` one holds. An unknown `source` from an older record ranks lowest
+  rather than poisoning the comparison.
+- `selectDescribingNote` / `selectDescribingNoteByCommitment` — picks the note
+  that describes a transfer when an extrinsic inserted several we own. Taking the
+  first would report the *change* amount as the transfer amount. Previously
+  implemented twice, once in the scanner and once in the app.
+- `isHexOfLength(value, byteLen)` — total predicate on `unknown` for validating
+  values that crossed a trust boundary.
+- `stampOrigin` and `NoteWithMeta.origin` — the operation that produced a note,
+  recorded instead of re-inferred.
+- `TransferFactsSource.outputsByExtrinsics?` — optional; without it outgoing
+  reconstruction falls back to inference. Only called for extrinsics the wallet
+  already surfaced via `byNullifiers`, so it adds no incremental server linkage.
+
+### Changed
+
+- **BREAKING** — `counterpartyPk` is now `sourcePk` across `DecryptedMemo`,
+  `NoteInput`, `ZkNote` and `BuildNoteParams`, and the `EncryptedMemo.build` /
+  `serializeMemo` parameter. The **wire format is unchanged** — same 32 bytes at
+  plaintext `[84,116)` — the old name read like a stable identifier for the other
+  party when the field holds a key used for exactly one transfer.
+- **BREAKING** — vault schema v4 → v5. A v4 record does *not* throw on read:
+  `sourcePk` is in `ABSENT_MEANS_ZERO`, so the old key's absence reads as a
+  legitimate zero and the note loads and spends fine while silently losing the
+  only copy of the payee a sender can still open. The bump exists because that
+  failure is quiet. Wipe-and-rescan as usual; ephemeral counters carry forward.
+- `noteOrigin` returns a `NoteOrigin` (`'shield' | 'transfer-in' |
+  'transfer-change' | 'unshield-change' | 'fee-claim' | 'unknown'`) instead of
+  `'shield' | 'private-transfer'`, reading the stamped field when present. The
+  old inference could not distinguish shield from unshield-change from fee-claim.
+- The change note still records who was paid, deliberately: it never leaves the
+  wallet, `NoteDisclosure` does not carry `sourcePk`, and it is the only copy of
+  the payee that survives a vault loss.
+
+### Fixed
+
+- **Security** — `openPaymentSlip` rebuilds its result field by field instead of
+  returning the parsed JSON. A valid MAC proves the sender knew the recipient's
+  viewing key, not that they are honest: anyone handed a privacy address can seal
+  a slip, so every field is attacker-chosen data that merely arrived
+  authenticated. `txHash` in particular is rendered as an explorer link, where an
+  unconstrained string is a script/URL injection wearing the authority of a
+  decrypted slip; it is now dropped unless it is a real 32-byte hash, rather than
+  failing the slip.
+- **Security** — `fromHex` rejects non-hex up front. `parseInt(_, 16)` accepts a
+  valid prefix and drops the rest (`"1z"` → `1`, `"-1"` → `-1`), so near-hex from
+  an untrusted source decoded into attacker-chosen bytes instead of throwing.
+- **Security** — `sealPaymentSlip` takes no ephemeral-key override. The 8-byte
+  nonce suffix is safe because the key derives from a fresh per-slip `ephSk`;
+  accepting an override would collapse both layers at once.
+- `bigintTo32Le` / `bigintTo32Be` / `bigintTo32LeArr` throw on a negative value
+  or one ≥ 2^256. Both were silent: `>>` on a negative is arithmetic and
+  converges to `-1n` (32×`0xFF`, read back as `2^256 - 1`), and oversized values
+  dropped their high bits (`2^256 + 7` → `7`). These bytes become on-chain
+  commitments and nullifiers, where a corrupted value is a note nobody can find
+  or spend.
+- Calldata builders validate before encoding. The ABI encoder is total — it
+  left-pads anything into a 32-byte word — so an empty string became 32 zero
+  bytes and an oversized number was truncated on the far side, where
+  `circuitVersion` of `2^32` reads back as `0` and silently selects a different
+  verifying key. `bytes32` and `uint32` fields are now checked where the field
+  name is still known.
+- `PrivacyKeyManager` copies the master bytes it is handed and zeroes secret
+  buffers on `clear()`. It previously retained the caller's buffer, so `clear()`
+  would zero memory the caller still referenced. Note the byte getters return the
+  *live* buffer — a caller keeping a secret past `clear()` must `.slice()` it.
+- `decodePrecompileCalldata` accepts both the 8-slot and 9-slot `privateTransfer`
+  layouts; every field it reads sits at the same offset in both.
+
 ## [1.3.1] - 2026-08-09
 
 **The sealed-chunk phase downloads with a 3-deep window, matching the tail.**

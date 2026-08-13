@@ -6,7 +6,7 @@ export { NoteBuilder } from './NoteBuilder';
 export {
     tryDecryptNote,
     tryDecryptNoteVerbose,
-    tryRecoverOutgoing,
+    collectOutgoingFacts,
     computeNullifier,
     computeNoteCommitment,
     commitmentHexOf,
