@@ -1328,11 +1328,37 @@ describe('SubstrateClient.adopt', () => {
             ])
         ).rejects.toThrow(/HTTP RPC endpoint/);
 
-        const withHttp = SubstrateClient.adopt(makeMockPapi() as never, 'http://localhost:9944');
-        // Reaches the transport instead of the guard; the transport itself is
-        // mocked elsewhere, so any rejection here is not the guard's message.
-        await expect(withHttp.batchRequest([{ method: 'x', params: [] }])).rejects.not.toThrow(
-            /HTTP RPC endpoint/
-        );
+        // With an endpoint the guard steps aside and the call reaches the
+        // transport. `fetch` is stubbed because otherwise this test POSTs to a
+        // real localhost:9944 — it passed or failed depending on whether a dev
+        // node happened to be running, which is not a property of the code.
+        const fetchSpy = vi
+            .spyOn(globalThis, 'fetch')
+            .mockResolvedValue(
+                new Response(JSON.stringify([{ jsonrpc: '2.0', id: 0, result: 'ok' }]), {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' },
+                })
+            );
+        try {
+            const withHttp = SubstrateClient.adopt(
+                makeMockPapi() as never,
+                'http://localhost:9944'
+            );
+
+            // The assertion that matters: the guard did NOT fire, so the result
+            // comes from the transport. (`.rejects.not.toThrow()` cannot express
+            // this — it still demands a rejection, so it failed the moment the
+            // transport answered successfully.)
+            await expect(withHttp.batchRequest([{ method: 'x', params: [] }])).resolves.toEqual([
+                'ok',
+            ]);
+            expect(fetchSpy).toHaveBeenCalledWith(
+                'http://localhost:9944',
+                expect.objectContaining({ method: 'POST' })
+            );
+        } finally {
+            fetchSpy.mockRestore();
+        }
     });
 });
