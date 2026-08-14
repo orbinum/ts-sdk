@@ -5,9 +5,6 @@ on:
         branches: [main]
         paths:
             - "package.json"
-            - "CHANGELOG.md"
-            - "src/**"
-            - ".github/workflows/release.yml"
     workflow_dispatch:
 
 permissions:
@@ -66,6 +63,15 @@ jobs:
                   echo "tag_exists=$TAG_EXISTS" >> $GITHUB_OUTPUT
                   echo "npm_exists=$NPM_EXISTS" >> $GITHUB_OUTPUT
 
+            - name: Require a CHANGELOG entry for this version
+              if: steps.check_tag.outputs.tag_exists == 'false'
+              run: |
+                  if ! grep -q "^## \[${{ steps.version.outputs.version }}\]" CHANGELOG.md; then
+                    echo "::error::CHANGELOG.md has no '## [${{ steps.version.outputs.version }}]' section. Rename '## [Unreleased]' to '## [${{ steps.version.outputs.version }}] - $(date +%F)' before releasing."
+                    exit 1
+                  fi
+                  echo "✅ CHANGELOG entry found for ${{ steps.version.outputs.version }}."
+
             - name: Install dependencies
               if: steps.check_tag.outputs.tag_exists == 'false'
               run: pnpm install --frozen-lockfile
@@ -108,7 +114,16 @@ jobs:
             - name: Create release notes
               if: steps.check_tag.outputs.tag_exists == 'false'
               run: |
-                  awk '/^## \[/{if(flag){exit}flag=1;next}flag' CHANGELOG.md > release_notes_body.md
+                  # Match the version's own heading. Taking "the first ## ["
+                  # instead worked only while [Unreleased] stayed empty — with
+                  # notes under it, a release shipped unreleased work as its
+                  # release notes.
+                  awk -v tag="## [${{ steps.version.outputs.version }}]" '
+                    index($0, tag) == 1   { flag = 1; next }
+                    flag && /^## \[/      { exit }
+                    flag && /^\[[^]]+\]:/ { exit }   # link definitions end the section
+                    flag
+                  ' CHANGELOG.md > release_notes_body.md
 
                   {
                     echo "## ${{ steps.version.outputs.tag }}"
