@@ -12,6 +12,13 @@
 import { fetchExtrinsicFacts } from './extrinsicFacts';
 import { scalarToHex } from '../../../foundation/encoding/hex';
 import { hasSourcePk, selectDescribingNoteByCommitment } from '../../provenance/index';
+import {
+    recoverSentNote,
+    collectOutgoingFacts,
+    type SentNoteFacts,
+} from '../../../protocol/note/index';
+import { regeneratePaymentSlip } from '../../provenance/index';
+import type { NoteFacts } from '../../../protocol/types';
 import type { TransferFactsRow, TransferFactsSource, TxFactsSource } from '../feed/sources';
 import type { VaultStore } from '../../vault/index';
 import type { ZkNote } from '../../../protocol/types';
@@ -38,6 +45,16 @@ export interface ReconstructedTxRecord {
     /** Set when the fee was unreadable — the amount overstates by exactly it. */
     amountApproximate?: true;
     timestampMs: number;
+    /**
+     * A freshly sealed `orbslip1:` slip for the recipient, when this row was
+     * recovered from the memo.
+     *
+     * Re-issued rather than remembered: a slip is sealed toward the recipient,
+     * so the sender never held a copy they could read back. It carries only
+     * public facts, and the sweep that recovered the amount also identified
+     * which counterparty to seal it toward.
+     */
+    paymentSlip?: string;
 }
 
 export interface ReconstructDeps {
@@ -46,6 +63,18 @@ export interface ReconstructDeps {
     txFacts: TxFactsSource;
     /** Injectable clock — reconstruction stamps rows whose block time is unknown. */
     now?: () => number;
+    /**
+     * What the sender needs to read back their own outgoing memos. Omit to keep
+     * the arithmetic-only behaviour.
+     *
+     * `counterpartyIvks` are the packed viewing keys of counterparties this
+     * vault knows — the keys of `pairwiseCounterparties`, which survive a
+     * wipe-and-rescan by design.
+     */
+    keys?: {
+        viewingSecretKey: Uint8Array;
+        counterpartyIvks: Uint8Array[];
+    };
 }
 
 /** Groups the feed's per-extrinsic rows: "{blockNumber}:{extrinsicIndex}". */
@@ -94,6 +123,78 @@ async function loadExistingRecords(
  */
 function recordKey(transfer: Pick<TransferFactsRow, 'hash' | 'blockNumber' | 'extrinsicIndex'>) {
     return transfer.hash ?? `${transfer.blockNumber}-${transfer.extrinsicIndex ?? 0}`;
+}
+
+/**
+ * The exact facts of a sent note, when the sender can still re-derive them.
+ *
+ * Only possible for a payment to a counterparty this vault knows: the pair
+ * secret is symmetric, so the ephemeral used back then is derivable now, and
+ * with it the memo the sender sealed. Returns null for everything else — a
+ * first payment (random ephemeral), a counterparty no longer in the vault, or
+ * a feed that does not serve outputs.
+ *
+ * Sweeping every known counterparty per output is what makes this work without
+ * storing which one each payment went to. The cost is bounded by the vault's
+ * counterparty count, and only the extrinsics this wallet signed are looked up.
+ */
+type RecoveredSend = {
+    facts: SentNoteFacts;
+    /** The counterparty whose key opened it — what a re-issued slip is sealed toward. */
+    theirIvk: Uint8Array;
+    /** The output's public facts, verbatim, ready to seal into a fresh slip. */
+    publicFacts: NoteFacts;
+};
+
+async function recoverSentFacts(
+    deps: ReconstructDeps,
+    transfer: TransferFactsRow
+): Promise<RecoveredSend | null> {
+    const { keys } = deps;
+    if (!keys || !deps.transfers.outputsByExtrinsics) return null;
+    if (transfer.extrinsicIndex === null) return null;
+
+    try {
+        const outputs = await deps.transfers.outputsByExtrinsics([
+            { blockNumber: transfer.blockNumber, extrinsicIndex: transfer.extrinsicIndex },
+        ]);
+
+        for (const output of outputs) {
+            const hint = {
+                commitmentHex: output.commitmentHex,
+                leafIndex: output.leafIndex ?? -1,
+                encryptedMemo: output.encryptedMemo,
+            };
+            for (const theirIvk of keys.counterpartyIvks) {
+                const facts = recoverSentNote({
+                    hint,
+                    myViewingSecretKey: keys.viewingSecretKey,
+                    theirViewingPublicKey: theirIvk,
+                });
+                if (!facts) continue;
+                // Which key opened it is the missing half of a re-issued slip:
+                // a slip is sealed TOWARD the recipient, so the sender needs
+                // their viewing key, and the sweep just identified it.
+                const publicFacts = collectOutgoingFacts(hint);
+                if (publicFacts) return { facts, theirIvk, publicFacts };
+            }
+        }
+    } catch {
+        // A feed that errors costs the exact amount, not the record — the
+        // arithmetic path below still produces a usable row.
+    }
+    return null;
+}
+
+/** A re-issued slip for a recovered send, or nothing when it cannot be sealed. */
+function reissuedSlip(sent: RecoveredSend, hash: string | null): { paymentSlip?: string } {
+    try {
+        return {
+            paymentSlip: regeneratePaymentSlip(sent.publicFacts, sent.theirIvk, hash ?? undefined),
+        };
+    } catch {
+        return {};
+    }
 }
 
 export async function reconstructOutgoingTxRecords(deps: ReconstructDeps): Promise<void> {
@@ -154,11 +255,17 @@ export async function reconstructOutgoingTxRecords(deps: ReconstructDeps): Promi
         // silently joining the history as a success.
         const { fee, success } = await fetchExtrinsicFacts(deps.txFacts, transfer.hash);
 
+        // The exact amount, when the sender can still re-derive the memo they
+        // sealed. Everything below falls back to arithmetic.
+        const sent = await recoverSentFacts(deps, transfer);
+
         // With no fee to subtract the amount overstates by exactly that fee, so
         // it ships MARKED: a visibly approximate amount beats a precise-looking
-        // wrong one.
+        // wrong one. A recovered amount needs no such caveat — it is the figure
+        // the sender wrote, not a subtraction.
         const totalInputValue = inputNotes.reduce((sum, n) => sum + n.value, 0n);
-        const transferAmount = totalInputValue - (changeNote?.value ?? 0n) - (fee ?? 0n);
+        const derivedAmount = totalInputValue - (changeNote?.value ?? 0n) - (fee ?? 0n);
+        const transferAmount = sent?.facts.value ?? derivedAmount;
         if (transferAmount <= 0n) continue;
 
         const record: ReconstructedTxRecord = {
@@ -166,14 +273,18 @@ export async function reconstructOutgoingTxRecords(deps: ReconstructDeps): Promi
             type: 'private_transfer',
             blockNumber: transfer.blockNumber,
             hash: transfer.hash ?? '',
-            assetId: inputNotes[0]!.assetId.toString(),
+            assetId: (sent?.facts.assetId ?? inputNotes[0]!.assetId).toString(),
             amount: transferAmount.toString(),
-            recipientPkHex,
+            // The recovered stealth pk comes from the memo the sender sealed,
+            // which beats reading it off a change note that may not exist.
+            recipientPkHex: sent ? toPkHex(sent.facts.recipientStealthPk) : recipientPkHex,
             status: success ? 'success' : 'failed',
-            ...(fee !== null
-                ? { feePlanck: fee.toString() }
-                : { amountApproximate: true as const }),
+            ...(fee !== null ? { feePlanck: fee.toString() } : {}),
+            ...(fee === null && !sent ? { amountApproximate: true as const } : {}),
             timestampMs: transfer.timestampMs ?? now(),
+            // Best-effort: a slip that cannot be sealed costs the convenience of
+            // handing it over again, never the history row.
+            ...(sent ? reissuedSlip(sent, transfer.hash) : {}),
         };
         await vault.saveTxRecord(record);
     }

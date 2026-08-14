@@ -80,6 +80,34 @@ Scope, stated plainly: this converts the steady-state case (repeat
 counterparties), not the worst case. A wallet restoring with no address book
 still pays the full scan, and a stranger's first payment is unaffected.
 
+### Which ephemeral an operation publishes
+
+One decision, made in `buildZkNote` and honoured by `NoteBuilder` on every path:
+
+```
+                      viewingPublicKey present?
+                              │
+              ┌───────────────┴───────────────┐
+             no                              yes
+              │                               │
+      shield · change              counter for this counterparty?
+      self-transfer                          │
+              │                   ┌───────────┴───────────┐
+      deriveSelfEphSk            yes                     no
+      (deterministic)             │                       │
+              │           derivePairwiseEphSk       randomBytes(32)
+              │           (deterministic)           first payment, or
+              │                   │                 counter lost
+              ▼                   ▼                       ▼
+      recipient: lookup   recipient: lookup      recipient: full scan
+      sender:    n/a      sender: RECOVERS       sender: cannot recover
+```
+
+The derived point is PRF-derived and indistinguishable from a random one to
+anyone without the pair secret — the same argument that makes `selfEph` and
+BIP-32 public keys safe. Reusing an index is what would leak, and that is the
+counter's whole job.
+
 ### View tags — everything else
 
 For memos neither window catches, the first nonce byte is a Monero-style tag:
@@ -170,15 +198,74 @@ host provides workers:
 ## 7. Outgoing history
 
 The chain never records what a private transfer sent or to whom. The submitting
-client saves that locally at spend time; after a restore,
-`reconstructOutgoingTxRecords` rebuilds it from each transfer's shape:
+client saves that locally at spend time — and a restore loses it.
+
+### Two ways to rebuild it
 
 ```
-amount = Σ(inputs) − change − fee
+                    restored sender: seed only
+                              │
+              ┌───────────────┴───────────────┐
+   counterparty known                  counterparty unknown
+   AND ephemeral derived               OR ephemeral was random
+              │                                │
+      read the memo back              subtract what is visible
+              │                                │
+   value, blinding, sourcePk          Σ(inputs) − change − fee
+        EXACT                          approximate: overstates
+              │                         by the fee when unreadable
+              ▼                                ▼
+   + re-issued payment slip           no slip: nobody to seal toward
 ```
 
-Its `TransferFactsSource` is separate from the scan feeds **on purpose**: its
-queries do send the wallet's own identifiers to the server. That is the
-documented linkage trade-off of history reconstruction — a host that prefers
-not to make it simply does not implement the source. Discovery itself never
-requires it.
+### Reading the memo back
+
+A sender cannot open a memo sealed toward someone else — unless they made it.
+The pair secret is symmetric, so the ephemeral they used is derivable again:
+
+```
+memo (180B, on chain)
+  nonce(12) ‖ cipher+MAC(136) ‖ ephPk(32)
+                                  └── in the clear
+
+sender, locally:
+  window = pairwiseEphWindow(pairSecret, theirIvk, 0, 64)
+  match  = window.find(e => e.ephPkHex === publishedEphPk)   ← string compare
+              │
+              └─► match.sharedSecret ─► decryptWithSharedSecret ─► plaintext
+```
+
+No counter is needed and nothing is asked of the server: the published ephPk is
+already in a memo the wallet fetched, and the comparison is local. See
+`recoverSentNote`.
+
+### The linkage trade-off, unchanged
+
+`TransferFactsSource` is separate from the scan feeds **on purpose**: its
+queries do send the wallet's own identifiers to the server. A host that prefers
+not to make that trade simply does not implement the source, and discovery
+never requires it.
+
+`outputsByExtrinsics` is optional and adds nothing to that exposure — it is only
+ever called for extrinsics `byNullifiers` already surfaced, which are extrinsics
+this wallet signed.
+
+### Why the first payment stays out
+
+A payment with a random ephemeral cannot be read back, and the first payment to
+a new counterparty is exactly that: `reservePairwiseIndex` returns `null`
+without history, because *"first payment"* and *"counter lost to a restore"* are
+indistinguishable, and guessing wrong republishes an ephPk.
+
+Reconstructing the counter from the chain looks like a fix and is not — an
+indexer that hides one extrinsic makes the wallet reuse that index:
+
+```
+published 0,1,2 → indexer omits the 2 → wallet picks 2 → COLLISION
+```
+
+Omission degrades a *read* (one history row missing) but corrupts a *write* (a
+republished ephPk, permanent and public). That asymmetry is why the counter is
+reconstructed for recovery and never for choosing what to publish.
+
+Cost: one payment per counterparty. Every later one is derivable.

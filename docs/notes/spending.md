@@ -102,6 +102,22 @@ is a chain under load, and retrying harder makes that worse.
       never their stable identifier — the vault must not become a ledger of who
       was paid.
 
+### The payment slip (step 6)
+
+A transfer to another user returns a `paymentSlip`: an `orbslip1:` string the
+sender can hand over so the recipient rebuilds the note without scanning.
+
+```
+transfer result
+  ├─ txHash, blockNumber, ok
+  └─ paymentSlip?   ← only for a transfer to SOMEONE ELSE
+                       (a self-transfer needs none: the sender authored it)
+```
+
+Sealing is **best-effort**: it happens after the transaction already landed, so
+a failure costs the convenience, never the transfer. Format and threat model in
+[note-cryptography.md](./note-cryptography.md) §5.
+
 ### Self-transfers (step 8)
 
 A transfer to your own address produces a stealth output that only a rescan

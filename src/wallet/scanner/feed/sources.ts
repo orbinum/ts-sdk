@@ -176,4 +176,29 @@ export interface TransferFactsRow {
 export interface TransferFactsSource {
     byNullifiers(nullifiers: string[]): Promise<TransferFactsRow[]>;
     byCommitments(commitments: string[]): Promise<TransferFactsRow[]>;
+    /**
+     * Every output of the given extrinsics, memo included.
+     *
+     * OPTIONAL: without it, reconstruction falls back to deriving the amount by
+     * arithmetic and marking it approximate. With it, the sender re-derives the
+     * ephemeral they used and reads the exact amount out of the memo they sealed
+     * (`recoverSentNote`).
+     *
+     * Adds no linkage beyond what the other two already send: it is only ever
+     * called for extrinsics this wallet surfaced via `byNullifiers`, which are
+     * extrinsics it signed itself.
+     */
+    outputsByExtrinsics?(
+        keys: Array<{ blockNumber: number; extrinsicIndex: number }>
+    ): Promise<TransferOutputRow[]>;
+}
+
+/** One output of a transfer extrinsic, as the feed reports it. */
+export interface TransferOutputRow {
+    blockNumber: number;
+    extrinsicIndex: number | null;
+    commitmentHex: string;
+    leafIndex: number | null;
+    /** The 180-byte encrypted memo, 0x-prefixed, exactly as published. */
+    encryptedMemo: string;
 }

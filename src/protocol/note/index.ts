@@ -13,5 +13,7 @@ export {
     collectOutgoingFacts,
 } from './NoteDecryptor';
 export type { OutgoingHint } from './NoteDecryptor';
+export { recoverSentNote, SENT_NOTE_WINDOW } from './recoverSent';
+export type { SentNoteFacts, RecoverSentNoteParams } from './recoverSent';
 export { createNoteDisclosureKey, decodeNoteDisclosureKey } from './NoteDisclosure';
 export type { NoteDisclosure } from './NoteDisclosure';

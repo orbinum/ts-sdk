@@ -6,7 +6,7 @@ packaging — is a separate concern: [sdk-architecture.md](../sdk-architecture.m
 
 | Document                                       | Covers                                                       |
 | ---------------------------------------------- | ------------------------------------------------------------ |
-| [note-cryptography.md](./note-cryptography.md) | Keys, commitments, nullifiers, encodings, disclosure         |
+| [note-cryptography.md](./note-cryptography.md) | Keys, commitments, nullifiers, encodings, disclosure, slips  |
 | [identity.md](./identity.md)                   | Deriving who you are, and keeping it across launches         |
 | [vault.md](./vault.md)                         | Storing notes encrypted, and what the storage must guarantee |
 | [note-discovery.md](./note-discovery.md)       | Finding your notes without telling anyone which they are     |
