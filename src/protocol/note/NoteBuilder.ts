@@ -64,8 +64,18 @@ export class NoteBuilder {
             const recipientOwnerPk = input.recipientOwnerPk!;
             const recipientIvkPacked = input.viewingPublicKey!;
 
-            // Generate one ephSk shared between memo encryption and stealth derivation.
-            const ephSk = randomBytes(32);
+            // One ephSk shared between memo encryption and stealth derivation.
+            //
+            // A caller-supplied one is what makes the pairwise path work: the
+            // recipient predicts that ephPk and finds the note by table lookup
+            // instead of one ECDH per pool hint. It is PRF-derived from a secret
+            // only the two of them share, so it is indistinguishable from random
+            // to everyone else — the same argument that makes selfEph safe.
+            //
+            // Absent an override the ephemeral must stay unpredictable: a first
+            // payment has no counter, and two notes sharing an ephPk would be
+            // publicly linked as coming from the same sender.
+            const ephSk = input.ephSkOverride ?? randomBytes(32);
 
             // Derive sharedSecret from the ephSk and the recipient's ivk.
             const ivkPackedBigint = bytesToBigintLE(recipientIvkPacked);

@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**The pairwise fast path actually publishes its ephemeral now.**
+
+`NoteBuilder.build` generated a fresh random `ephSk` on the stealth path and
+dropped whatever the caller passed as `ephSkOverride` — and a payment to another
+user is *always* stealth, since `transfer.ts` supplies `recipientOwnerPk`
+unconditionally. So `buildNote` derived a pairwise ephemeral on every repeat
+payment and the builder threw it away.
+
+The effect was silent: notes were still correct, and the recipient still found
+them, but by full trial ECDH per pool hint instead of the table lookup the
+derived ephemeral exists to enable. `NoteInput.ephSkOverride` even documented the
+behaviour as intentional ("Ignored on the stealth path"), which is why nothing
+flagged it.
+
+### Fixed
+
+- The stealth path honours `ephSkOverride`. The same ephSk drives both the memo
+  encryption and the stealth-owner derivation, so the recipient's path is
+  unchanged — verified by decrypting a note built with a derived ephemeral.
+- Absent an override the ephemeral stays random. A first payment has no counter,
+  and two notes sharing an ephPk would be publicly linked as same-sender; that
+  case still degrades to random by way of `reservePairwiseIndex` returning null.
+
+### Changed
+
+- `NoteInput.ephSkOverride` documents that it is honoured everywhere, and that
+  passing one is a promise the value is unique.
+
+---
+
 **A decrypted payment slip is authenticated, not trusted.**
 
 `openPaymentSlip` returned the parsed JSON as-is, checking only that two fields

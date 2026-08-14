@@ -8,6 +8,16 @@ import {
     deriveOutgoingViewingKey,
 } from '../../../src/protocol/keys/PrivacyKeys';
 import { openOutgoingBlob } from '../../../src/protocol/memo/OutgoingBlob';
+import { bytesToBjjScalar } from '../../../src/protocol/memo/EncryptedMemo';
+import {
+    derivePairwiseSharedSecret,
+    derivePairwiseEphSk,
+} from '../../../src/protocol/eph/index';
+import { tryDecryptNote } from '../../../src/protocol/note/NoteDecryptor';
+import { toHex } from '../../../src/foundation/encoding/hex';
+import { bigintTo32Le } from '../../../src/foundation/encoding/bytes';
+import { fastMulBase } from '../../../src/foundation/crypto/bjj-fast';
+import { packPoint } from '@zk-kit/baby-jubjub';
 
 // ─── NoteBuilder.build ────────────────────────────────────────────────────────
 
@@ -334,5 +344,115 @@ describe('NoteBuilder.build — stealth path', () => {
         expect(withoutOvk.memo).toHaveLength(ENCRYPTED_MEMO_SIZE);
         expect(withOvk.ovkBlob).toBeDefined();
         expect(withoutOvk.ovkBlob).toBeUndefined();
+    });
+});
+
+// ─── El ephemeral override en la rama stealth ────────────────────────────────
+
+describe('NoteBuilder.build — ephSkOverride en stealth', () => {
+    const SENDER_SK = 111n;
+    const RECIPIENT_SK = 222n;
+
+    const senderIvsk = deriveViewingSecretKey(SENDER_SK);
+    const recipientIvsk = deriveViewingSecretKey(RECIPIENT_SK);
+    const recipientIvk = deriveViewingPublicKey(recipientIvsk);
+    const recipientOwnerPk = deriveOwnerPk(RECIPIENT_SK);
+
+    /** El ephPk que la efímera derivada debería publicar. */
+    const expectedEphPk = (ephSk: Uint8Array) =>
+        toHex(bigintTo32Le(packPoint(fastMulBase(bytesToBjjScalar(ephSk))) as bigint));
+
+    /** Los últimos 32 bytes del memo son el ephPk publicado. */
+    const publishedEphPk = (note: { memo: number[] }) =>
+        toHex(Uint8Array.from(note.memo.slice(148, 180)));
+
+    it('publica la efímera que el llamador pidió, no una aleatoria', async () => {
+        // El camino pairwise deriva una efímera determinista para que el
+        // receptor encuentre la nota por búsqueda en tabla en vez de un ECDH
+        // por hint. Si `build` la descarta, esa optimización no existe: el
+        // llamador la calcula y nadie la usa.
+        const ephSk = derivePairwiseEphSk(
+            derivePairwiseSharedSecret(senderIvsk, recipientIvk),
+            0
+        );
+
+        const note = await NoteBuilder.build({
+            value: 4200n,
+            blinding: 777n,
+            ownerPk: recipientOwnerPk,
+            viewingPublicKey: recipientIvk,
+            recipientOwnerPk,
+            ephSkOverride: ephSk,
+        });
+
+        expect(publishedEphPk(note)).toBe(expectedEphPk(ephSk));
+    });
+
+    it('sin override sigue siendo aleatoria', async () => {
+        // Un primer pago no tiene contador, así que la efímera tiene que seguir
+        // siendo impredecible: dos notas iguales no pueden compartir ephPk.
+        const params = {
+            value: 4200n,
+            blinding: 777n,
+            ownerPk: recipientOwnerPk,
+            viewingPublicKey: recipientIvk,
+            recipientOwnerPk,
+        };
+
+        const a = await NoteBuilder.build(params);
+        const b = await NoteBuilder.build(params);
+
+        expect(publishedEphPk(a)).not.toBe(publishedEphPk(b));
+    });
+
+    it('el receptor sigue abriendo la nota con la efímera derivada', async () => {
+        // El override no puede romper el camino del receptor: la derivación
+        // stealth y el cifrado del memo comparten ese mismo ephSk.
+        const ephSk = derivePairwiseEphSk(
+            derivePairwiseSharedSecret(senderIvsk, recipientIvk),
+            5
+        );
+
+        const note = await NoteBuilder.build({
+            value: 4200n,
+            blinding: 777n,
+            ownerPk: recipientOwnerPk,
+            viewingPublicKey: recipientIvk,
+            recipientOwnerPk,
+            ephSkOverride: ephSk,
+        });
+
+        const opened = tryDecryptNote(
+            {
+                commitmentHex: note.commitmentHex,
+                leafIndex: 1,
+                encryptedMemo: toHex(Uint8Array.from(note.memo)),
+            },
+            recipientIvsk,
+            RECIPIENT_SK,
+            recipientOwnerPk
+        );
+
+        expect(opened).not.toBeNull();
+        expect(opened!.value).toBe(4200n);
+    });
+
+    it('índices distintos publican efímeras distintas', async () => {
+        // Reutilizar un índice republica el mismo ephPk y enlaza las dos notas
+        // en público — la fuga que el contador existe para evitar.
+        const pair = derivePairwiseSharedSecret(senderIvsk, recipientIvk);
+        const build = (i: number) =>
+            NoteBuilder.build({
+                value: 1n,
+                blinding: 7n,
+                ownerPk: recipientOwnerPk,
+                viewingPublicKey: recipientIvk,
+                recipientOwnerPk,
+                ephSkOverride: derivePairwiseEphSk(pair, i),
+            });
+
+        const [a, b] = await Promise.all([build(0), build(1)]);
+
+        expect(publishedEphPk(a)).not.toBe(publishedEphPk(b));
     });
 });
