@@ -76,6 +76,39 @@ describe('sealPaymentSlip / openPaymentSlip', () => {
     it('rejects a too-short envelope', () => {
         expect(openPaymentSlip(recipientIvsk, new Uint8Array(10))).toBeNull();
     });
+
+    // The MAC proves the SENDER sealed the slip, not that its fields are sane.
+    // A malicious sender's extra/mistyped fields must not survive the open.
+    it('strips fields the sender should not have set, keeps only the known ones', () => {
+        const dirty = {
+            commitmentHex: fields.commitmentHex,
+            encryptedMemo: fields.encryptedMemo,
+            txHash: fields.txHash,
+            evil: 'x',
+        } as unknown as typeof fields;
+        const env = sealPaymentSlip(recipientIvk, dirty);
+        const opened = openPaymentSlip(recipientIvsk, env)!;
+        expect(opened).not.toBeNull();
+        expect(Object.keys(opened).sort()).toEqual(['commitmentHex', 'encryptedMemo', 'txHash']);
+        expect((opened as unknown as Record<string, unknown>)['evil']).toBeUndefined();
+    });
+
+    it('rejects a slip with an invalid optional field (negative leafIndex)', () => {
+        const env = sealPaymentSlip(recipientIvk, {
+            commitmentHex: fields.commitmentHex,
+            encryptedMemo: fields.encryptedMemo,
+            leafIndex: -1 as unknown as number,
+        });
+        expect(openPaymentSlip(recipientIvsk, env)).toBeNull();
+    });
+
+    it('rejects a slip whose required field is the wrong type', () => {
+        const env = sealPaymentSlip(recipientIvk, {
+            commitmentHex: 123 as unknown as string,
+            encryptedMemo: fields.encryptedMemo,
+        });
+        expect(openPaymentSlip(recipientIvsk, env)).toBeNull();
+    });
 });
 
 describe('encodePaymentSlip / decodePaymentSlip (orbslip1 wire)', () => {
