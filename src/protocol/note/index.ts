@@ -10,6 +10,7 @@ export {
     computeNullifier,
     computeNoteCommitment,
     commitmentHexOf,
+    collectOutgoingFacts,
 } from './NoteDecryptor';
 export type { OutgoingHint } from './NoteDecryptor';
 export { createNoteDisclosureKey, decodeNoteDisclosureKey } from './NoteDisclosure';

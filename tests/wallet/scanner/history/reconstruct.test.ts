@@ -156,7 +156,13 @@ describe('reconstructOutgoingTxRecords', () => {
 
     it('salta transfers cuyo LocalTxRecord ya tiene recipient conocido', async () => {
         mocks.getTxRecords.mockResolvedValue([
-            { hash: '0xhash-100-2', recipientPkHex: '0x' + 'abc'.padStart(64, '0') },
+            {
+                // `id` es la clave de almacenamiento, igual que la escribe
+                // `saveTxRecord`; una fila sin él no existe en un vault real.
+                id: '0xhash-100-2',
+                hash: '0xhash-100-2',
+                recipientPkHex: '0x' + 'abc'.padStart(64, '0'),
+            },
         ]);
 
         await reconstructOutgoingTxRecords(makeIndexer());
@@ -187,7 +193,7 @@ describe('reconstructOutgoingTxRecords', () => {
     });
 
     it('backfillea aunque la change note ya esté gastada (transfers encadenados)', async () => {
-        mocks.getTxRecords.mockResolvedValue([{ hash: '0xhash-100-2' }]);
+        mocks.getTxRecords.mockResolvedValue([{ id: '0xhash-100-2', hash: '0xhash-100-2' }]);
         mocks.getAll.mockReturnValue([INPUT, { ...CHANGE, spent: true }]);
 
         await reconstructOutgoingTxRecords(makeIndexer());
@@ -198,7 +204,7 @@ describe('reconstructOutgoingTxRecords', () => {
     });
 
     it('record existente sin pk y change note sin counterparty → no reescribe nada', async () => {
-        mocks.getTxRecords.mockResolvedValue([{ hash: '0xhash-100-2' }]);
+        mocks.getTxRecords.mockResolvedValue([{ id: '0xhash-100-2', hash: '0xhash-100-2' }]);
         mocks.getAll.mockReturnValue([INPUT, { ...CHANGE, sourcePk: 0n }]);
 
         await reconstructOutgoingTxRecords(makeIndexer());
@@ -342,5 +348,31 @@ describe('reconstructOutgoingTxRecords', () => {
         expect(mocks.saveTxRecord).toHaveBeenCalledExactlyOnceWith(
             expect.objectContaining({ status: 'success' })
         );
+    });
+});
+
+// ─── La clave con la que se guarda y la clave con la que se busca ────────────
+
+describe('un registro sin hash se reconoce en la siguiente pasada', () => {
+    it('no lo vuelve a escribir como si fuera nuevo', async () => {
+        // `saveTxRecord` guarda por `id`, que cae a `{bloque}-{indice}` cuando
+        // la extrinsic no trae hash. Buscar solo por `hash` no lo encuentra —
+        // queda `''` — así que la reconstrucción siguiente lo trata como nuevo
+        // y lo reescribe, perdiendo lo que la fila ya tuviera.
+        const sinHash = { ...TRANSFER, hash: undefined };
+        const deps = makeIndexer({ byNullifiers: vi.fn().mockResolvedValue([sinHash]) });
+
+        // Primera pasada: crea la fila con id "100-2" y hash vacío.
+        await reconstructOutgoingTxRecords(deps);
+        const escrito = mocks.saveTxRecord.mock.calls[0]?.[0];
+        expect(escrito?.id).toBe('100-2');
+        expect(escrito?.hash).toBe('');
+
+        // Segunda pasada, con esa fila ya guardada y su destinatario conocido.
+        mocks.saveTxRecord.mockClear();
+        mocks.getTxRecords.mockResolvedValue([escrito]);
+        await reconstructOutgoingTxRecords(deps);
+
+        expect(mocks.saveTxRecord).not.toHaveBeenCalled();
     });
 });

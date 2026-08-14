@@ -19,13 +19,14 @@ import { openOutgoingBlob, OVK_BLOB_SIZE } from '../memo/OutgoingBlob';
 import { isValidLeafIndex } from '../spend/coinSelection';
 import { deriveStealthOwnerPk, deriveStealthSk } from '../../foundation/crypto/stealth';
 import { recoverOwnerPkPoint } from '../../foundation/crypto/bjj';
-import { fromHex, toHex } from '../../foundation/encoding/hex';
+import { fromHex, toHex, isHexOfLength } from '../../foundation/encoding/hex';
 import { bigintTo32Le, bytesToBigintLE } from '../../foundation/encoding/bytes';
 import {
     type ScanCommitment,
     type ZkNote,
     type DecryptedMemo,
     type OutgoingNoteRecord,
+    type NoteFacts,
 } from '../types';
 export type { ScanCommitment };
 
@@ -349,5 +350,37 @@ export function tryRecoverOutgoing(
         blinding: plaintext.blinding,
         sourcePk: plaintext.sourcePk,
         circuitVersion: plaintext.circuitVersion,
+    };
+}
+
+/**
+ * Collect what a sender can still say about a note they sent.
+ *
+ * There is no decryption on this path and no key involved. The memo travels
+ * verbatim, exactly as published — the point is to FORWARD it to the recipient
+ * inside a fresh payment slip, not to read it. The recipient opens it with
+ * their own viewing key as they always would.
+ *
+ * That is what makes a slip recoverable after a lost device: re-issuing one
+ * needs the commitment, the memo, and the leaf index, all of them public.
+ *
+ * What is NOT recoverable this way is the amount and the recipient, which live
+ * inside the sealed memo. A sender restoring from a seed alone gets working
+ * slips, not their outgoing history.
+ *
+ * Never throws (runs in recovery loops).
+ */
+export function collectOutgoingFacts(hint: ScanCommitment): NoteFacts | null {
+    // Shape-check both fields rather than trusting the server. These facts are
+    // forwarded into a payment slip, which enforces the SAME sizes when opened —
+    // a value that slipped through here would fail on the RECIPIENT's device,
+    // where nothing explains which server supplied it.
+    if (!isHexOfLength(hint.commitmentHex, 32)) return null;
+    if (!isHexOfLength(hint.encryptedMemo, ENCRYPTED_MEMO_SIZE)) return null;
+
+    return {
+        commitmentHex: hint.commitmentHex,
+        ...(isValidLeafIndex(hint.leafIndex) ? { leafIndex: hint.leafIndex } : {}),
+        encryptedMemo: hint.encryptedMemo,
     };
 }

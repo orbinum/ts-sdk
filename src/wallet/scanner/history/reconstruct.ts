@@ -11,6 +11,7 @@
  */
 import { fetchExtrinsicFacts } from './extrinsicFacts';
 import { scalarToHex } from '../../../foundation/encoding/hex';
+import { hasSourcePk, selectDescribingNoteByCommitment } from '../../provenance/index';
 import type { TransferFactsRow, TransferFactsSource, TxFactsSource } from '../feed/sources';
 import type { VaultStore } from '../../vault/index';
 import type { ZkNote } from '../../../protocol/types';
@@ -52,27 +53,18 @@ function extrinsicKey(row: Pick<TransferFactsRow, 'blockNumber' | 'extrinsicInde
     return `${row.blockNumber}:${row.extrinsicIndex ?? 'null'}`;
 }
 
-/** A 0x-prefixed 64-char pk, or ZERO_PK when the note carries no counterparty. */
-function toPkHex(sourcePk: bigint | null | undefined): string {
-    return sourcePk != null && sourcePk !== 0n ? scalarToHex(sourcePk) : ZERO_PK;
-}
-
 /**
- * The change note of a transfer: a note WE own produced by the same extrinsic.
+ * A 0x-prefixed 64-char pk, or ZERO_PK when the note carries no counterparty.
  *
- * It may itself be spent by now (chained transfers), so unspent is not
- * required. A candidate with a stamped counterparty pk wins — that is the
- * change note, and in a self-transfer the recipient note qualifies too since
- * either identifies us.
+ * Shares `hasSourcePk` with the selection rule rather than repeating its check:
+ * both ask the same question, and a note whose scalars skipped normalisation
+ * carries a string, where `'0' != null && '0' !== 0n` reads a zero as a real
+ * key.
  */
-function findChangeNote(
-    commitments: string[],
-    noteByCommitment: Map<string, ZkNote>
-): ZkNote | undefined {
-    const candidates = commitments
-        .map((h) => noteByCommitment.get(h))
-        .filter((n): n is ZkNote => n !== undefined);
-    return candidates.find((n) => n.sourcePk != null && n.sourcePk !== 0n) ?? candidates[0];
+function toPkHex(sourcePk: bigint | null | undefined): string {
+    return typeof sourcePk === 'bigint' && hasSourcePk({ sourcePk })
+        ? scalarToHex(sourcePk)
+        : ZERO_PK;
 }
 
 /** Local records keyed by tx hash; an unavailable history reads as empty. */
@@ -81,11 +73,27 @@ async function loadExistingRecords(
 ): Promise<Map<string, ReconstructedTxRecord>> {
     try {
         const records = await vault.getTxRecords<ReconstructedTxRecord>();
-        return new Map(records.map((r) => [r.hash, r]));
+        return new Map(records.map((r) => [r.id, r]));
     } catch {
         // History not yet available — treat every record as missing.
         return new Map();
     }
+}
+
+/**
+ * The key a record is stored under — the same one `saveTxRecord` writes.
+ *
+ * An extrinsic without a decoded hash still gets a row, keyed by position.
+ * Looking it up by `hash` instead would miss it (that field is left empty), so
+ * the next reconstruction would treat the row as absent and write it again,
+ * discarding whatever the previous pass had already resolved.
+ *
+ * The `{block}-{index}` spelling is NOT `extrinsicKey`: that one groups rows
+ * in memory and may change freely, while this one is a storage key already
+ * written into vaults, so its shape is fixed.
+ */
+function recordKey(transfer: Pick<TransferFactsRow, 'hash' | 'blockNumber' | 'extrinsicIndex'>) {
+    return transfer.hash ?? `${transfer.blockNumber}-${transfer.extrinsicIndex ?? 0}`;
 }
 
 export async function reconstructOutgoingTxRecords(deps: ReconstructDeps): Promise<void> {
@@ -110,12 +118,12 @@ export async function reconstructOutgoingTxRecords(deps: ReconstructDeps): Promi
         commitmentTransfers.map((ct) => [extrinsicKey(ct), ct.matchedCommitments ?? []])
     );
 
-    const existingByHash = await loadExistingRecords(vault);
+    const existingByKey = await loadExistingRecords(vault);
 
     for (const transfer of outgoingTransfers) {
         // Already recorded WITH a known recipient → idempotent skip. A zero pk
         // falls through so the recipient can be backfilled once known.
-        const existing = transfer.hash ? existingByHash.get(transfer.hash) : undefined;
+        const existing = existingByKey.get(recordKey(transfer));
         if (existing?.recipientPkHex && existing.recipientPkHex !== ZERO_PK) continue;
 
         // The input notes this extrinsic spent — ours only.
@@ -125,8 +133,9 @@ export async function reconstructOutgoingTxRecords(deps: ReconstructDeps): Promi
         if (inputNotes.length === 0) continue; // spent by someone else
 
         // Recipient = the change note's counterparty pk; per protocol the
-        // stealth address is the identity.
-        const changeNote = findChangeNote(
+        // stealth address is the identity. The note may itself be spent by now
+        // (chained transfers), so unspent is not required.
+        const changeNote = selectDescribingNoteByCommitment(
             commitmentsByExtrinsic.get(extrinsicKey(transfer)) ?? [],
             noteByCommitment
         );
@@ -153,7 +162,7 @@ export async function reconstructOutgoingTxRecords(deps: ReconstructDeps): Promi
         if (transferAmount <= 0n) continue;
 
         const record: ReconstructedTxRecord = {
-            id: transfer.hash ?? `${transfer.blockNumber}-${transfer.extrinsicIndex ?? 0}`,
+            id: recordKey(transfer),
             type: 'private_transfer',
             blockNumber: transfer.blockNumber,
             hash: transfer.hash ?? '',

@@ -177,3 +177,30 @@ export type OutgoingNoteRecord = {
     /** Circuit version the sent note was created under. */
     circuitVersion: number;
 };
+
+/**
+ * What a sender can still say about a note they sent, using only public data.
+ *
+ * No decryption and no key: the memo travels verbatim, exactly as published.
+ * The point is to FORWARD it to the recipient inside a fresh payment slip, not
+ * to read it — the recipient opens it with their own viewing key as always.
+ *
+ * That is what makes a slip recoverable after a lost device. What is NOT
+ * recoverable this way is the amount and the recipient, which live inside the
+ * sealed memo: a sender restoring from a seed alone gets working slips, not
+ * their outgoing history.
+ */
+export type NoteFacts = {
+    /** 0x-prefixed 32-byte LE commitment hex of the recipient output. */
+    commitmentHex: string;
+    /** Global Merkle leaf index, when known. */
+    leafIndex?: number;
+    /**
+     * The note's 180-byte encrypted memo, 0x-prefixed, exactly as published.
+     *
+     * Carried verbatim, never decrypted here — the sender has no key for it.
+     * Handing it back to the recipient inside a fresh slip is what re-issuing a
+     * slip means.
+     */
+    encryptedMemo: string;
+};

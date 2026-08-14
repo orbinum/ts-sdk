@@ -7,6 +7,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**One vocabulary for "where did this note come from, and where did it go".**
+
+Several mechanisms answer that question, and they had separate vocabularies and
+no contract between them: the memo's `sourcePk`, readable by whoever can
+decrypt the note, and a lookup by commitment that returns only public fields.
+They are not competing designs but providers of the same fact, so
+`NoteProvenanceRecord` records the fact and `ProvenanceSource` records which one
+spoke.
+
+Nothing here derives a key — this layer only holds data already recovered.
+
+### Fixed
+
+- A reconstructed record whose extrinsic carried no decoded hash was rewritten
+  on every scan. `saveTxRecord` keys by `id`, which falls back to
+  `{block}-{index}`, but the lookup indexed by `hash` — left empty in exactly
+  that case — so the row read as absent and was written again, discarding
+  whatever the previous pass had resolved. Both sides now use the same key.
+- `reconstruct.ts` uses `selectDescribingNoteByCommitment` and `hasSourcePk`
+  instead of its own copies of both. The duplication was the reason this module
+  exists, and the copies also compared by value only, where an unnormalised
+  `'0'` reads as a stamped key.
+
+### Added
+
+- `wallet/provenance` — `NoteProvenanceRecord` and its vocabulary
+  (`NoteOrigin`, `ProvenanceSource`, `PkScope`, `ProvenancePeer`,
+  `ProvenanceAmount`), subsuming three shapes that described the same thing.
+- `mergeProvenance` / `outranks` — merging a rescan's findings into what the
+  wallet already knew, under two rules: a weaker source never overwrites a
+  stronger one's facts, and absence never overwrites presence. Two fields are
+  deliberately outside the ranking. `status` is the chain's outcome, which no
+  source knows better than another, so a success is never demoted — otherwise a
+  row written at submit time could mark a transaction failed that the chain went
+  on to accept. `amount.exact` is a property of the FIGURE, so an exact amount
+  from a weaker source beats an approximate one from a stronger, and rank only
+  breaks a tie. Records with different ids are refused outright: the result
+  would carry one transaction's amount under another's hash, indistinguishable
+  from a real row.
+
+  Absence is not only `undefined`. Several fields spell "not known yet" with a
+  value — `0` for block and timestamp, the empty string for `hash` and a slip's
+  `encoded`, `scope: 'none'` for a peer — and treating those as data let a
+  placeholder win by rank. A row written before the chain confirmed reports
+  block `0` (see `RECOVERED_TX_RESULT`), so it erased a block number the
+  reconstruction had already resolved.
+
+  The merged record shares no nested object with its inputs. `{...base}` is a
+  shallow copy, so `amount`, `peer` and `slip` came back as the same objects the
+  stored row still holds — a caller editing one field of the result rewrote
+  history live in memory, and for an outgoing transfer that history is the only
+  copy of the amount and the recipient.
+
+  A field only the losing row carries now survives. Hosts store their own record
+  type through this, and `ReconstructedTxRecord` carries `amountApproximate` —
+  the flag marking an amount derived without subtracting the fee. Dropping it
+  turned an approximate figure into one that merely looks exact: the warning
+  disappeared, the number did not. Rank still decides every field both rows
+  carry. The amount and
+  recipient of an outgoing transfer live inside a memo sealed toward someone
+  else, so a `witnessed` record is the only copy the sender has; losing it is
+  not recoverable by re-running anything. Previously a single spread expression
+  inside the reconstruction loop.
+- `selectDescribingNote` / `selectDescribingNoteByCommitment` — picks the note
+  that describes a transfer when one extrinsic inserted several the wallet owns.
+  Taking the first would report the CHANGE amount as the transfer amount, and an
+  arbitrary one at that, since vault order is insertion order. Previously
+  implemented twice, once in the scanner and once in the app. `hasSourcePk`
+  checks the scalar's TYPE, not only its value: notes come back from encrypted
+  storage and `normalizeNote` is what makes their scalars bigints, so a record
+  that skipped normalisation carries a string — and `'0' != null && '0' !== 0n`
+  is true, which would read an unnormalised zero as a stamped key.
+- `regeneratePaymentSlip` — re-issues a slip from public facts. A slip is sealed
+  toward the recipient, so the sender keeps no copy they can decrypt; losing the
+  local record used to mean the recipient could never be handed one again. The
+  new envelope carries the same fields under a fresh ephemeral key and nonce.
+
+  The facts are validated before sealing, because they were looked up by
+  commitment and sealing them produces an AUTHENTICATED envelope: a valid MAC
+  proves the sender knew the recipient's viewing key, not that they — or the
+  server that answered — are honest. A malformed commitment, memo or leaf index
+  throws, since those are the note's identity. `txHash` is informational and is
+  DROPPED instead, so the slip still rebuilds the note; it is rendered as an
+  explorer link, where an unconstrained string is a URL injection wearing the
+  authority of a decrypted slip.
+- `collectOutgoingFacts` and `NoteFacts` — what a sender can still say about a
+  note they sent, using only public data. No decryption and no key: the memo
+  travels verbatim to be FORWARDED inside a fresh slip, not read. The amount and
+  recipient stay unrecoverable — a sender restoring from a seed gets working
+  slips, not their outgoing history.
+
+---
+
 **`counterpartyPk` is now `sourcePk`.**
 
 The field holds a key used for exactly ONE transfer, but the old name read like
