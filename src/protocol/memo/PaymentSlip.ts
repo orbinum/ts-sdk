@@ -21,6 +21,19 @@
  * slip key, and opens it. An interceptor without the recipient's `ivsk` sees only
  * random bytes.
  *
+ * ## What the MAC does NOT prove
+ *
+ * It proves the sender knew the recipient's viewing key — nothing about the
+ * fields being true. Anyone handed a privacy address can seal a slip, so what
+ * comes out of `openPaymentSlip` is attacker-chosen data that merely arrived
+ * authenticated, and past that point it is indistinguishable from a field the
+ * wallet scanned itself. Hence the shape checks there, at the boundary.
+ *
+ * A slip that lies about the note itself is caught further in, by two
+ * independent defences either of which suffices: the commitment is mixed into
+ * the memo's encryption key (`deriveEncryptionKey`), and `tryDecryptNote`
+ * recomputes the commitment from the decrypted plaintext.
+ *
  * ## Format
  *
  * Envelope bytes: `ephPk(32) || nonce(8) || ciphertext || MAC(16)`.
@@ -35,19 +48,35 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { packPoint, unpackPoint } from '@zk-kit/baby-jubjub';
 import { fastMulBase, fastMulPoint } from '../../foundation/crypto/bjj-fast';
 import { bigintTo32Le, bytesToBigintLE } from '../../foundation/encoding/bytes';
-import { toHex } from '../../foundation/encoding/hex';
+import { toHex, isHexOfLength } from '../../foundation/encoding/hex';
 import { base64UrlEncode, base64UrlDecode } from '../../foundation/encoding/base64url';
-import { bytesToBjjScalar } from './EncryptedMemo';
+import { bytesToBjjScalar, ENCRYPTED_MEMO_SIZE } from './EncryptedMemo';
+import { isValidLeafIndex } from '../spend/coinSelection';
 
 // ─── Frozen format constants ─────────────────────────────────────────────────
 // Do NOT change after launch without versioning — the golden vector fixes them.
 
-/** HKDF info for the slip cipher key. Distinct domain from the memo and the ovk blob. */
+/** HKDF info for the slip cipher key. Distinct domain from the memo's. */
 const SLIP_DOMAIN = new TextEncoder().encode('orbinum-payment-slip-v1');
 /** 4-byte constant nonce prefix, not transmitted — domain separation at the nonce level. */
 const NONCE_PREFIX = new TextEncoder().encode('SLP1');
 const EPH_PK_SIZE = 32;
 const NONCE_SUFFIX_SIZE = 8;
+
+/**
+ * Ceiling on an envelope, in bytes.
+ *
+ * Every field a slip carries is fixed-width, so a full one measures 624 bytes
+ * JSON-encoded. The cap sits well above that — it is not a size budget but a
+ * refusal to let the SENDER decide how much the recipient decrypts and parses.
+ *
+ * The wire string is the tighter constraint in practice: 624 bytes encode to
+ * ~1685 characters, against the ~1800 a single QR holds at error-correction
+ * level M. A new field eats that margin before it eats this one.
+ */
+const MAX_SLIP_ENVELOPE_SIZE = 4096;
+
+// ─── Fields ──────────────────────────────────────────────────────────────────
 
 /** The fields a payment slip carries — all public on-chain. */
 export interface PaymentSlipFields {
@@ -61,6 +90,8 @@ export interface PaymentSlipFields {
      *  the recipient can show as proof of the payment; not needed to reconstruct. */
     txHash?: string;
 }
+
+// ─── Sealing and opening ─────────────────────────────────────────────────────
 
 /** Derive the 32-byte slip key from the ECDH shared secret. */
 function deriveSlipKey(sharedSecret: Uint8Array): Uint8Array {
@@ -98,7 +129,14 @@ export function sealPaymentSlip(
     const ivkPoint = unpackPoint(bytesToBigintLE(recipientIvkPacked));
     if (!ivkPoint) throw new Error('PaymentSlip: invalid recipient viewing public key');
 
-    // Ephemeral keypair for this slip (same ECDH shape as the memo).
+    // A fresh ephemeral keypair PER SLIP, never a caller-supplied one.
+    //
+    // This is what makes the 8-byte nonce suffix safe. Eight random bytes alone
+    // would collide by the birthday bound around 2^32 slips, but the key is
+    // derived from this ephSk, so every envelope encrypts under a different
+    // key — the (key, nonce) pair that ChaCha20-Poly1305 actually requires to
+    // be unique cannot repeat. The random suffix is the second layer, not the
+    // first. Accepting an ephSk override here would collapse both at once.
     const ephSkScalar = bytesToBjjScalar(randomBytes(32));
     const ephPkPacked = bigintTo32Le(packPoint(fastMulBase(ephSkScalar)) as bigint);
 
@@ -119,14 +157,25 @@ export function sealPaymentSlip(
 }
 
 /**
- * Open a payment slip with the recipient's viewing secret key. Returns the fields
- * or null (not ours / corrupt). Never throws — safe in import loops.
+ * Open a payment slip with the recipient's viewing secret key.
+ *
+ * Returns the fields, or null when the slip is not ours, is corrupt, or carries
+ * a field that cannot be what it claims. Never throws: the input is a string a
+ * user pasted, and an exception here takes down the paste handler rather than
+ * one import.
+ *
+ * The result is REBUILT field by field rather than returned from `JSON.parse` —
+ * see the note on the MAC at the top of this file for why a decrypted slip is
+ * still untrusted input.
  */
 export function openPaymentSlip(
     recipientIvsk: Uint8Array,
     envelope: Uint8Array
 ): PaymentSlipFields | null {
+    // Both bounds are checked BEFORE any decryption or parsing: the work an
+    // oversized envelope costs lands before a single field is ever inspected.
     if (envelope.length < EPH_PK_SIZE + NONCE_SUFFIX_SIZE + 16) return null;
+    if (envelope.length > MAX_SLIP_ENVELOPE_SIZE) return null;
     try {
         const ephPkPacked = envelope.subarray(0, EPH_PK_SIZE);
         const ephPkPoint = unpackPoint(bytesToBigintLE(ephPkPacked));
@@ -142,11 +191,32 @@ export function openPaymentSlip(
         const cipher = chacha20poly1305(slipKey, buildNonce(suffix));
         const plaintext = cipher.decrypt(sealed); // throws on MAC failure
 
-        const fields = JSON.parse(new TextDecoder().decode(plaintext)) as PaymentSlipFields;
-        if (typeof fields.commitmentHex !== 'string' || typeof fields.encryptedMemo !== 'string') {
-            return null;
-        }
-        return fields;
+        const parsed = JSON.parse(new TextDecoder().decode(plaintext)) as Record<string, unknown>;
+
+        // Identity of the note: a wrong value here is not a degraded slip but a
+        // different one, so it fails the whole thing.
+        if (!isHexOfLength(parsed['commitmentHex'], 32)) return null;
+        if (!isHexOfLength(parsed['encryptedMemo'], ENCRYPTED_MEMO_SIZE)) return null;
+
+        // `isValidLeafIndex` is the SDK's one definition of a tree position.
+        // A bare `Number.isInteger` would admit 2^53 and 1e300, which the u32
+        // index cannot represent.
+        const leafIndex = parsed['leafIndex'];
+        if (leafIndex !== undefined && !isValidLeafIndex(leafIndex as number)) return null;
+
+        // Informational, and rendered as an explorer link — where an
+        // unconstrained string is a URL injection carrying the authority of a
+        // slip the recipient just decrypted. DROPPED rather than fatal: the note
+        // behind it is still valid without the reference.
+        const rawTxHash = parsed['txHash'];
+        const txHash = isHexOfLength(rawTxHash, 32) ? (rawTxHash as string) : undefined;
+
+        return {
+            commitmentHex: parsed['commitmentHex'] as string,
+            encryptedMemo: parsed['encryptedMemo'] as string,
+            ...(leafIndex !== undefined ? { leafIndex: leafIndex as number } : {}),
+            ...(txHash !== undefined ? { txHash } : {}),
+        };
     } catch {
         return null;
     }
@@ -157,7 +227,13 @@ export function openPaymentSlip(
 /** URI scheme prefix. The version is in the name, so a v2 reader can refuse a v1. */
 export const PAYMENT_SLIP_SCHEME = 'orbslip1:';
 
-/** 8 lowercase hex chars — first 4 bytes of sha256 over the payload. */
+/**
+ * 8 lowercase hex chars — first 4 bytes of sha256 over the payload.
+ *
+ * A typo/truncation check for a string humans copy around, NOT authentication:
+ * anyone can recompute it over bytes they chose. Tampering is caught by the
+ * envelope's MAC, which needs the recipient's viewing key.
+ */
 function slipChecksum(payload: string): string {
     const digest = sha256(new TextEncoder().encode(PAYMENT_SLIP_SCHEME + payload));
     return toHex(digest.slice(0, 4)).slice(2);

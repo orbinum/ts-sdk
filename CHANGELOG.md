@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**A decrypted payment slip is authenticated, not trusted.**
+
+`openPaymentSlip` returned the parsed JSON as-is, checking only that two fields
+were strings. A valid MAC proves the sender knew the recipient's viewing key —
+it does not make them honest, and anyone handed a privacy address can seal a
+slip. Every field was therefore attacker-chosen data arriving authenticated, and
+past that point indistinguishable from a field the wallet scanned itself.
+
+### Fixed
+
+- **Security** — the result is rebuilt field by field. `commitmentHex` and
+  `encryptedMemo` must be hex of exactly the right length, and the leaf index
+  must be a real tree position (`isValidLeafIndex`, the SDK's one definition —
+  checking `Number.isInteger` here admitted `2^53` and `1e300` as positions that
+  cannot exist).
+- **Security** — `txHash` is dropped unless it is a real 32-byte hash, rather
+  than failing the slip. It renders as an explorer link, where an unconstrained
+  string is a script/URL injection wearing the authority of a slip the recipient
+  just decrypted successfully; the note behind it is still valid, so the field
+  goes and the slip stays.
+- **Security** — an envelope larger than 4 KB is refused before anything is
+  decrypted or parsed. A real slip is a few hundred bytes; without a ceiling the
+  SENDER decides how much memory the recipient spends, and the cost lands before
+  a single field is inspected.
+- `sealPaymentSlip` takes no ephemeral-key override. The 8-byte nonce suffix is
+  safe because the key derives from a fresh per-slip `ephSk`, so the (key,
+  nonce) pair ChaCha20-Poly1305 requires to be unique cannot repeat; accepting
+  an override would collapse both layers at once.
+
+---
+
 **One vocabulary for "where did this note come from, and where did it go".**
 
 Several mechanisms answer that question, and they had separate vocabularies and
