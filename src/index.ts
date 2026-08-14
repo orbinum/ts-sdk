@@ -108,6 +108,8 @@ export * from './wallet/ops/index';
 // re-sign on every launch, and naming the vault it belongs to.
 export * from './wallet/identity/index';
 
+export * from './wallet/provenance/index';
+
 // The decryption pool's contract. The kernel itself lives in the `/worker`
 // subpath, because the Worker is one only a host's bundler can resolve.
 export * from './wallet/worker/index';
