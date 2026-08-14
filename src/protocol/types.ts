@@ -74,10 +74,17 @@ export type NoteInput = {
     /** Circuit version to stamp on the note. Defaults to `CURRENT_CIRCUIT_VERSION`. */
     circuitVersion?: number;
     /**
-     * 32-byte ephemeral secret for the memo ECDH. Self-notes pass a
-     * deterministic one (deriveSelfEphSk) so a cold restore recognizes them by
-     * ephPk equality with no trial ECDH. Ignored on the stealth path (it
-     * generates its own coordinated ephSk). Default: random.
+     * 32-byte ephemeral secret for the memo ECDH. Default: random.
+     *
+     * Two callers supply one, and both do it so the RECIPIENT can predict the
+     * published ephPk and match it by table lookup instead of one trial ECDH per
+     * pool hint: self-notes pass `deriveSelfEphSk`, and a payment to a known
+     * counterparty passes `derivePairwiseEphSk`.
+     *
+     * Honoured on the stealth path too, where the same ephSk drives both the
+     * memo encryption and the stealth-owner derivation. Passing one is a promise
+     * that the value is unique — reusing it republishes an ephPk and links the
+     * two notes in public.
      */
     ephSkOverride?: Uint8Array;
     /**

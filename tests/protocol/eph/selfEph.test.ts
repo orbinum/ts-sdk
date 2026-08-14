@@ -169,7 +169,11 @@ describe('tryDecryptNote with a precomputed sharedSecret', () => {
         }
     });
 
-    it('stealth path ignores ephSkOverride: recipient still finds the note, memo uses its own eph', async () => {
+    it('stealth path honours ephSkOverride, and the recipient still finds the note', async () => {
+        // The override used to be dropped here, which silently disabled the
+        // pairwise fast path: the caller derived an ephemeral the builder threw
+        // away. Honouring it must not cost the recipient anything — the same
+        // ephSk drives both the memo encryption and the stealth derivation.
         const recipientOwnerPk = deriveOwnerPk(SPENDING_KEY);
         const override = deriveSelfEphSk(SPENDING_KEY, 99);
         const note = await NoteBuilder.build({
@@ -184,9 +188,9 @@ describe('tryDecryptNote with a precomputed sharedSecret', () => {
             ephSkOverride: override, // documented as ignored on the stealth path
         });
 
-        // The published ephPk must NOT be the override's (stealth generated its own)…
+        // The published ephPk is the override's…
         const [overrideEntry] = selfEphWindow(SPENDING_KEY, ivk, 99, 1);
-        expect(memoEphPkHex(note.memo)).not.toBe(overrideEntry!.ephPkHex);
+        expect(memoEphPkHex(note.memo)).toBe(overrideEntry!.ephPkHex);
         // …and the recipient still recovers the note via the normal stealth scan.
         const found = tryDecryptNote(asHint(note), ivsk, SPENDING_KEY, recipientOwnerPk);
         expect(found).not.toBeNull();
