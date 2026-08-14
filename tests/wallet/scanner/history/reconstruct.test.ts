@@ -7,6 +7,22 @@ import { vi, describe, it, expect, beforeEach } from 'vitest';
 import { reconstructOutgoingTxRecords } from '../../../../src/wallet/scanner/history/reconstruct';
 import type { ReconstructDeps } from '../../../../src/wallet/scanner/history/reconstruct';
 import type { ZkNote } from '../../../../src/protocol/types';
+import { NoteBuilder } from '../../../../src/protocol/note/NoteBuilder';
+import {
+    deriveViewingSecretKey,
+    deriveViewingPublicKey,
+    deriveOwnerPk,
+} from '../../../../src/protocol/keys/PrivacyKeys';
+import {
+    derivePairwiseSharedSecret,
+    derivePairwiseEphSk,
+} from '../../../../src/protocol/eph/index';
+import { toHex, scalarToHex } from '../../../../src/foundation/encoding/hex';
+import {
+    openPaymentSlip,
+    decodePaymentSlip,
+} from '../../../../src/protocol/memo/PaymentSlip';
+import { importPaymentSlip } from '../../../../src/wallet/ops/notes/paymentSlipImport';
 
 const mocks = {
     getAll: vi.fn(),
@@ -374,5 +390,185 @@ describe('un registro sin hash se reconoce en la siguiente pasada', () => {
         await reconstructOutgoingTxRecords(deps);
 
         expect(mocks.saveTxRecord).not.toHaveBeenCalled();
+    });
+});
+
+// ─── El importe exacto, leído del memo que el emisor selló ───────────────────
+//
+// La aritmética (`Σ inputs − cambio − fee`) es una estimación: si el fee no se
+// puede leer, el importe sobreestima exactamente por él. Cuando la contraparte
+// está en el vault, el emisor re-deriva la efímera que usó y lee la cifra que
+// escribió, sin nada nuevo en cadena.
+
+describe('reconstrucción con recuperación del memo', () => {
+    const SENDER_SK = 111n;
+    const RECIPIENT_SK = 222n;
+    const STRANGER_SK = 999n;
+
+    const senderIvsk = deriveViewingSecretKey(SENDER_SK);
+    const recipientIvsk = deriveViewingSecretKey(RECIPIENT_SK);
+    const recipientIvk = deriveViewingPublicKey(recipientIvsk);
+    const recipientOwnerPk = deriveOwnerPk(RECIPIENT_SK);
+    const pairSecret = derivePairwiseSharedSecret(senderIvsk, recipientIvk);
+
+    /** El pago real que la extrinsic publicó, con efímera derivada. */
+    async function sentNote(value: bigint, index = 4) {
+        return NoteBuilder.build({
+            value,
+            assetId: 0n,
+            blinding: 777n,
+            ownerPk: recipientOwnerPk,
+            sourcePk: deriveOwnerPk(SENDER_SK),
+            viewingPublicKey: recipientIvk,
+            recipientOwnerPk,
+            ephSkOverride: derivePairwiseEphSk(pairSecret, index),
+        });
+    }
+
+    /** Las deps con el feed de salidas y las claves del emisor cableadas. */
+    function withRecovery(note: ZkNote, counterparties = [recipientIvk]): ReconstructDeps {
+        const base = makeIndexer();
+        return {
+            ...base,
+            transfers: {
+                ...base.transfers,
+                outputsByExtrinsics: vi.fn().mockResolvedValue([
+                    {
+                        blockNumber: 100,
+                        extrinsicIndex: 2,
+                        commitmentHex: note.commitmentHex,
+                        leafIndex: 9,
+                        encryptedMemo: toHex(Uint8Array.from(note.memo)),
+                    },
+                ]),
+            },
+            keys: { viewingSecretKey: senderIvsk, counterpartyIvks: counterparties },
+        } as ReconstructDeps;
+    }
+
+    it('usa el importe del memo, no el deducido por resta', async () => {
+        // El importe real (5000) no coincide con lo que daría la aritmética
+        // sobre las notas del fixture: si el test pasa, viene del memo.
+        const note = await sentNote(5000n);
+
+        await reconstructOutgoingTxRecords(withRecovery(note));
+
+        const written = mocks.saveTxRecord.mock.calls[0]?.[0];
+        expect(written.amount).toBe('5000');
+    });
+
+    it('un importe recuperado no se marca aproximado aunque falte el fee', async () => {
+        // La marca existe porque la resta sobreestima por el fee que no se pudo
+        // leer. Una cifra leída del memo no arrastra ese error.
+        const note = await sentNote(5000n);
+        const deps = withRecovery(note);
+        deps.txFacts.byHash = vi.fn().mockResolvedValue(extrinsicRow({ fee: null }));
+
+        await reconstructOutgoingTxRecords(deps);
+
+        const written = mocks.saveTxRecord.mock.calls[0]?.[0];
+        expect(written.amount).toBe('5000');
+        expect('amountApproximate' in written).toBe(false);
+    });
+
+    it('el destinatario sale del memo sellado, no de la nota de cambio', async () => {
+        const note = await sentNote(5000n);
+
+        await reconstructOutgoingTxRecords(withRecovery(note));
+
+        const written = mocks.saveTxRecord.mock.calls[0]?.[0];
+        expect(written.recipientPkHex).toBe(scalarToHex(note.ownerPk));
+    });
+
+    it('vuelve a la aritmética cuando la contraparte no está en el vault', async () => {
+        // Sin la clave correcta el barrido no encuentra nada, y el registro
+        // tiene que seguir escribiéndose por la vía de siempre.
+        const note = await sentNote(5000n);
+        const strangerIvk = deriveViewingPublicKey(deriveViewingSecretKey(STRANGER_SK));
+
+        await reconstructOutgoingTxRecords(withRecovery(note, [strangerIvk]));
+
+        const written = mocks.saveTxRecord.mock.calls[0]?.[0];
+        expect(written).toBeDefined();
+        expect(written.amount).not.toBe('5000');
+    });
+
+    it('vuelve a la aritmética cuando el feed no sirve salidas', async () => {
+        // `outputsByExtrinsics` es opcional: un host que no lo implemente
+        // conserva exactamente el comportamiento anterior.
+        const deps = makeIndexer();
+
+        await reconstructOutgoingTxRecords(deps);
+
+        expect(mocks.saveTxRecord).toHaveBeenCalled();
+    });
+
+    it('un feed que falla no impide escribir el registro', async () => {
+        // Perder la cifra exacta es aceptable; perder la fila no.
+        const note = await sentNote(5000n);
+        const deps = withRecovery(note);
+        deps.transfers.outputsByExtrinsics = vi.fn().mockRejectedValue(new Error('502'));
+
+        await reconstructOutgoingTxRecords(deps);
+
+        expect(mocks.saveTxRecord).toHaveBeenCalled();
+    });
+
+    it('encuentra la contraparte correcta entre varias', async () => {
+        // Un monedero con varias contrapartes las prueba todas; la equivocada
+        // no puede atribuir el pago a la persona incorrecta.
+        const note = await sentNote(5000n);
+        const otras = [
+            deriveViewingPublicKey(deriveViewingSecretKey(777n)),
+            recipientIvk,
+            deriveViewingPublicKey(deriveViewingSecretKey(888n)),
+        ];
+
+        await reconstructOutgoingTxRecords(withRecovery(note, otras));
+
+        expect(mocks.saveTxRecord.mock.calls[0]?.[0].amount).toBe('5000');
+    });
+    it('reemite un slip que el receptor puede abrir', async () => {
+        // El objetivo final: tras restaurar, el emisor puede volver a entregar
+        // un slip funcional sin pedirle nada al receptor. Se sella hacia la
+        // contraparte que el barrido acaba de identificar.
+        const note = await sentNote(5000n);
+
+        await reconstructOutgoingTxRecords(withRecovery(note));
+
+        const slip = mocks.saveTxRecord.mock.calls[0]?.[0].paymentSlip as string;
+        expect(slip).toMatch(/^orbslip1:/);
+
+        const opened = openPaymentSlip(recipientIvsk, decodePaymentSlip(slip)!);
+        expect(opened).not.toBeNull();
+        expect(opened!.commitmentHex).toBe(note.commitmentHex);
+    });
+
+    it('el slip reemitido reconstruye la nota gastable del receptor', async () => {
+        // Abrir el sobre no basta: lo que importa es que el receptor recupere
+        // una nota que puede gastar.
+        const note = await sentNote(5000n);
+
+        await reconstructOutgoingTxRecords(withRecovery(note));
+
+        const slip = mocks.saveTxRecord.mock.calls[0]?.[0].paymentSlip as string;
+        const rebuilt = importPaymentSlip(slip, {
+            viewingSecretKey: recipientIvsk,
+            spendingKey: RECIPIENT_SK,
+            ownerPk: recipientOwnerPk,
+        });
+
+        expect(rebuilt).not.toBeNull();
+        expect(rebuilt!.value).toBe(5000n);
+        expect(rebuilt!.commitmentHex).toBe(note.commitmentHex);
+    });
+
+    it('sin recuperación no inventa un slip', async () => {
+        // Un registro deducido por aritmética no sabe hacia quién sellar, y un
+        // slip sellado hacia la contraparte equivocada no lo abriría nadie.
+        await reconstructOutgoingTxRecords(makeIndexer());
+
+        const written = mocks.saveTxRecord.mock.calls[0]?.[0];
+        expect('paymentSlip' in written).toBe(false);
     });
 });

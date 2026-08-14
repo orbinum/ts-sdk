@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+**A sender can read back what they sent, with nothing new on chain.**
+
+The amount and the recipient of an outgoing transfer live inside a memo sealed
+toward someone else, so they were treated as unrecoverable: a sender restoring
+from a seed got working payment slips, never their own history. The OVK existed
+to close that, at the cost of a new extrinsic field, a `transaction_version`
+bump, an EVM ABI change and an indexer migration.
+
+None of it is needed for a payment to a counterparty the wallet already knows.
+The pair secret is symmetric, so the sender derives the same ephemeral they used
+in the first place, and with it the memo's shared secret. This reads what was
+already published.
+
+### Added
+
+- `recoverSentNote(params) → SentNoteFacts | null` in `protocol/note`. Returns
+  the value, asset, blinding, stealth owner and source pk of a note this wallet
+  sent — deliberately without a spending key or nullifier, since the sender does
+  not own the recipient's note, only the memory of having sent it.
+
+  **No counter is required.** The index is not stored anywhere recoverable, and
+  asking a server "does this ephPk exist" would reveal which notes are ours.
+  Neither is needed: the published ephPk travels in the clear in the memo's last
+  32 bytes, so the sender precomputes their own window and looks the index up
+  locally. `SentNoteFacts.ephIndex` reports which index a note used, which also
+  lets a caller repair a lost counter.
+
+  Only applies to payments that used a derived ephemeral — a first payment to a
+  new counterparty has no counter, so its ephemeral is random and stays outside
+  this path by design.
+
+- `TransferFactsSource.outputsByExtrinsics?` — optional. Serves every output of
+  a transfer, memo included. Adds no linkage beyond the queries already made:
+  it is only ever called for extrinsics this wallet surfaced via `byNullifiers`,
+  which are extrinsics it signed itself. A host that omits it keeps exactly the
+  previous behaviour.
+
+- `ReconstructDeps.keys?` — the sender's viewing key plus the packed viewing
+  keys of counterparties the vault knows, which are the keys of
+  `pairwiseCounterparties` and survive a wipe-and-rescan by design.
+
+### Changed
+
+- History reconstruction reads the exact amount out of the memo the sender
+  sealed, when it can. Previously every outgoing row was derived by arithmetic
+  (`Σ inputs − change − fee`) and marked `amountApproximate` whenever the fee
+  could not be read — the figure then overstated by exactly that fee. A
+  recovered amount carries no such caveat, and the recipient's stealth pk comes
+  from the memo rather than off a change note that may not exist.
+
+- A reconstructed row carries a freshly sealed `paymentSlip` when it was
+  recovered from the memo. A slip is sealed toward the recipient, so the sender
+  never held a copy they could read back; re-issuing needs the recipient's
+  viewing key, and the sweep that recovers the amount is what identifies which
+  counterparty to seal toward. Rows derived by arithmetic carry no slip — sealing
+  one toward a guess would produce something nobody can open.
+
+  Both fall back cleanly: a feed without `outputsByExtrinsics`, a counterparty
+  no longer in the vault, or a failing request all leave the arithmetic row
+  exactly as before.
+
 **The pairwise fast path actually publishes its ephemeral now.**
 
 `NoteBuilder.build` generated a fresh random `ephSk` on the stealth path and

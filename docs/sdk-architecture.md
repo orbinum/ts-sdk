@@ -16,8 +16,8 @@ src/
 ├── protocol/     note, memo, eph, spend, keys, proving,         pure and offline —
 │                 circuit-version                                no chain, no storage
 ├── chain/        client, substrate, evm, rpc, pallet            needs a connection
-├── wallet/       vault, scanner, ops, identity, worker,         needs protocol + chain
-│                 OrbinumWallet
+├── wallet/       vault, scanner, ops, identity, provenance,     needs protocol + chain
+│                 worker, OrbinumWallet
 └── adapters/     indexeddb                                      needs a browser
 ```
 

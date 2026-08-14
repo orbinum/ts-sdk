@@ -170,7 +170,92 @@ All numeric fields use little-endian hex encoding to match the BN254 field eleme
 
 ---
 
-## 5. Summary
+## 5. Payment Slips
+
+A slip is what a **sender** hands a **recipient** so they rebuild a note without
+scanning the pool. Every field it carries is already public on chain.
+
+```
+SENDER                                                 RECIPIENT
+  │                                                        │
+  │  sealPaymentSlip(recipientIvk, facts)                   │
+  │    ephSk        ← fresh, PER SLIP                       │
+  │    sharedSecret = [ephSk]·recipientIvk                  │
+  │    slipKey      = HKDF(sharedSecret, "…slip-v1")        │
+  │    envelope     = ephPk(32) ‖ nonce(8) ‖ cipher ‖ MAC(16)
+  │    wire         = orbslip1:{base64url}:{checksum}       │
+  │                                                        │
+  └──────── chat · QR (~1685 of ~1800 chars) ──────────────►│
+                                                            │
+                                            openPaymentSlip(ivsk)
+                                              │
+                                              ├─ size ≤ 4 KB, checked BEFORE
+                                              │  decrypting anything
+                                              ├─ ECDH + MAC
+                                              └─ rebuild field by field
+                                                            │
+                                            importPaymentSlip → tryDecryptNote
+                                                            │
+                                                     SPENDABLE note
+```
+
+### Why it is encrypted at all
+
+The fields are public, but *pairing* them off-chain is not: whoever intercepts a
+plaintext slip learns that **this** recipient expects **this** payment. The
+envelope is sealed toward the recipient with the same ECDH the memo uses.
+
+### What the MAC does not prove
+
+It proves the sender knew the recipient's viewing key. It does **not** prove the
+fields are true — anyone handed a privacy address can seal a slip. So the result
+is rebuilt field by field rather than returned from `JSON.parse`:
+
+| Field | Rule | If violated |
+|---|---|---|
+| `commitmentHex` | hex, exactly 32 bytes | slip fails |
+| `encryptedMemo` | hex, exactly 180 bytes | slip fails |
+| `leafIndex` | `isValidLeafIndex` (u32) | slip fails |
+| `txHash` | hex, exactly 32 bytes | **field dropped** |
+
+The commitment and memo are the note's identity — a wrong value there is not a
+degraded slip but a different one. `txHash` is informational and renders as an
+explorer link, so an unconstrained string is a URL injection; dropping it keeps
+the slip working.
+
+### A slip that lies about the note
+
+Caught further in, by **two independent defences, either of which suffices**:
+
+```
+        forged (commitment, memo) pair
+                    │
+     ┌──────────────┴──────────────┐
+     │                             │
+ encKey = SHA256(ss ‖ commitment)  tryDecryptNote recomputes
+ → wrong key → memo MAC fails      Poseidon4 → mismatch
+     │                             │
+     └──────────────┬──────────────┘
+                    ▼
+                  null
+```
+
+Disabling one alone changes nothing; disabling both lets a phantom note through.
+
+### Re-issuing
+
+A slip is sealed toward the recipient, so the sender keeps no readable copy —
+losing the local record used to mean the recipient could never be handed one
+again. `regeneratePaymentSlip` seals a fresh envelope from the same public
+facts: different bytes (new ephemeral and nonce), identical fields.
+
+It needs the recipient's viewing key. After a restore that comes from the sweep
+in [Note Discovery §7](./note-discovery.md#7-outgoing-history), which recovers
+*which* counterparty a payment went to.
+
+---
+
+## 6. Summary
 
 ```
 EVM wallet (secp256k1)
@@ -192,4 +277,9 @@ Nullifier:
 Disclosure key (orbdisc:...):
   └─ reveals preimage of commitment (value, asset_id, owner_pk, blinding)
   └─ does NOT reveal spending_key, nullifier, or EVM address
+
+Payment slip (orbslip1:...):
+  └─ carries public locators (commitment, memo, leaf index) sealed toward the recipient
+  └─ grants NO spend power — the stealth key is derived by the recipient, not carried
+  └─ a valid MAC proves the sender knew the viewing key, NOT that the fields are true
 ```
