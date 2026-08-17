@@ -8,6 +8,12 @@ type OrbinumClientCommon = {
     /** HTTP URL of the EVM JSON-RPC endpoint (e.g. `"http://localhost:9933"`). Omit to disable EVM support. */
     evmRpc?: string;
     /**
+     * HTTP URL of a second, independent EVM endpoint. Never used for submission —
+     * only to tell a genuinely pending transaction from one stranded on `evmRpc`
+     * alone, which reports as pending forever but can never mine.
+     */
+    evmRpcPeer?: string;
+    /**
      * Base URL of a circuits-artifact mirror serving `manifest.json` and the
      * artifacts beside it. Omit for the default npm CDN (unpkg).
      *

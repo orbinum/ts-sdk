@@ -3,6 +3,12 @@ export type EvmTxRequest = {
     to: string;
     data: string;
     value?: bigint;
+    /**
+     * Explicit gas price in wei. Omit to let the wallet pick, which prices the
+     * transaction at the bare base fee — enough to be evicted as `GasPriceTooLow`
+     * the moment the base fee rises, stranding every later nonce from the account.
+     */
+    gasPrice?: bigint;
 };
 
 /** Callback that signs and submits an EVM transaction, returning the tx hash. */

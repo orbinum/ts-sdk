@@ -43,6 +43,8 @@ export interface ClientProviderConfig {
     substrateWs: string;
     /** HTTP URL of the EVM JSON-RPC endpoint (e.g. `"http://localhost:9933"`). Omit to disable EVM support. */
     evmRpc?: string;
+    /** HTTP URL of a second EVM endpoint, used only to detect transactions stranded on `evmRpc`. */
+    evmRpcPeer?: string;
     /** Base URL of a circuits-artifact mirror (manifest.json + artifacts). Omit to use the default npm CDN. */
     circuitsBaseUrl?: string;
     /** Timeout for the initial WebSocket handshake in milliseconds. Default: `8_000`. */
@@ -229,6 +231,7 @@ export class OrbinumClientProvider {
                 connectTimeoutMs: this.connectTimeoutMs,
             };
             if (this.config.evmRpc) connectConfig.evmRpc = this.config.evmRpc;
+            if (this.config.evmRpcPeer) connectConfig.evmRpcPeer = this.config.evmRpcPeer;
             if (this.config.circuitsBaseUrl)
                 connectConfig.circuitsBaseUrl = this.config.circuitsBaseUrl;
             clientPromise = OrbinumClient.connect(connectConfig);

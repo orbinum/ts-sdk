@@ -255,6 +255,42 @@ note nobody can find or spend.
   `privateTransfer` layouts; every field it reads sits at the same offset in
   both.
 
+---
+
+**A transaction priced at the base fee is a transaction waiting to be evicted.**
+
+`eth_gasPrice` reports the base fee exactly, and the base fee moves. A shield
+signed at that bare minimum is rejected as `GasPriceTooLow` on the pool's next
+revalidation the moment it rises — and because eviction happens after the tx was
+accepted, it leaves a nonce gap. Every later transaction from that account then
+sits in the future queue forever, since the nonce it waits on will never arrive.
+
+The wallet's report of that state was worse than the state. A stranded tx is
+still known to the node that accepted it, so the pool check read "the tx exists,
+it is merely pending" and the caller was told to keep waiting on something that
+can never mine. The node's own metrics showed the shape: 141 transactions
+invalidated with `reason="custom"`, dragging 147 more down as `category="subtree"`.
+
+### Added
+
+- `new EvmClient(rpcUrl, peerRpcUrl?)` — an optional independent EVM endpoint,
+  queried only after the receipt wait gives up. A transaction the
+  submitting node knows and the peer has never heard of was never gossiped, and
+  `waitForReceipt` now reports it as dropped (safe to retry) rather than pending.
+  An unreachable or disagreeing peer changes nothing: only a definitive `null`
+  from the peer counts, so a network blip cannot invite a retry of a live tx.
+- `OrbinumClientConfig.evmRpcPeer` / `ClientProviderConfig.evmRpcPeer` pass that
+  endpoint through `OrbinumClient.connect` and `OrbinumClientProvider`.
+- `EvmTxRequest.gasPrice` — an explicit price for a signer to use, for callers
+  who would rather not inherit whatever the wallet picks.
+
+### Changed
+
+- `getGasPrice()` pads the reported price by 25%, and takes a `bumpPercent`
+  argument to override or disable the pad (`getGasPrice(0)` returns the raw
+  value). Absorbing the usual base-fee movement is the difference between a tx
+  that mines and one that strands its own successors.
+
 ## [1.4.0] - 2026-08-12
 
 **A restored vault no longer republishes an ephemeral key.**

@@ -17,8 +17,15 @@ type JsonRpcBatchResponse<T> = Array<JsonRpcResponse<T>>;
  * Follows the standard Ethereum JSON-RPC specification.
  */
 export class EvmClient {
-    /** @param rpcUrl - HTTP URL of the EVM JSON-RPC endpoint (e.g. `"http://localhost:9933"`). */
-    constructor(private readonly rpcUrl: string) {}
+    /**
+     * @param rpcUrl - HTTP URL of the EVM JSON-RPC endpoint (e.g. `"http://localhost:9933"`).
+     * @param peerRpcUrl - Optional second endpoint, used only to tell a genuinely
+     *   pending transaction from one stranded on `rpcUrl` alone. See `waitForReceipt`.
+     */
+    constructor(
+        private readonly rpcUrl: string,
+        private readonly peerRpcUrl?: string
+    ) {}
 
     /**
      * Performs a single JSON-RPC call and returns the typed result.
@@ -86,10 +93,18 @@ export class EvmClient {
         return hexToNumber(hex);
     }
 
-    /** Returns the current gas price in wei. */
-    async getGasPrice(): Promise<bigint> {
+    /**
+     * Returns the current gas price in wei, padded by `bumpPercent`.
+     *
+     * `eth_gasPrice` reports the base fee exactly, and the base fee moves
+     * between signing and the pool's next revalidation. A transaction priced at
+     * the bare minimum is evicted as `GasPriceTooLow` the moment it rises, which
+     * leaves every later nonce from that account stranded in the future queue.
+     * The default 25% pad absorbs the usual movement.
+     */
+    async getGasPrice(bumpPercent = 25): Promise<bigint> {
         const hex = await this.request<string>('eth_gasPrice', []);
-        return hexToBigint(hex);
+        return (hexToBigint(hex) * BigInt(100 + bumpPercent)) / 100n;
     }
 
     /** Submits a signed raw transaction. Returns the transaction hash. */
@@ -243,8 +258,44 @@ export class EvmClient {
                 deadline = Math.min(deadline + timeoutMs, hardDeadline);
             }
         }
+        // A tx only this node knows about was never gossiped — typically because
+        // an earlier nonce was evicted, stranding it in the future queue where it
+        // can never mine. That is a dropped tx wearing a pending tx's clothes, and
+        // reporting it as pending tells the caller to wait forever.
+        if (await this.isStrandedOnThisNode(txHash)) {
+            throw new Error(
+                `Transaction dropped from the tx pool (never propagated beyond the submitting node, ${Date.now() - start}ms): ${txHash}`
+            );
+        }
         throw new Error(
             `Transaction still pending after ${Date.now() - start}ms: ${txHash} — it may still confirm; check the hash on the explorer before retrying`
         );
+    }
+
+    /**
+     * True when `rpcUrl` knows the transaction but the configured peer does not.
+     *
+     * Returns false without a peer configured, and on any peer error — an
+     * unreachable peer is not evidence that a live transaction is stranded.
+     */
+    private async isStrandedOnThisNode(txHash: string): Promise<boolean> {
+        if (!this.peerRpcUrl) return false;
+        try {
+            const res = await postJsonWithRetry(
+                this.peerRpcUrl,
+                JSON.stringify({
+                    id: 1,
+                    jsonrpc: '2.0',
+                    method: 'eth_getTransactionByHash',
+                    params: [txHash],
+                })
+            );
+            if (!res.ok) return false;
+            const json = (await res.json()) as JsonRpcResponse<unknown>;
+            if (json.error) return false;
+            return json.result === null;
+        } catch {
+            return false;
+        }
     }
 }

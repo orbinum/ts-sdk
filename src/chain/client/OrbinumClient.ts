@@ -116,7 +116,7 @@ export class OrbinumClient {
         const substrate = config.papi
             ? SubstrateClient.adopt(config.papi, config.substrateHttp)
             : await SubstrateClient.connect(config.substrateWs, config.connectTimeoutMs ?? 15_000);
-        const evm = config.evmRpc ? new EvmClient(config.evmRpc) : null;
+        const evm = config.evmRpc ? new EvmClient(config.evmRpc, config.evmRpcPeer) : null;
         return new OrbinumClient(substrate, evm, config.circuitsBaseUrl);
     }
 
