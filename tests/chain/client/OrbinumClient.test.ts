@@ -118,7 +118,24 @@ describe('OrbinumClient.connect', () => {
         });
 
         expect(client.evm).not.toBeNull();
-        expect(vi.mocked(EvmClient)).toHaveBeenCalledWith('http://localhost:9933');
+        expect(vi.mocked(EvmClient)).toHaveBeenCalledWith('http://localhost:9933', undefined);
+    });
+
+    it('passes evmRpcPeer through to the EvmClient', async () => {
+        const substrate = makeSubstrate();
+        vi.mocked(SubstrateClient.connect).mockResolvedValue(substrate);
+        vi.mocked(EvmClient).mockImplementation(makeEvm as never);
+
+        await OrbinumClient.connect({
+            substrateWs: 'ws://localhost:9944',
+            evmRpc: 'http://localhost:9933',
+            evmRpcPeer: 'http://localhost:9934',
+        });
+
+        expect(vi.mocked(EvmClient)).toHaveBeenCalledWith(
+            'http://localhost:9933',
+            'http://localhost:9934'
+        );
     });
 
     it('sets evmExplorer to null when evmRpc is not provided', async () => {

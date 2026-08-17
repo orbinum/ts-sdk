@@ -86,9 +86,14 @@ describe('EvmClient.getTransactionCount', () => {
 // ─── EvmClient.getGasPrice ────────────────────────────────────────────────────
 
 describe('EvmClient.getGasPrice', () => {
-    it('returns gas price as bigint', async () => {
+    it('pads the reported price so a rising base fee does not evict the tx', async () => {
         mockFetchOk('0x3b9aca00'); // 1 Gwei
-        expect(await new EvmClient('http://localhost').getGasPrice()).toBe(1_000_000_000n);
+        expect(await new EvmClient('http://localhost').getGasPrice()).toBe(1_250_000_000n);
+    });
+
+    it('returns the raw price as bigint with the pad disabled', async () => {
+        mockFetchOk('0x3b9aca00');
+        expect(await new EvmClient('http://localhost').getGasPrice(0)).toBe(1_000_000_000n);
     });
 });
 
@@ -475,5 +480,82 @@ describe('EvmClient.waitForReceipt timeout handling', () => {
         // and a potential double-spend) — it falls through to "still pending".
         expect(err?.message).toMatch(/still pending/);
         expect(err?.message).not.toMatch(/dropped/);
+    });
+});
+
+// ─── EvmClient.waitForReceipt — stranded-tx detection ─────────────────────────
+
+/**
+ * The node always knows the tx and never mines it; `peerSees` decides whether a
+ * second endpoint has heard of it, and `peerOk` whether that endpoint answers.
+ */
+function mockStrandedScenario(peerSees: boolean, peerOk = true): void {
+    vi.stubGlobal(
+        'fetch',
+        vi.fn().mockImplementation(async (url: string, init: { body: string }) => {
+            const { method } = JSON.parse(init.body) as { method: string };
+            if (url === 'http://peer') {
+                if (!peerOk) return { ok: false, status: 500, statusText: 'boom' };
+                return {
+                    ok: true,
+                    json: async () => ({
+                        jsonrpc: '2.0',
+                        id: 1,
+                        result: peerSees ? { hash: '0xabc' } : null,
+                    }),
+                };
+            }
+            return {
+                ok: true,
+                json: async () => ({
+                    jsonrpc: '2.0',
+                    id: 1,
+                    result: method === 'eth_getTransactionByHash' ? { hash: '0xabc' } : null,
+                }),
+            };
+        })
+    );
+}
+
+describe('EvmClient.waitForReceipt stranded-tx detection', () => {
+    async function runToHardCap(client: EvmClient): Promise<Error | null> {
+        const p = client.waitForReceipt('0xabc', 100, 1_000).then(
+            () => null,
+            (e: Error) => e
+        );
+        await vi.advanceTimersByTimeAsync(5_000);
+        return p;
+    }
+
+    it('reports a tx no peer can see as dropped, not pending', async () => {
+        vi.useFakeTimers();
+        mockStrandedScenario(false);
+        const err = await runToHardCap(new EvmClient('http://node', 'http://peer'));
+        // Stranded behind an evicted nonce: it can never mine, so the caller
+        // must be told to retry rather than wait.
+        expect(err?.message).toMatch(/never propagated/);
+        expect(err?.message).toMatch(/dropped from the tx pool/);
+    });
+
+    it('keeps reporting pending when the peer also sees the tx', async () => {
+        vi.useFakeTimers();
+        mockStrandedScenario(true);
+        const err = await runToHardCap(new EvmClient('http://node', 'http://peer'));
+        expect(err?.message).toMatch(/still pending/);
+    });
+
+    it('keeps reporting pending when the peer is unreachable', async () => {
+        vi.useFakeTimers();
+        mockStrandedScenario(false, false);
+        const err = await runToHardCap(new EvmClient('http://node', 'http://peer'));
+        // An unreachable peer is not evidence that a live tx is stranded.
+        expect(err?.message).toMatch(/still pending/);
+    });
+
+    it('keeps reporting pending when no peer is configured', async () => {
+        vi.useFakeTimers();
+        mockStrandedScenario(false);
+        const err = await runToHardCap(new EvmClient('http://node'));
+        expect(err?.message).toMatch(/still pending/);
     });
 });
