@@ -18,11 +18,19 @@ import { decodeUint } from './abi';
  * `unshield` — a classifier that checks in the wrong order reports every
  * unshield as a shield, silently, and a new pallet method breaks it again.
  */
-export type PrecompileMethod = 'shield' | 'unshield' | 'privateTransfer' | 'shieldBatch';
+export type PrecompileMethod =
+    | 'shield'
+    | 'unshield'
+    | 'privateTransfer'
+    | 'shieldBatch'
+    | 'claimShieldedFees';
 
 export type DecodedPrecompile = {
     fnSig: string;
-    /** The operation, from the selector. Null for a known precompile's unmapped call. */
+    /**
+     * The operation, from the selector. Null only when the args below could not
+     * be decoded either — every signature this file decodes maps to a name.
+     */
     method: PrecompileMethod | null;
     args: Record<string, unknown>;
 };
@@ -37,6 +45,7 @@ function methodOf(fnSig: string): PrecompileMethod | null {
     if (fnSig.startsWith('unshield(')) return 'unshield';
     if (fnSig.startsWith('privateTransfer(')) return 'privateTransfer';
     if (fnSig.startsWith('shieldBatch(')) return 'shieldBatch';
+    if (fnSig.startsWith('claimShieldedFees(')) return 'claimShieldedFees';
     if (fnSig.startsWith('shield(')) return 'shield';
     return null;
 }

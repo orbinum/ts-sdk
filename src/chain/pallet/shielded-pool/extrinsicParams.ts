@@ -22,6 +22,24 @@ export type ShieldParams = {
     encryptedMemo: Uint8Array;
 };
 
+/**
+ * How the relay fee recipient is decided.
+ *
+ * It is not a parameter anywhere in this module: the chain reads it from the
+ * dispatch origin, which calldata cannot influence. A `relayer` field would be an
+ * unauthenticated claim — anyone could take a propagated proof, resubmit it
+ * naming themselves, and collect a fee they never paid for.
+ *
+ * | Submitted via | Credited |
+ * |---|---|
+ * | EVM precompile | whoever signed that EVM transaction and paid its gas |
+ * | Signed extrinsic | the signer's registered EVM address |
+ * | Unsigned extrinsic | the block author |
+ *
+ * `fee` below still matters: it is a ZK public input, so it cannot be altered
+ * without regenerating the proof. Only the *recipient* moved to the origin.
+ */
+
 /** Parameters for shieldedPool.unshield — withdraws from the pool to a clear address. */
 export type UnshieldParams = {
     /** ZK proof bytes */

@@ -34,7 +34,7 @@ const SIGNER = {} as SubstrateSigner;
 
 function makeDeps() {
     return {
-        buildNote: vi.fn().mockResolvedValue(NOTE),
+        buildNote: vi.fn().mockResolvedValue({ note: NOTE }),
         resolver: {
             resolve: vi.fn().mockResolvedValue({ provider: { tag: 'pinned' }, version: 1 }),
         },

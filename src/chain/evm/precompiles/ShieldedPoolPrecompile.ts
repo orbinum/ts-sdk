@@ -84,7 +84,9 @@ export class ShieldedPoolPrecompile {
      * hidden by design, so any address (a relayer included) can submit a valid
      * proof.
      *
-     * Extrinsic: `shieldedPool.privateTransfer(proof, merkleRoot, nullifiers, commitments, memos)`
+     * Extrinsic: `shieldedPool.privateTransfer(proof, merkleRoot, nullifiers,
+     * commitments, memos, assetId, fee, circuitVersion)` — eight arguments; see
+     * `buildPrivateTransferCalldata` for the encoding order.
      */
     async privateTransfer(params: PrivateTransferParams, signer: EvmSigner): Promise<string> {
         return signer({ to: this.addr, data: buildPrivateTransferCalldata(params) });
@@ -98,7 +100,14 @@ export class ShieldedPoolPrecompile {
      * `params.recipientAddress` must be a 0x-prefixed AccountId32. To send to an
      * EVM address, derive it first with `evmToImplicitSubstrate(evmAddr)`.
      *
-     * Extrinsic: `shieldedPool.unshield(proof, merkleRoot, nullifier, assetId, amount, recipient)`
+     * Extrinsic: `shieldedPool.unshield(proof, merkleRoot, nullifier, assetId,
+     * amount, recipient, fee, changeCommitment, changeEncryptedMemo,
+     * circuitVersion)` — ten arguments; see `buildUnshieldCalldata`.
+     *
+     * **The relay fee goes to whoever `signer` is.** The chain takes the recipient
+     * from `msg.sender`, not from calldata, so the account behind this signer is
+     * the one credited — and it is also the one paying gas. Relaying on someone
+     * else's behalf and being paid for it is the same act here.
      */
     async unshield(params: UnshieldParams, signer: EvmSigner): Promise<string> {
         return signer({ to: this.addr, data: buildUnshieldCalldata(params) });
@@ -119,7 +128,9 @@ export class ShieldedPoolPrecompile {
      * The `msg.sender` address is the validator identity, and must match the
      * one with pending fees.
      *
-     * Extrinsic: `shieldedPool.claim_shielded_fees(commitment, amount, assetId, memo, proof, publicSignals)`
+     * Extrinsic: `shieldedPool.claim_shielded_fees(commitment, amount, assetId,
+     * memo, proof, publicSignals, circuitVersion)` — seven arguments; see
+     * `buildClaimShieldedFeesCalldata`.
      */
     async claimShieldedFees(params: ClaimShieldedFeesParams, signer: EvmSigner): Promise<string> {
         return signer({
@@ -135,7 +146,16 @@ export class ShieldedPoolPrecompile {
     // call.
 
     async estimateShieldGas(params: ShieldParams, from: string): Promise<bigint> {
-        return this.evm.estimateGas({ from, to: this.addr, data: buildShieldCalldata(params) });
+        // `value` too, not just the calldata: `shield` is payable and the
+        // precompile takes the amount from `msg.value`, rejecting zero outright.
+        // Estimating without it reverts every time — an estimate that can never
+        // succeed, for a call that would.
+        return this.evm.estimateGas({
+            from,
+            to: this.addr,
+            data: buildShieldCalldata(params),
+            value: `0x${params.amount.toString(16)}`,
+        });
     }
 
     async estimatePrivateTransferGas(params: PrivateTransferParams, from: string): Promise<bigint> {

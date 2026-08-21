@@ -15,7 +15,10 @@ vi.mock('@orbinum/proof-generator', () => ({
     }),
 }));
 
-import { generateFeeClaimProof, WebArtifactProvider } from '../../../src/protocol/proving/fee-claim';
+import {
+    generateFeeClaimProof,
+    WebArtifactProvider,
+} from '../../../src/protocol/proving/fee-claim';
 import { generateProof } from '@orbinum/proof-generator';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
