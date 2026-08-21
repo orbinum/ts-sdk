@@ -1,3 +1,14 @@
+/**
+ * Witness assembly for the fee-claim circuit — accrued relayer fees minted
+ * straight into a shielded note.
+ *
+ * No input note and no merkle path: this proves knowledge of a commitment's
+ * preimage, so the chain can check the note encodes exactly the amount being
+ * claimed and a relayer cannot inflate its own payout.
+ *
+ * The public signals are a fixed 76-byte buffer the runtime parses by offset,
+ * so their layout is a wire contract rather than an implementation detail.
+ */
 import {
     CircuitType,
     generateProof,

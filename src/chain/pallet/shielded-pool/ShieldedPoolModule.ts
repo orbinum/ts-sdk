@@ -27,7 +27,9 @@ import type {
  * which means the Orbinum node must be reachable on first use.
  * Signing is delegated to a SubstrateSigner (see polkadot-api/signer).
  *
- * Parameter order matches the Orbinum runtime extrinsics exactly.
+ * Arguments are passed BY NAME through PAPI, so the field names — not the
+ * order — have to match the runtime's. A renamed parameter fails at
+ * encoding rather than silently shifting a value into the wrong slot.
  */
 export class ShieldedPoolModule {
     constructor(private readonly substrate: SubstrateClient) {}
@@ -61,7 +63,11 @@ export class ShieldedPoolModule {
      * Withdraws tokens from the shielded pool to a public address.
      * Submits as an UNSIGNED (gasless) transaction — fee is embedded in the ZK proof.
      * Pass a `signer` to fall back to signed submission (e.g. for testing).
-     * Extrinsic: shieldedPool.unshield(proof, merkleRoot, nullifier, assetId, amount, recipient, fee, changeCommitment, changeEncryptedMemo, relayer, circuitVersion)
+     * Extrinsic: shieldedPool.unshield(proof, merkleRoot, nullifier, assetId, amount, recipient, fee, changeCommitment, changeEncryptedMemo, circuitVersion)
+     *
+     * The relay fee recipient is NOT a parameter: the chain takes it from the
+     * dispatch origin. Submitting unsigned credits the block author; submitting
+     * through the EVM precompile credits whoever signed that transaction.
      */
     async unshield(
         params: UnshieldParams,
@@ -94,7 +100,6 @@ export class ShieldedPoolModule {
             fee: params.fee ?? 0n,
             change_commitment: changeCommitment,
             change_encrypted_memo: changeEncryptedMemo,
-            relayer: undefined, // Option<H160> — None for direct Substrate submissions
             circuit_version: params.circuitVersion,
         });
         if (signer) {
@@ -107,7 +112,11 @@ export class ShieldedPoolModule {
      * Performs a private (shielded) transfer between two notes.
      * Submits as an UNSIGNED (gasless) transaction — fee is embedded in the ZK proof.
      * Pass a `signer` to fall back to signed submission (e.g. for testing).
-     * Extrinsic: shieldedPool.privateTransfer(proof, merkleRoot, nullifiers, commitments, memos, assetId, fee, relayer, circuitVersion)
+     * Extrinsic: shieldedPool.privateTransfer(proof, merkleRoot, nullifiers, commitments, memos, assetId, fee, circuitVersion)
+     *
+     * The relay fee recipient is NOT a parameter: the chain takes it from the
+     * dispatch origin. Submitting unsigned credits the block author; submitting
+     * through the EVM precompile credits whoever signed that transaction.
      */
     async privateTransfer(
         params: PrivateTransferParams,
@@ -133,7 +142,6 @@ export class ShieldedPoolModule {
             encrypted_memos: memos,
             asset_id: params.assetId,
             fee: params.fee ?? 0n,
-            relayer: undefined, // Option<H160> — None for direct Substrate submissions
             circuit_version: params.circuitVersion,
         });
         if (signer) {
