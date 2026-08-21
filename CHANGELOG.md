@@ -7,6 +7,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-08-21
+
+**The `relayer` parameter is gone from the chain.**
+
+`unshield` and `private_transfer` used to declare `relayer: Option<H160>`, and
+this SDK sent `undefined` for it on every call. Both extrinsics are `ensure_none`,
+so that field was an unauthenticated claim on an unauthenticated call: anyone
+could take a propagated proof, resubmit it naming themselves, and collect a fee
+they never paid for.
+
+The runtime removed the argument. The fee recipient now comes from the dispatch
+origin, which is the one place calldata cannot reach. Both calls end at
+`circuit_version`.
+
+**Requires `pallet-shielded-pool` 0.19.0 or later.** Against an older runtime the
+call will fail to encode — the argument counts no longer match. Callers of this
+SDK need no change: the parameter was never exposed in `UnshieldParams` or
+`PrivateTransferParams`, only injected internally.
+
+| Submitted via      | Credited                                             |
+| ------------------ | ---------------------------------------------------- |
+| EVM precompile     | whoever signed that EVM transaction and paid its gas |
+| Signed extrinsic   | the signer's registered EVM address                  |
+| Unsigned extrinsic | the block author                                     |
+
+The `fee` argument is unaffected — it is a ZK public input and cannot be altered
+without regenerating the proof. Only the *recipient* moved to the origin.
+
+### Breaking
+
+- **`FeeClaimDeps.buildNote`** now returns `{ note: ZkNote }` instead of a bare
+  `ZkNote`, matching the shape `buildZkNote` already returns everywhere else.
+  Hosts were wrapping or unwrapping it at the call site; that inconsistency is
+  gone. Update: `buildNote: (p) => buildZkNote(p)` needs no change if it already
+  forwards the builder's result — only hand-rolled `buildNote` implementations
+  that returned a bare note do.
+
+### Fixed
+
+- **`estimateShieldGas` never returned a usable estimate.** `shield` is payable
+  and the precompile reads the amount from `msg.value`, rejecting zero outright,
+  so estimating without `value` reverted every time — an estimate that could
+  never succeed for a call that would. It now passes `params.amount`.
+- **`claimShieldedFees` was missing from the precompile classifier.** Its
+  selector decoded to `method: null`, so a fee claim submitted through the EVM
+  precompile could not be told apart from an unmapped call in history or
+  explorer views.
+- **`MIN_GASLESS_FEE` was documented as a runtime constant.** It is the default
+  of `pallet-relayer`'s `MinRelayFee`, which is **mutable storage**: governance
+  moves it with `set_min_relay_fee`, no upgrade required. A wallet that hardcodes
+  it starts failing with `FeeTooLow` the moment the floor rises — read
+  `min_relay_fee()` when the answer has to be current.
+
+### Changed
+
+- `PrecompileMethod` gains `'claimShieldedFees'`.
+- Extrinsic argument lists in `ShieldedPoolModule` and `ShieldedPoolPrecompile`
+  doc comments now match the runtime, including the arity the encoder actually
+  sends.
+
 ## [2.0.0] - 2026-08-17
 
 **The pairwise fast path actually publishes its ephemeral now.**

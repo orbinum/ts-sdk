@@ -397,3 +397,62 @@ describe('decodePrecompileCalldata — hostile array offsets', () => {
         expect(decoded?.args['circuitVersion']).toBeDefined();
     });
 });
+
+/**
+ * `claimShieldedFees` fue el hueco: el decodificador la parseaba entera pero
+ * `methodOf` no la mapeaba, así que salía con `method: null` y los `args`
+ * poblados. Un consumidor que clasifique por `method` trataba una reclamación
+ * de comisiones como llamada desconocida teniendo todos los datos delante.
+ */
+describe('decodePrecompileCalldata — claimShieldedFees', () => {
+    it('la nombra en vez de devolver method: null', async () => {
+        const sp = new ShieldedPoolPrecompile(mockEvm());
+        let data = '';
+        await sp.claimShieldedFees(
+            {
+                commitment: COMMITMENT,
+                amount: 5_000n,
+                assetId: 0,
+                proof: PROOF,
+                publicSignals: new Uint8Array(76),
+                encryptedMemo: new Uint8Array(180),
+                circuitVersion: 1,
+            },
+            async (tx) => {
+                data = tx.data;
+                return '0xhash';
+            }
+        );
+
+        const decoded = decodePrecompileCalldata(SP_ADDR, data);
+
+        expect(decoded?.method).toBe('claimShieldedFees');
+    });
+
+    it('y decodifica sus argumentos', async () => {
+        // El contraste que da sentido al anterior: si los args no salieran,
+        // `method: null` sería la respuesta honesta.
+        const sp = new ShieldedPoolPrecompile(mockEvm());
+        let data = '';
+        await sp.claimShieldedFees(
+            {
+                commitment: COMMITMENT,
+                amount: 5_000n,
+                assetId: 0,
+                proof: PROOF,
+                publicSignals: new Uint8Array(76),
+                encryptedMemo: new Uint8Array(180),
+                circuitVersion: 1,
+            },
+            async (tx) => {
+                data = tx.data;
+                return '0xhash';
+            }
+        );
+
+        const decoded = decodePrecompileCalldata(SP_ADDR, data);
+
+        expect(decoded?.args['commitment']).toBe(COMMITMENT);
+        expect(decoded?.args['amount']).toBe(5_000n);
+    });
+});

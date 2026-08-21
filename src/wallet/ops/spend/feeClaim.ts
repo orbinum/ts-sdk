@@ -1,17 +1,13 @@
 /**
  * Claiming accrued relayer fees into a fresh private note.
  *
- * The claim mints a brand-new note, so the flow is build → prove → submit →
- * persist, with no inputs to spend. The circuit version is resolved fail-closed
- * against the chain BEFORE proving: a proof generated under a stale artifact
- * wastes seconds and is rejected anyway, and a wrong provider could prove
- * against a key the chain no longer accepts.
+ * Mints a new note, so the flow is build → prove → submit → persist, with no
+ * inputs to spend. The circuit version resolves fail-closed against the chain
+ * BEFORE proving: a proof under a stale artifact is rejected anyway.
  *
- * The minted note is saved on success, the same way a transfer saves its change
- * and an unshield its remainder. Leaving it to the next scan would work — the
- * ephemeral is deterministic, so a rescan finds it — but the claimed fees would
- * be absent from the balance until then, which reads as a claim that did
- * nothing.
+ * The note is saved on success rather than left to the next scan. A rescan
+ * would find it — the ephemeral is deterministic — but until then the claimed
+ * fees are missing from the balance, which reads as a claim that did nothing.
  */
 import { CircuitType } from '@orbinum/proof-generator';
 import { generateFeeClaimProof } from '../../../protocol/proving/fee-claim';
@@ -33,7 +29,7 @@ export interface FeeClaimDeps {
      * Builds the note the claim mints. Owns key material and the ephemeral-index
      * reservation — which is why it is injected rather than parameterized here.
      */
-    buildNote: (params: { value: bigint; assetId: bigint }) => Promise<ZkNote>;
+    buildNote: (params: { value: bigint; assetId: bigint }) => Promise<{ note: ZkNote }>;
     resolver: Pick<CircuitVersionResolver, 'resolve'>;
     pool: Pick<ShieldedPoolModule, 'claimShieldedFees'>;
     /** Where the minted note lands once the claim finalizes. */
@@ -60,7 +56,7 @@ export async function claimFees(
     onStep?: (step: FeeClaimStep) => void
 ): Promise<TxResult> {
     onStep?.('building-note');
-    const note = await deps.buildNote({ value: amount, assetId: BigInt(assetId) });
+    const { note } = await deps.buildNote({ value: amount, assetId: BigInt(assetId) });
 
     const { provider } = await deps.resolver.resolve(CircuitType.ValueProof, note.circuitVersion);
 

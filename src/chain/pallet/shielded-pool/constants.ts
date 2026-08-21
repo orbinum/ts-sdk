@@ -7,14 +7,19 @@
  * `fee`, and without this a host is left reverse-engineering the number from a
  * failed extrinsic.
  *
- * A runtime upgrade can change these. They are exported as the current chain's
- * values, which is what every caller needs today; a chain that has moved on
- * should pass its own.
+ * These are the current chain's values, which is what every caller needs today.
+ * A chain that has moved on should pass its own — and note that not all of them
+ * need a runtime upgrade to move: see `MIN_GASLESS_FEE`.
  */
 
 /**
  * Smallest fee an unsigned (gasless) shielded-pool extrinsic may carry, in
- * planck. Mirrors the runtime's `MinGaslessFee`.
+ * planck — the default of `pallet-relayer`'s `MinRelayFee`.
+ *
+ * MUTABLE STORAGE, not a runtime constant: governance moves it with
+ * `set_min_relay_fee`, no upgrade required. A wallet that hardcodes this value
+ * starts failing with `FeeTooLow` the moment the floor rises, so read
+ * `min_relay_fee()` when the answer has to be current.
  *
  * Below it the pallet rejects with `FeeTooLow`. The fee is paid to the block
  * author by the runtime, which is what lets a user with no public balance spend
