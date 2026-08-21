@@ -7,8 +7,11 @@
  * in its OWN database, separate from the vault, because it is not per-account —
  * one installation has one device key regardless of how many wallets it opens.
  *
- * Non-extractable is the point. The raw bytes cannot be read back out even by
- * this code, so a compromised page cannot exfiltrate the key itself.
+ * Non-extractable is the point: the raw bytes cannot be read back out even by
+ * this code, so a compromised page exfiltrates an opaque handle and nothing
+ * more. That property comes from `generateDeviceKey`, which creates the key
+ * with `extractable: false` — this module only persists whatever it is handed,
+ * and cannot restore the guarantee for a key that was created without it.
  */
 import { createDeviceKeyProvider } from '../../wallet/identity/deviceKey';
 import type { DeviceKeyStore } from '../../wallet/identity/deviceKey';
@@ -22,9 +25,9 @@ const DEVICE_KEY_ID = 'device';
  * A `DeviceKeyStore` backed by a tiny dedicated IndexedDB.
  *
  * IndexedDB rather than localStorage because it stores a `CryptoKey` HANDLE via
- * structured clone. The key is generated non-extractable, so its material never
- * becomes visible to JavaScript — a storage dump yields an opaque handle, not
- * bytes. localStorage can only hold strings, which would mean exporting the key.
+ * structured clone, so the material never becomes visible to JavaScript and a
+ * storage dump yields an opaque handle. localStorage holds only strings, which
+ * would mean exporting the key to store it at all.
  *
  * Its own database, separate from the vault: the device key outlives any single
  * vault and must survive one being dropped.

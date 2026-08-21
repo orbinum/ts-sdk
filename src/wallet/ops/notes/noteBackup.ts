@@ -1,40 +1,33 @@
 /**
- * CLOSED JSON backup of notes — the same notes moved between a user's devices as
- * a plain file, WITHOUT exposing any spending key.
+ * CLOSED JSON backup: notes moved between a user's devices as a plain file,
+ * WITHOUT exposing any spending key.
  *
- * ## The idea
+ * An entry carries only what is already PUBLIC on chain — the commitment and
+ * the encrypted memo — so the file grants nothing on its own.
  *
- * A backup entry carries only what is already PUBLIC on chain: the commitment and
- * the encrypted memo. It contains no spending key, so the file is safe to hold
- * and even share — it grants nothing on its own.
+ * DECRYPTION IS THE PROOF OF OWNERSHIP. On import each memo is opened with the
+ * importer's viewing key: one that opens rebuilds a full spendable `ZkNote`
+ * (spending and stealth keys derived from their identity); one that does not is
+ * someone else's note and is dropped.
  *
- * On import, the recipient DECRYPTS each memo with their own viewing key
- * (`importNotesFromBackup`). Decryption is the proof of ownership:
- *   - the memo decrypts → the note is theirs → a full spendable `ZkNote` is
- *     reconstructed, spending key and stealth key derived from their identity;
- *   - the memo does not decrypt → the note is someone else's → it is dropped.
+ * Not a chain scan — only the N memos in the file are tried, which is what lets
+ * a device restore without re-scanning the pool.
  *
- * This is NOT a chain scan: only the N memos in the backup are tried, not the
- * whole pool. It moves notes between devices without re-scanning, and a note that
- * is not yours simply fails to import.
- *
- * ## What travels vs what does not
- *
- * Travels: `commitmentHex`, `encryptedMemo`, and `leafIndex` (informational).
- * Does NOT travel: value, ownerPk, blinding, spendingKey — all recovered by
- * decrypting the memo. The Merkle proof is re-fetched at spend time.
+ * Travels: `commitmentHex`, `encryptedMemo`, `leafIndex` (informational).
+ * Recovered from the memo: value, ownerPk, blinding, spendingKey. The Merkle
+ * proof is re-fetched at spend time.
  */
 import type { ZkNote, ScanCommitment } from '../../../protocol/types';
 import { tryDecryptNote } from '../../../protocol/note/NoteDecryptor';
-import { toHex } from '../../../foundation/encoding/hex';
+import { assertSecretKeyBytes } from '../../../foundation/crypto/keyGuards';
+import { toHex, isHexOfLength } from '../../../foundation/encoding/hex';
+import { ENCRYPTED_MEMO_SIZE } from '../../../protocol/memo/EncryptedMemo';
+import { isValidLeafIndex } from '../../../protocol/spend/coinSelection';
 
 /** Current backup format version. Bumped only if the entry shape changes. */
 export const NOTE_BACKUP_VERSION = 1 as const;
 
-/**
- * One note in a closed backup — public data only. Field names are short but not
- * cryptic; readability matters more than density in a file (unlike the QR path).
- */
+/** One note in a closed backup — public data only. */
 export interface NoteBackupEntry {
     /** 0x-prefixed 32-byte LE commitment hex. */
     commitmentHex: string;
@@ -138,6 +131,11 @@ export function importNotesFromBackup(
     entries: NoteBackupEntry[],
     keys: BackupImportKeys
 ): ZkNote[] {
+    // A bad KEY throws; a bad ENTRY is skipped below by failing to decrypt.
+    // Without this split, a truncated viewing key returns an empty array —
+    // indistinguishable from a backup that holds nobody's notes.
+    assertSecretKeyBytes(keys.viewingSecretKey, 'importNotesFromBackup: viewingSecretKey');
+
     const out: ZkNote[] = [];
     for (const entry of entries) {
         const commitment: ScanCommitment = {
@@ -166,9 +164,19 @@ export function importNotesFromBackup(
 function isEntry(value: unknown): value is NoteBackupEntry {
     if (typeof value !== 'object' || value === null) return false;
     const e = value as Record<string, unknown>;
-    if (typeof e['commitmentHex'] !== 'string' || e['commitmentHex'].length === 0) return false;
-    if (typeof e['encryptedMemo'] !== 'string' || e['encryptedMemo'].length === 0) return false;
-    if ('leafIndex' in e && e['leafIndex'] !== undefined && typeof e['leafIndex'] !== 'number') {
+
+    // Exact shapes, not "non-empty string": a loose check admits a 4-byte
+    // commitment, a truncated memo, or NaN as a tree position. Same shapes
+    // `openPaymentSlip` checks for the same values.
+    if (!isHexOfLength(e['commitmentHex'], 32)) return false;
+    if (!isHexOfLength(e['encryptedMemo'], ENCRYPTED_MEMO_SIZE)) return false;
+    if (e['leafIndex'] !== undefined && !isValidLeafIndex(e['leafIndex'] as number)) return false;
+
+    // Spend status is copied VERBATIM into the vault, so a truthy non-boolean
+    // like `spent: "no"` would mark a spendable note as spent and hide funds.
+    // Optional: an older backup simply omits both.
+    if (e['spent'] !== undefined && typeof e['spent'] !== 'boolean') return false;
+    if (e['spentAt'] !== undefined && e['spentAt'] !== null && typeof e['spentAt'] !== 'number') {
         return false;
     }
     return true;

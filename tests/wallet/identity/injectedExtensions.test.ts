@@ -81,9 +81,7 @@ describe('connectInjectedExtension', () => {
 
     it('names hasInjectedExtensions in the error, so the fix is actionable', async () => {
         delete globals.window;
-        await expect(connectInjectedExtension('talisman')).rejects.toThrow(
-            /hasInjectedExtensions/
-        );
+        await expect(connectInjectedExtension('talisman')).rejects.toThrow(/hasInjectedExtensions/);
     });
 
     it('rejects rather than throwing synchronously', () => {

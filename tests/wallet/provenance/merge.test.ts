@@ -8,10 +8,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { mergeProvenance, outranks } from '../../../src/wallet/provenance/index';
-import type {
-    NoteProvenanceRecord,
-    ProvenanceSource,
-} from '../../../src/wallet/provenance/index';
+import type { NoteProvenanceRecord, ProvenanceSource } from '../../../src/wallet/provenance/index';
 
 function record(over: Partial<NoteProvenanceRecord> = {}): NoteProvenanceRecord {
     return {

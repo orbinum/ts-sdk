@@ -38,9 +38,17 @@ export type { OrbinumClientConfig };
  * const stats = await client.privacy.getPoolStats();
  * console.log('root:', stats.merkleRoot, 'leaves:', stats.commitmentCount);
  *
- * // Shield tokens (with a SubstrateSigner)
+ * // Shield tokens (with a SubstrateSigner). `NoteBuilder.build` produces the
+ * // commitment and the 180-byte memo together — both are required, and a note
+ * // shielded without a valid memo is unrecoverable.
+ * const note = await NoteBuilder.build({ value: 1000n, assetId: 1n, ownerPk });
  * const result = await client.shieldedPool.shield(
- *   { assetId: 1, amount: 1000n, commitment: '0xabc...' },
+ *   {
+ *     assetId: 1,
+ *     amount: note.value,
+ *     commitment: note.commitmentHex,
+ *     encryptedMemo: Uint8Array.from(note.memo),
+ *   },
  *   signer,
  * );
  * console.log('tx ok:', result.ok, 'block:', result.blockHash);

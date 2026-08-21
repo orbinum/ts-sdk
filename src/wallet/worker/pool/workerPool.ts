@@ -33,8 +33,19 @@ function mergeResults(results: DecryptBatchResult[]): DecryptBatchResult {
         tagFiltered: results.reduce((sum, r) => sum + r.tagFiltered, 0),
         selfMatched: results.reduce((sum, r) => sum + r.selfMatched, 0),
         pairwiseMatched: results.reduce((sum, r) => sum + r.pairwiseMatched, 0),
+        sentNotes: results.flatMap((r) => r.sentNotes ?? []),
+        // Deduped: slices run in parallel, so the same change note cannot be
+        // seen twice, but two different ones may name the same recipient.
+        learnedRecipients: [...new Set(results.flatMap((r) => r.learnedRecipients ?? []))],
+        unmatchedSent: results.flatMap((r) => r.unmatchedSent ?? []),
+        sealedBookEntries: [...new Set(results.flatMap((r) => r.sealedBookEntries ?? []))],
         maxSelfEphIndex: results.reduce<number | null>(
             (max, r) => (r.maxSelfEphIndex === null ? max : Math.max(max ?? -1, r.maxSelfEphIndex)),
+            null
+        ),
+        maxOutgoingEphIndex: results.reduce<number | null>(
+            (max, r) =>
+                r.maxOutgoingEphIndex == null ? max : Math.max(max ?? -1, r.maxOutgoingEphIndex),
             null
         ),
     };

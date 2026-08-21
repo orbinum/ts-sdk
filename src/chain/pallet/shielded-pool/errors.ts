@@ -1,16 +1,14 @@
 /**
  * Classification of shielded-pool failures out of raw chain errors.
  *
- * These are pallet vocabulary, not app policy: the strings come from the
- * runtime's error variants, and what each one MEANS for a wallet — resync the
- * vault, purge a note — is protocol knowledge. A consumer without these treats
- * a ghost note as a generic failure and leaves the unspendable note in place.
+ * Pallet vocabulary, not app policy. The strings are the runtime's error
+ * variants, and what each MEANS for a wallet — resync, purge a note, retry — is
+ * protocol knowledge: without it a ghost note reads as a generic failure and
+ * the unspendable note stays in the vault.
  *
- * The split with a host is deliberate. This module answers "what kind of
- * failure is this, and what should a wallet DO about it"; the words shown to a
- * person, in whatever language, belong to the host. Two wallets should agree
- * that `UnknownMerkleRoot` means "rescan and retry" while phrasing it however
- * they like.
+ * This module answers "what kind of failure, and what should a wallet DO"; the
+ * words a person reads belong to the host. Two wallets should agree that
+ * `UnknownMerkleRoot` means "rescan and retry" while phrasing it differently.
  */
 
 /**
@@ -54,11 +52,16 @@ export type PalletErrorKind =
     | 'unknown';
 
 /**
- * Every pallet error name this SDK knows, mapped to what it means for a wallet.
+ * Every `pallet-shielded-pool` error name this SDK classifies, plus the few it
+ * meets through the same path. An unlisted name degrades to `unknown`, so a
+ * runtime newer than this SDK loses the hint and nothing else.
  *
- * `NullifierAlreadySpent` is not a runtime variant — the SDK raises it from the
- * pre-flight nullifier check in `ops/spend/lifecycle`, worded to match the
- * pallet exactly so one situation produces one reaction however it was found.
+ * Three entries are not shielded-pool variants:
+ *   - `NullifierAlreadySpent` — raised by the SDK's own pre-flight check in
+ *     `ops/spend/lifecycle`, worded to match the pallet so one situation
+ *     produces one reaction however it was found;
+ *   - `InsufficientBalance` / `ExistentialDeposit` — the balances pallet,
+ *     reached through the same submit.
  */
 const ERROR_KINDS: Readonly<Record<string, PalletErrorKind>> = {
     // Notes and nullifiers
@@ -69,10 +72,10 @@ const ERROR_KINDS: Readonly<Record<string, PalletErrorKind>> = {
     UnknownMerkleRoot: 'stale-proof',
 
     // Amounts and fees
-    AmountTooSmall: 'amount',
     InvalidAmount: 'amount',
     InsufficientPoolBalance: 'amount',
     FeeTooLow: 'amount',
+    InsufficientPendingFees: 'amount',
 
     // Proofs
     InvalidProof: 'proof',
@@ -83,6 +86,7 @@ const ERROR_KINDS: Readonly<Record<string, PalletErrorKind>> = {
     InvalidAssetId: 'asset',
     AssetNotVerified: 'asset',
     AssetIdMismatch: 'asset',
+    AssetIdAlreadyExists: 'asset',
 
     // Request shape
     InvalidMemoSize: 'shape',
@@ -90,6 +94,7 @@ const ERROR_KINDS: Readonly<Record<string, PalletErrorKind>> = {
     TooManyInputsOrOutputs: 'shape',
     InvalidRecipient: 'shape',
     EmptyBatch: 'shape',
+    FeeRecipientUnavailable: 'shape',
 
     // Capacity
     MerkleTreeFull: 'capacity',

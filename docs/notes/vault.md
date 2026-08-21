@@ -10,7 +10,8 @@ station of a note's life.
 
 ## 1. What the vault holds
 
-Three stores, one contract (`VaultStorage`), split by concern:
+Four stores, one contract (`VaultStorage` — `NoteStorage` + `NullifierCache` +
+`TxHistoryStore`), split by concern:
 
 | Store           | Contents                                                           | Contract slice   |
 | --------------- | ------------------------------------------------------------------ | ---------------- |
@@ -94,7 +95,7 @@ The config record carries four things, one of which is a privacy control:
 
 ```
 {
-  v:                     4,          // schema version
+  v:                     5,          // schema version
   chainFingerprint:      genesis hash (lowercased)
   lastScannedLeafIndex:  scan cursor (ABSENT when cleared — see below)
   selfEphCounter:        next self-note ephemeral index
@@ -164,7 +165,12 @@ mismatch rule above catches any real conflict.
 
 - **Query the chain.** It is pure storage plus cache; reconciliation is the
   scanner's and the spend lifecycle's job.
-- **Store who you paid.** A change note's `sourcePk` is the recipient's
-  one-time stealth key, never their stable identifier.
+- **Store who you paid _in the clear_.** A change note's `sourcePk` carries the
+  recipient book — the recipient's stable viewing key, XOR-sealed under the
+  wallet's OUTGOING viewing key (`orbinum-recipient-book-v3`). It is what lets a
+  wallet restored from its seed name who it paid and re-issue a payment slip.
+  A holder of the incoming viewing key reads every amount and not one
+  counterparty; only the `ovk` opens the book. Before that, the field held the
+  recipient's one-time stealth key, which named nobody.
 - **Trust its own contents over the chain.** `markSpent`, purges and resets all
   flow _from_ chain observations _toward_ the vault.

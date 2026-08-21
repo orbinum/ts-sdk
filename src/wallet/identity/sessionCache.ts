@@ -1,22 +1,20 @@
 /**
  * Caching a derived privacy identity between sessions.
  *
- * Without this the user signs on every launch, and on Substrate that is worse
- * than an annoyance: sr25519 signatures are randomised, so a second signature
- * over the same message yields a DIFFERENT key and a different vault. The cache
- * is what makes the identity stable across restarts.
+ * Not just to skip a prompt: sr25519 signatures are RANDOMISED, so signing the
+ * same message twice yields a different key and a different vault. The cache is
+ * what makes a Substrate identity stable across restarts at all.
  *
- * The cached value is encrypted at rest under a device-resident key the host
- * supplies. That key must be non-extractable where the platform can do it (a
- * WebCrypto `CryptoKey` with `extractable: false`), so a storage dump, a disk
- * image or a synced profile does not expose the spending key.
+ * Encrypted at rest under a device key the host supplies, non-extractable where
+ * the platform allows it, so a storage dump or a synced profile exposes nothing.
  *
- * Threat-model limit, stated honestly: code running in the same context can
- * still call decrypt. That boundary is not defendable from here. It is a strict
- * improvement over storing the key in the clear.
+ * Threat-model limit, stated plainly: code in the same context can still call
+ * decrypt. That boundary is not defendable from here — this is a strict
+ * improvement over storing the key in the clear, not a guarantee.
  */
 import { encryptJson, decryptJson } from '../vault/index';
 import { canonicalAccountId } from '../../protocol/keys/accountIdentity';
+import type { IdentityVersion } from './vaultName';
 import type { SecretStore } from './secretStore';
 
 const KEY_PREFIX = 'orbinum_sk_';
@@ -39,21 +37,25 @@ function isEnvelope(value: unknown): value is EncryptedSessionEnvelope {
 }
 
 /**
- * Storage key for one cached identity.
+ * Storage key for one cached identity — same three parts as the vault name, for
+ * the same reason (see `vaultName`).
  *
- * Scoped by chainId because the chain is PART of the identity: the spending key
- * is derived with `info = "orbinum-sk-v2:{chainId}:{account}"`, so one wallet
- * yields a different key per network. A key shared across networks would restore
- * one network's identity into another and show an empty vault with nothing to
- * explain it.
- *
- * The account half goes through `canonicalAccountId` for the same reason: it has
- * to match what the derivation keys by, or one identity ends up filed under two
- * names. An SS58 address re-listed under another network prefix is the common
- * way that happens — same key, different vault, orphaned notes.
+ * The chain is PART of the identity: the derivation's `info` carries the chain
+ * id, so one wallet yields a different key per network. The account goes through
+ * `canonicalAccountId` so this matches what the derivation keys by — an address
+ * re-listed under another SS58 prefix would otherwise file one identity under
+ * two names.
  */
-export function sessionCacheKey(address: string, chainId: number): string {
-    return `${KEY_PREFIX}${chainId}_${canonicalAccountId(address)}`;
+export function sessionCacheKey(
+    address: string,
+    chainId: number,
+    version: IdentityVersion = 'v3'
+): string {
+    // Same rule as the vault name, and the same placement: the marker goes
+    // BEFORE the account, so no address can spell its way into another
+    // version's slot.
+    const marker = `${version}_`;
+    return `${KEY_PREFIX}${marker}${chainId}_${canonicalAccountId(address)}`;
 }
 
 export interface SessionCacheDeps {

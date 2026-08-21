@@ -8,7 +8,11 @@
  */
 import { describe, it, expect } from 'vitest';
 import type { ZkNote } from '../../../../src/protocol/types';
-import { upsertNote, applyBatch, removeByCommitment } from '../../../../src/wallet/vault/notes/merge';
+import {
+    upsertNote,
+    applyBatch,
+    removeByCommitment,
+} from '../../../../src/wallet/vault/notes/merge';
 
 const note = (commitmentHex: string, over: Partial<ZkNote> = {}) =>
     ({ commitmentHex, spent: false, spentAt: null, value: 100n, ...over }) as ZkNote;

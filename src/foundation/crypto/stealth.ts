@@ -1,3 +1,24 @@
+/**
+ * Stealth addresses — a one-time owner key per note, from a shared secret.
+ *
+ * A recipient publishes ONE privacy address and every payment to it commits to
+ * a DIFFERENT owner key, so an observer cannot group two notes as belonging to
+ * the same person. Both sides reach the same value from opposite directions:
+ * the sender from the ECDH secret it just sealed the memo with, the recipient
+ * from the same secret recovered out of that memo.
+ *
+ * The whole scheme rests on one identity, which is what makes it work with an
+ * UNMODIFIED circuit:
+ *
+ *   BabyPbk(stealthSk).Ax === deriveStealthOwnerPk(sharedSecret, ownerPk, point)
+ *
+ * The circuit already checks that a spender's key derives the commitment's
+ * owner. Because the stealth scalar is added on both sides — to the base point
+ * on one, to the spending key on the other — that check passes unchanged.
+ *
+ * The salt is the recipient's GLOBAL ownerPk, so a shared secret reused across
+ * two recipients still yields different stealth keys.
+ */
 import { sha256 } from '@noble/hashes/sha2.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { mulPointEscalar, Base8, addPoint } from '@zk-kit/baby-jubjub';

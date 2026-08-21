@@ -1,3 +1,14 @@
+/**
+ * Witness assembly for the 2-in/2-out private-transfer circuit.
+ *
+ * Pure marshalling: bigints and hex in, decimal strings the prover accepts out.
+ * Nothing here VALIDATES the witness — the circuit is what enforces every
+ * constraint, and a caller that assembles an inconsistent one gets a proof
+ * failure rather than a wrong proof.
+ *
+ * Always two inputs and two outputs. A single-note spend pads slot B with a
+ * dummy (see `buildDummyTransferInput`), because the circuit's shape is fixed.
+ */
 import {
     CircuitType,
     generateProof,
@@ -45,12 +56,21 @@ export interface PrivateTransferProofInputs {
     merkleRoot: string;
     inputs: [TransferInputNote, TransferInputNote];
     outputs: [TransferOutputNote, TransferOutputNote];
-    /** Gasless fee in planck (default 0n). Must satisfy: input_sum == output_sum + fee */
+    /**
+     * Gasless fee in planck (default 0n).
+     *
+     * The circuit constrains `input_sum == output_sum + fee`. Nothing here
+     * checks it — the caller balances the amounts (`transferNotes` does, before
+     * proving) and an unbalanced witness fails at proof time.
+     */
     fee?: bigint;
 }
 
 /**
  * Generate a Groth16 proof for a PrivateTransfer operation.
+ *
+ * The merkle root arrives LITTLE-ENDIAN hex and is converted here; passing it
+ * big-endian yields a root the circuit cannot match against the paths.
  */
 export async function generateTransferProof(
     params: PrivateTransferProofInputs,

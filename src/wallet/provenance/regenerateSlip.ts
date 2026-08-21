@@ -1,19 +1,14 @@
 /**
  * Re-issuing a payment slip from recovered history.
  *
- * A slip is sealed toward the RECIPIENT, so the sender keeps no copy they can
- * decrypt — losing the local record used to mean the recipient could never be
- * handed one again, and had to fall back to a full chain scan.
+ * A slip is sealed toward the RECIPIENT, so the sender never held a readable
+ * copy. But a slip carries only PUBLIC facts — commitment, memo, leaf index —
+ * so once those are looked up on chain the sender can seal a NEW envelope with
+ * the same contents, without ever reading the memo. Different bytes (fresh
+ * ephemeral and nonce), identical fields on opening.
  *
- * That stops being true once the facts are looked up on chain. A slip contains
- * only the commitment, the memo, and the leaf index — all public — so the
- * sender can seal a NEW envelope carrying the same facts without ever reading
- * the memo. The result is not the original bytes (a fresh ephemeral key and
- * nonce make every envelope different) but it opens to exactly the same fields.
- *
- * What this does NOT do is let anyone else re-issue a slip: it needs the
- * recipient's viewing key, which the sender only holds because they were given
- * a privacy address in the first place.
+ * Not a capability anyone else gains: it needs the recipient's viewing key,
+ * which the sender holds only because they were given a privacy address.
  */
 import { sealPaymentSlip, encodePaymentSlip } from '../../protocol/memo/PaymentSlip';
 import { ENCRYPTED_MEMO_SIZE } from '../../protocol/memo/EncryptedMemo';
@@ -24,25 +19,20 @@ import type { NoteFacts } from '../../protocol/types';
 /**
  * Seal a fresh `orbslip1:` slip for a transfer recovered from history.
  *
- * ## Why the facts are checked here
+ * VALIDATES ON THIS SIDE OF THE WIRE. The facts crossed a trust boundary (they
+ * were looked up by commitment) and sealing them produces an AUTHENTICATED
+ * envelope: a valid MAC proves the sender knew the recipient's viewing key, not
+ * that the server which answered was honest. The recipient's wallet then renders
+ * those fields with the authority of a decrypted slip, on a device that cannot
+ * tell where they came from.
  *
- * They were looked up by commitment, so they crossed a trust boundary, and
- * sealing them produces an AUTHENTICATED envelope. A valid MAC proves the
- * sender knew the recipient's viewing key — not that they are honest, and not
- * that whatever server answered the lookup was. The recipient's wallet then
- * renders those fields with the authority of a decrypted slip, on a device
- * where nothing explains which server supplied them.
- *
- * So the check belongs on THIS side of the wire: a value that slipped through
- * would fail on the recipient's device, or worse, not fail at all.
- *
- * Throws on a malformed commitment, memo or leaf index — those are the note's
- * identity, and a slip carrying a wrong one is not a degraded slip but a broken
- * one. `txHash` is informational, so it is DROPPED rather than fatal.
+ * Throws on a malformed commitment, memo or leaf index — they are the note's
+ * identity, and a slip carrying a wrong one is broken, not degraded. `txHash` is
+ * informational, so it is DROPPED instead.
  *
  * @param facts               public facts of the sent note, looked up by commitment
  * @param recipientIvkPacked  32-byte packed viewing key from the recipient's privacy address
- * @param txHash              the transfer's hash, when known — informational, shown as proof of payment
+ * @param txHash              the transfer's hash, when known — informational
  */
 export function regeneratePaymentSlip(
     facts: NoteFacts,
@@ -65,10 +55,8 @@ export function regeneratePaymentSlip(
         commitmentHex: facts.commitmentHex,
         encryptedMemo: facts.encryptedMemo,
         ...(facts.leafIndex !== undefined ? { leafIndex: facts.leafIndex } : {}),
-        // Rendered as an explorer link by the recipient, where an unconstrained
+        // The recipient renders this as an explorer link, so an unconstrained
         // string is a URL injection wearing the authority of a decrypted slip.
-        // Dropped rather than fatal: the slip still rebuilds the note, which is
-        // the part that matters.
         ...(isHexOfLength(txHash, 32) ? { txHash } : {}),
     });
     return encodePaymentSlip(envelope);

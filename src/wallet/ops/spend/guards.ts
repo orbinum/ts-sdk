@@ -18,12 +18,12 @@ import type { PrivacyMerkleProof } from '../../../chain/rpc/types/index';
 /**
  * Whether a note still matches the commitment stored on chain.
  *
- * The circuit ignores the ownerPk it is passed and rebuilds each input
- * commitment from BabyPbk(spending_key).Ax. If a note's stored spendingKey,
- * value, assetId or blinding drift from what was committed, the recomputed root
- * differs and witness generation dies on the Merkle constraint. Checking here
- * costs one EC multiplication plus a Poseidon hash — around 0.13 ms — against
- * seconds of proving that would fail anyway, and it names the real problem.
+ * The circuit ignores the `ownerPk` it is handed and rebuilds each input
+ * commitment from `BabyPbk(spending_key).Ax`, so a drifted spendingKey, value,
+ * assetId or blinding kills witness generation on the Merkle constraint.
+ *
+ * ~0.13 ms here — one EC mul plus a Poseidon hash — against seconds of proving
+ * that fails anyway, and this one names the note.
  */
 export function noteMatchesCommitment(note: ZkNote): boolean {
     try {
@@ -35,11 +35,10 @@ export function noteMatchesCommitment(note: ZkNote): boolean {
         );
         return recomputed === bytesToBigintLE(fromHex(note.commitmentHex));
     } catch {
-        // A commitment that is not parseable hex cannot match anything, so the
-        // answer is simply "no". Throwing here would escape `checkSpendableInputs`
-        // — which every caller treats as returning a result rather than raising —
-        // and turn a corrupt stored note into an unhandled rejection instead of a
-        // message naming the note.
+        // Unparseable hex matches nothing, so the answer is "no". Throwing would
+        // escape `checkSpendableInputs`, which every caller treats as returning
+        // a result — turning a corrupt note into an unhandled rejection instead
+        // of a message naming it.
         return false;
     }
 }

@@ -308,6 +308,36 @@ describe('ShieldedPoolPrecompile.estimateShieldGas', () => {
         expect(args?.from).toBe('0xfrom');
         expect(args?.to).toBe(PRECOMPILE_ADDR.SHIELDED_POOL);
     });
+
+    it('manda el VALUE, o la estimación revierte siempre', async () => {
+        // `shield` es payable: el precompile toma el importe de `msg.value` y
+        // rechaza el cero antes de mirar la calldata. Estimar sin él pide al
+        // nodo una llamada que no puede tener éxito, así que la estimación
+        // falla incluso cuando la transferencia real funcionaría.
+        const evm = mockEvm();
+
+        await new ShieldedPoolPrecompile(evm).estimateShieldGas(SHIELD_PARAMS, '0xfrom');
+
+        const args = vi.mocked(evm.estimateGas).mock.calls[0]?.[0];
+        expect(BigInt(args?.value ?? '0x0')).toBe(SHIELD_PARAMS.amount);
+    });
+
+    it('y el value coincide con el que manda `shield`', async () => {
+        // Las dos rutas tienen que medir la MISMA llamada; si divergen, la
+        // estimación deja de describir la transferencia que se va a enviar.
+        const evm = mockEvm();
+        const sp = new ShieldedPoolPrecompile(evm);
+        let sentValue: bigint | undefined;
+
+        await sp.shield(SHIELD_PARAMS, async (tx) => {
+            sentValue = tx.value;
+            return '0xhash';
+        });
+        await sp.estimateShieldGas(SHIELD_PARAMS, '0xfrom');
+
+        const args = vi.mocked(evm.estimateGas).mock.calls[0]?.[0];
+        expect(BigInt(args?.value ?? '0x0')).toBe(sentValue);
+    });
 });
 
 describe('ShieldedPoolPrecompile.estimatePrivateTransferGas', () => {

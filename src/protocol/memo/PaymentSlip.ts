@@ -1,54 +1,52 @@
 /**
- * Payment slip — a note the SENDER of a private transfer hands the RECIPIENT so
- * they rebuild it without scanning the pool.
+ * Payment slip — what the SENDER of a private transfer hands the RECIPIENT so
+ * they rebuild their note without scanning the pool.
  *
  * ## What it carries
  *
- * The minimum a recipient needs to locate and reconstruct their note, all of it
- * already PUBLIC on-chain: the recipient output's `commitmentHex`, its
- * `encryptedMemo`, and (optionally) its `leafIndex`. The recipient opens the memo
- * with their own viewing key (`tryDecryptNote`), which decrypts the fields,
- * derives the stealth spending key, and verifies the commitment — so the slip
- * grants no spend power and reveals nothing the chain does not already hold.
+ * Only what is already PUBLIC on chain: the recipient output's `commitmentHex`,
+ * its `encryptedMemo`, and optionally its `leafIndex`. The recipient opens that
+ * memo with their own viewing key (`tryDecryptNote`), which derives the stealth
+ * spending key and verifies the commitment — so a slip grants no spend power
+ * and reveals nothing the chain does not already hold.
  *
  * ## Why it is still encrypted
  *
- * The slip's fields are public, but *pairing* them off-chain leaks a correlation:
- * whoever intercepts a plaintext slip learns that this recipient is expecting this
- * payment. So the slip is sealed toward the recipient with the same ECDH the memo
- * uses. The ephemeral public key travels in the clear inside the envelope; the
- * recipient runs ECDH with their `ivsk` to recover the shared secret, derives the
- * slip key, and opens it. An interceptor without the recipient's `ivsk` sees only
- * random bytes.
+ * The fields are public, but PAIRING them off-chain leaks a correlation:
+ * whoever intercepts a plaintext slip learns this recipient expects this
+ * payment. So it is sealed toward them with the same ECDH the memo uses.
  *
  * ## What the MAC does NOT prove
  *
- * It proves the sender knew the recipient's viewing key — nothing about the
- * fields being true. Anyone handed a privacy address can seal a slip, so what
- * comes out of `openPaymentSlip` is attacker-chosen data that merely arrived
- * authenticated, and past that point it is indistinguishable from a field the
- * wallet scanned itself. Hence the shape checks there, at the boundary.
+ * That the sender knew the recipient's viewing key — nothing about the fields
+ * being TRUE. Anyone handed a privacy address can seal a slip, so what comes
+ * out of `openPaymentSlip` is attacker-chosen data that merely arrived
+ * authenticated, indistinguishable past that point from a field the wallet
+ * scanned itself. Hence the shape checks at that boundary.
  *
- * A slip that lies about the note itself is caught further in, by two
- * independent defences either of which suffices: the commitment is mixed into
- * the memo's encryption key (`deriveEncryptionKey`), and `tryDecryptNote`
- * recomputes the commitment from the decrypted plaintext.
+ * A slip that lies about the note is caught further in by two independent
+ * defences, either sufficient: the commitment is mixed into the memo's
+ * encryption key (`deriveEncryptionKey`), and `tryDecryptNote` recomputes the
+ * commitment from the decrypted plaintext.
  *
  * ## Format
  *
- * Envelope bytes: `ephPk(32) || nonce(8) || ciphertext || MAC(16)`.
+ * Envelope: `ephPk(32) || nonce_suffix(8) || ciphertext || MAC(16)`. The nonce
+ * is 12 bytes; its constant `"SLP1"` prefix is domain separation and is not
+ * transmitted.
+ *
  * Cipher: ChaCha20-Poly1305, `slipKey = HKDF(sharedSecret, info="orbinum-payment-slip-v1")`.
- * The wire string is `orbslip1:{base64url(envelope)}:{checksum}` (see
- * `encodePaymentSlip` / `decodePaymentSlip` below).
+ * Wire string: `orbslip1:{base64url(envelope)}:{checksum}`.
  */
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { randomBytes } from '@noble/ciphers/utils.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
-import { packPoint, unpackPoint } from '@zk-kit/baby-jubjub';
+import { packPoint } from '@zk-kit/baby-jubjub';
 import { fastMulBase, fastMulPoint } from '../../foundation/crypto/bjj-fast';
 import { bigintTo32Le, bytesToBigintLE } from '../../foundation/encoding/bytes';
-import { toHex, isHexOfLength } from '../../foundation/encoding/hex';
+import { unpackUsableViewingKey } from '../../foundation/crypto/bjj';
+import { toHex, isHexOfLength, fromHex } from '../../foundation/encoding/hex';
 import { base64UrlEncode, base64UrlDecode } from '../../foundation/encoding/base64url';
 import { bytesToBjjScalar, ENCRYPTED_MEMO_SIZE } from './EncryptedMemo';
 import { isValidLeafIndex } from '../spend/coinSelection';
@@ -75,6 +73,19 @@ const NONCE_SUFFIX_SIZE = 8;
  * level M. A new field eats that margin before it eats this one.
  */
 const MAX_SLIP_ENVELOPE_SIZE = 4096;
+
+/**
+ * Characters a single QR code holds at error-correction level M.
+ *
+ * Not a limit this module enforces — a slip is a string, and nothing here
+ * refuses a long one. It is the bound a TEST checks the wire format against,
+ * because a slip that outgrows a QR stops being scannable without failing:
+ * the encoder still produces it and no error names the reason.
+ *
+ * Lived in the note-transfer codec until that was removed; kept here because
+ * this is the format that has to fit.
+ */
+export const QR_SINGLE_CODE_MAX_CHARS = 1800;
 
 // ─── Fields ──────────────────────────────────────────────────────────────────
 
@@ -126,7 +137,10 @@ export function sealPaymentSlip(
             `PaymentSlip: recipientIvk must be 32 bytes, got ${recipientIvkPacked.length}`
         );
     }
-    const ivkPoint = unpackPoint(bytesToBigintLE(recipientIvkPacked));
+    // Low-order keys refused, not just malformed ones: a point from the
+    // cofactor-8 subgroup collapses the ECDH to at most 8 secrets, and the
+    // sealed slip then opens by trying them — no key required.
+    const ivkPoint = unpackUsableViewingKey(bytesToBigintLE(recipientIvkPacked));
     if (!ivkPoint) throw new Error('PaymentSlip: invalid recipient viewing public key');
 
     // A fresh ephemeral keypair PER SLIP, never a caller-supplied one.
@@ -178,7 +192,10 @@ export function openPaymentSlip(
     if (envelope.length > MAX_SLIP_ENVELOPE_SIZE) return null;
     try {
         const ephPkPacked = envelope.subarray(0, EPH_PK_SIZE);
-        const ephPkPoint = unpackPoint(bytesToBigintLE(ephPkPacked));
+        // Same gate `sealPaymentSlip` applies on the way out — a slip arrives
+        // from whoever hands it over, and a cofactor-8 ephPk would collapse the
+        // shared secret to one of eight enumerable values.
+        const ephPkPoint = unpackUsableViewingKey(bytesToBigintLE(ephPkPacked));
         if (!ephPkPoint) return null;
 
         // sharedSecret = [ivsk]·ephPk — the same value the sender computed.
@@ -258,14 +275,12 @@ export function decodePaymentSlip(text: string): Uint8Array | null {
     const checksum = rest.slice(sep + 1);
     if (slipChecksum(payload) !== checksum) return null;
     try {
-        const hex = base64UrlDecode(payload);
-        const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
-        if (clean.length % 2 !== 0) return null;
-        const bytes = new Uint8Array(clean.length / 2);
-        for (let i = 0; i < bytes.length; i++) {
-            bytes[i] = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
-        }
-        return bytes;
+        // `fromHex`, never a local decode loop. A bare `parseInt` accepts a
+        // valid prefix and drops the rest, so near-hex decodes into byte 0
+        // instead of failing — which is the behaviour `fromHex` documents
+        // itself as existing to prevent. Two decoders with different rules is
+        // how one of them ends up wrong.
+        return fromHex(base64UrlDecode(payload));
     } catch {
         return null;
     }

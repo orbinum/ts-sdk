@@ -29,15 +29,33 @@ Baby JubJub is a twisted Edwards curve defined **over the BN254 scalar field**. 
 Wallet (EVM: EIP-712 typed data · Substrate: VRF sign)
   └─ signature over "orbinum-spending-key-v2\n{chainId}\n{canonicalAccountId(address)}"
         └─ HKDF-SHA256(signature, info="orbinum-sk-v2:{chainId}:{account}")
-              └─ master bytes (32)
-                    └─ spending_key = master mod BABYJUB_SUBORDER  (BJJ scalar)
-                          └─ owner_pk = spending_key · G   (BJJ point, Ax in the commitment)
+              └─ master bytes (32) — the root secret every branch hangs off
+                    ├─ spending_key = HKDF(master, "orbinum-spend-v3") mod BABYJUB_SUBORDER
+                    │     └─ owner_pk = spending_key · G  (BJJ point, Ax in the commitment)
+                    ├─ ivsk         = HKDF(master, "orbinum-ivk-v3")    (opens incoming memos)
+                    └─ ovk          = HKDF(master, "orbinum-ovk-v3")    (reads what was SENT)
 ```
 
 The `info` string binds the key to `(chainId, account)`: one wallet yields a
 different spending key per network. Derivation v1 (no chainId) was removed in
 0.20.0 — the version inside the HKDF `info` keeps v2 keys disjoint from
 anything v1 produced.
+
+The `v2` in the message and the `v3` in the branches are **two different
+versions and neither is stale**: `v2` versions the string the user signs (it
+never changed), `v3` versions the branches below the master. Identity v2 —
+where `ivsk` descended from the spending key, leaving no viewing key that could
+be handed out — was removed the same way v1 was; `IdentityVersion` admits only
+`'v3'`. Details in [identity.md](./identity.md) §1.
+
+Two consequences of the branches being siblings rather than a chain:
+
+- **Spending a received note needs two of them.** The scalar that spends is
+  `deriveStealthSk(sharedSecret, ownerPk, spendingKey)`, and the shared secret
+  comes from the _viewing_ key. A spending key alone decrypts nothing.
+- **Recovery needs the root**, not the spending key: the outgoing branch is
+  unreachable from the spending branch, so "back up your key" means "back up
+  your master bytes".
 
 The spending key never leaves the SDK. Only its public counterpart (`owner_pk.Ax`) is embedded in the note commitment. On Substrate the signature is **randomised** (sr25519), so the derived identity must be cached rather than re-derived — see [identity.md](./identity.md) §2.
 
@@ -170,7 +188,91 @@ All numeric fields use little-endian hex encoding to match the BN254 field eleme
 
 ---
 
-## 5. Summary
+## 5. Stealth Addresses
+
+A recipient publishes **one** privacy address, and every payment to it commits
+to a **different** owner key. Without this, two payments to the same address
+carry the same `owner_pk` in the clear and an observer groups them as one
+person's — the memo stays private and the ownership graph does not.
+
+Both sides reach the same one-time key from opposite directions, from the ECDH
+secret the memo already established:
+
+```
+sender                                     recipient
+  sharedSecret from the ephemeral it            sharedSecret recovered from the
+  sealed the memo with                          memo's ephPk and their ivsk
+       │                                             │
+       ▼                                             ▼
+stealthScalar = HKDF(sharedSecret, salt = owner_pk_LE, info = "orbinum-stealth-v1")
+       │                                             │
+       ▼                                             ▼
+  stealth_owner_pk =                            stealth_sk =
+    (stealthScalar · G + ownerPkPoint).Ax         stealthScalar + spending_key
+```
+
+The identity that makes it work with an **unmodified circuit**:
+
+```
+BabyPbk(stealth_sk).Ax === deriveStealthOwnerPk(sharedSecret, owner_pk, point)
+```
+
+The circuit already proves that the spender's key derives the commitment's
+owner. Because the same scalar is added on both sides — to the base point on
+one, to the spending key on the other — that check passes untouched. No new
+constraint, no new public input.
+
+The **salt is the recipient's global `owner_pk`**, so a shared secret reused
+across two recipients still yields different stealth keys.
+
+Practical consequence for the vault: a received note's stored `spendingKey` is
+the _stealth_ scalar, not the wallet's global one, and it is a value a rescan
+re-derives from the memo. Anything built _from_ a received note — a change note
+in particular — must use the wallet's **global** keys instead
+([spending.md](./spending.md) §4).
+
+---
+
+## 6. Payment Slips
+
+A slip (`orbslip1:<base64url>:<checksum>`) is what a **sender** hands a
+**recipient** so they rebuild their note without scanning the pool.
+
+### What it carries
+
+Only what is already public on chain: the recipient output's `commitment`, its
+`encryptedMemo`, and optionally its `leafIndex`. The recipient opens that memo
+with their own viewing key, which derives the stealth spending key and verifies
+the commitment. **A slip grants no spending power** and reveals nothing the
+chain does not already hold.
+
+### Why it is encrypted anyway
+
+The fields are public; _pairing_ them off-chain is not. Whoever intercepts a
+plaintext slip learns that this recipient expects this payment — so it is
+sealed toward them with the same ECDH the memo uses, under a separate domain:
+
+```
+envelope = ephPk(32) ‖ nonce_suffix(8) ‖ ciphertext ‖ MAC(16)
+nonce    = "SLP1" ‖ nonce_suffix          (the prefix is not transmitted)
+slipKey  = HKDF(sharedSecret, info = "orbinum-payment-slip-v1")
+```
+
+### What the MAC does NOT prove
+
+That the fields are **true**. It proves only that whoever sealed the slip knew
+the recipient's viewing key — and anyone handed a privacy address knows that.
+What comes out of `openPaymentSlip` is attacker-chosen data that merely arrived
+authenticated.
+
+Two independent defences catch a lying slip, either one sufficient: the
+commitment is mixed into the memo's encryption key, and `tryDecryptNote`
+recomputes the commitment from the decrypted plaintext. A slip that names a
+note the sender does not own fails to open at all.
+
+---
+
+## 7. Summary
 
 ```
 EVM wallet (secp256k1)
@@ -189,7 +291,13 @@ Nullifier:
   Poseidon2(commitment, spending_key)
   └─ spending_key is secret → nullifier cannot be predicted from commitment alone
 
-Disclosure key (orbdisc:...):
-  └─ reveals preimage of commitment (value, asset_id, owner_pk, blinding)
-  └─ does NOT reveal spending_key, nullifier, or EVM address
+Stealth (per received note):
+  stealth_owner_pk = (HKDF(sharedSecret, salt=owner_pk) · G + ownerPkPoint).Ax
+  stealth_sk       = HKDF(sharedSecret, salt=owner_pk) + spending_key
+  └─ one-time owner per payment; the circuit verifies it unmodified
+
+The three shareable strings — none carries the spending key:
+  orbpriv3:...  owner_pk + ivk (public)  → so someone can pay you
+  orbslip1:...  commitment + memo (public, sealed) → so a payee rebuilds a note
+  orbdisc:...   preimage of commitment   → so an auditor verifies one note
 ```

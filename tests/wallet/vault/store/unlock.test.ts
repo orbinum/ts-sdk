@@ -20,7 +20,7 @@ import { createWalletSession } from '../../../../src/wallet/vault/session/Wallet
 import { buildConfig } from '../../../../src/wallet/vault/storage/config';
 import {
     reserveSelfEphIndex,
-    reservePairwiseIndex,
+    reserveOutgoingIndex,
 } from '../../../../src/wallet/vault/storage/ephemeralIndex';
 import { encryptNote } from '../../../../src/wallet/vault/notes/record';
 import { deriveVaultKey, deriveVaultBlindKey } from '../../../../src/wallet/vault/crypto/keys';
@@ -314,9 +314,11 @@ describe('VaultStore.unlock — ephemeral counters', () => {
         expect(await reserveSelfEphIndex(storage)).not.toBe(reservedMidFlight);
     });
 
-    it('does not roll back a pairwise reservation made during unlock', async () => {
+    it('does not roll back an outgoing reservation made during unlock', async () => {
+        // A rolled-back outgoing counter hands out an index already published,
+        // which republishes its ephPk and links the two payments in public.
         const { storage, key, session } = await openVault();
-        await reservePairwiseIndex(storage, '0xaabb');
+        await reserveOutgoingIndex(storage);
 
         const reopened = new VaultStore({ storage, session, notes: createNotesCache() });
         const slowUnlock = reopened.unlock(key, {
@@ -326,10 +328,10 @@ describe('VaultStore.unlock — ephemeral counters', () => {
             },
         });
         await new Promise((resolve) => setTimeout(resolve, 5));
-        const reservedMidFlight = await reservePairwiseIndex(storage, '0xaabb');
+        const reservedMidFlight = await reserveOutgoingIndex(storage);
         await slowUnlock;
 
-        expect(await reservePairwiseIndex(storage, '0xaabb')).not.toBe(reservedMidFlight);
+        expect(await reserveOutgoingIndex(storage)).not.toBe(reservedMidFlight);
     });
 });
 

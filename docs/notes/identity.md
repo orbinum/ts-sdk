@@ -29,12 +29,21 @@ wallet signs:  "⚠ {SPENDING_KEY_WARNING}\n\n
         │         what this signature creates, and stripping it changes the key)
         └─ HKDF(info = "orbinum-sk-v2:{chainId}:{account}") ──► master bytes (32)
                       │
-                      ├─ spending key   = master mod BABYJUB_SUBORDER   (owns notes)
+                      │   identity v3 — every branch is a SIBLING of the master,
+                      │   none descends from another:
+                      │
+                      ├─ spending key   = HKDF(master, "orbinum-spend-v3")  (moves funds)
                       │     └─ ownerPk  = BabyPbk(spendingKey).Ax
-                      ├─ viewing keys   = HKDF(LE32(spendingKey), "orbinum-ivk-v1")
-                      │                                            (opens memos)
-                      └─ vault keys     = HKDF(master, …)          (encrypts storage)
+                      ├─ ivsk           = HKDF(master, "orbinum-ivk-v3")    (opens incoming)
+                      │     └─ ivk      = packPoint(BJJ_mul(Base8, ivsk))
+                      ├─ ovk            = HKDF(master, "orbinum-ovk-v3")    (reads what was SENT)
+                      └─ vault keys     = HKDF(master, "orbinum-vault-key-v1" | "…-blind-v1")
 ```
+
+The `v2` in the signed message and in the HKDF `info` is **not stale**: it
+versions the MESSAGE the user signs, and that did not change. `IdentityVersion`
+versions the BRANCHES below it. Bumping the message version would force everyone
+to re-sign to reach an identity that is otherwise identical.
 
 Three properties of the derivation are protocol, not implementation detail:
 
@@ -53,6 +62,14 @@ Three properties of the derivation are protocol, not implementation detail:
 Derivation v1 (message `orbinum-spending-key-v1:<address>`, no chainId) was
 **removed** in 0.20.0. The version lives inside the HKDF `info`, so v2 keys are
 disjoint from anything v1 ever produced.
+
+Identity **v2** — where the viewing key descended from the spending key — was
+removed the same way, and for the same reason: while it was reachable, so was
+the shape that made a watch-only wallet impossible. `IdentityVersion` admits
+only `'v3'`, so the compiler refuses the rest, and `deriveIdentity` throws on
+anything else reaching it from JavaScript. Nothing migrates: a v2 note is
+committed on chain under a v2 `ownerPk`, so re-deriving the identity does not
+move it — holders unshield before the switch.
 
 ### The entropy guard
 
@@ -116,10 +133,16 @@ per route is what the resulting bytes are worth to the attacker.
 | EVM EIP-712         | the real identity, **if the user signs** | the domain and the `warning` field are rendered by the wallet and cannot be reworded — but no wallet verifies that `verifyingContract` matches the requesting origin. Visibility, not impossibility: it still depends on the user reading.                                                                    |
 | ed25519 (`signRaw`) | the real identity, if the user signs     | same as EVM: the message is fixed, so an identical request yields identical bytes. The in-text warning is the defense.                                                                                                                                                                                        |
 
-Capture is **all or nothing** — there is no view-only middle ground. Viewing
-keys derive _from_ the spending key, and the vault keys from the same master
-bytes, so one signature yields the entire tree: see, spend, and decrypt
-storage. Conversely the VRF route's "useless identity" is useless completely:
+Capture is **all or nothing** — and identity v3 does not change that. The
+branches are siblings rather than a chain, which is what makes a viewing key
+delegable to an auditor without handing over the spending key; but all of them
+hang off the same master bytes, so one captured signature still yields the
+entire tree: see, spend, read the payment graph, and decrypt storage. Splitting
+the branches solved delegation, not harvesting — the fix for harvesting has to
+come from outside the signature channel, and is not built. See
+[`IDENTITY_SECURITY.md`](../../IDENTITY_SECURITY.md).
+
+Conversely the VRF route's "useless identity" is useless completely:
 the attacker cannot even _see_ the real notes. And no route is silent — the
 wallet always prompts, with the signed warning rendered verbatim; the attack is
 phishing-with-consent, not extraction.

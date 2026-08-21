@@ -49,8 +49,10 @@ each. Two rules govern it:
   internals — the EVM ABI encoder, vault reset helpers, fast-mul variants — are
   exported **by name**, because a blanket splat once leaked 37 internal symbols
   into the public surface.
-- The surface is snapshot-checked: a reorganisation must end with **zero lost
-  exports** against the pre-move snapshot, on all three entry points.
+- A reorganisation must end with **zero lost exports** on all three entry
+  points. This one is enforced by review, not by a test: the barrel is compared
+  against the pre-move surface by hand, and nothing in CI would catch a
+  silently dropped `export`. A snapshot test is the obvious gap to close.
 
 ### Published subpaths
 

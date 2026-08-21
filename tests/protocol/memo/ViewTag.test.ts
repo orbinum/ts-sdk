@@ -8,15 +8,9 @@
  */
 import { describe, it, expect } from 'vitest';
 import { sha256 } from '@noble/hashes/sha2.js';
-import {
-    EncryptedMemo,
-    ENCRYPTED_MEMO_SIZE,
-} from '../../../src/protocol/memo/EncryptedMemo';
+import { EncryptedMemo, ENCRYPTED_MEMO_SIZE } from '../../../src/protocol/memo/EncryptedMemo';
 import { deriveViewTag } from '../../../src/protocol/memo/plaintext';
-import {
-    tryDecryptNote,
-    tryDecryptNoteVerbose,
-} from '../../../src/protocol/note/NoteDecryptor';
+import { tryDecryptNote, tryDecryptNoteVerbose } from '../../../src/protocol/note/NoteDecryptor';
 import { NoteBuilder } from '../../../src/protocol/note/NoteBuilder';
 import {
     deriveViewingSecretKey,

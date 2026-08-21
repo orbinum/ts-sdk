@@ -1,3 +1,17 @@
+/**
+ * Witness assembly for the unshield circuit — one note in, a public payout and
+ * an optional change note out.
+ *
+ * The only entry point here that BUILDS anything rather than marshalling it:
+ * a partial unshield needs a change note, and its blinding and commitment are
+ * computed here when the caller does not supply them. The blinding comes from
+ * a CSPRNG — it is the only unknown in `Poseidon4(value, assetId, ownerPk,
+ * blinding)` once an observer guesses the amount, so a predictable one makes
+ * the commitment brute-forceable.
+ *
+ * A total unshield has no change, and the circuit constrains its commitment to
+ * be exactly zero — not a commitment to a zero-value note.
+ */
 import {
     CircuitType,
     generateProof,

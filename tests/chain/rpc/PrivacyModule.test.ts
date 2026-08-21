@@ -63,12 +63,19 @@ describe('PrivacyModule.getMerkleProof', () => {
         expect(proof.treeId).toBeUndefined();
     });
 
-    it('acepta commitment hex como parámetro', async () => {
+    it('manda el índice tal cual, sin envolverlo', async () => {
+        // El nodo declara este parámetro `u32`. Un commitment hex lo rechaza la
+        // deserialización antes de mirar el árbol — para eso está
+        // `getMerkleProofByCommitment`, que sí toma string. El test anterior
+        // pasaba un hex contra un MOCK, así que fijaba lo contrario de lo que
+        // la cadena acepta.
         const substrate = makeSubstrate({
             privacy_getMerkleProof: { path: ['0xc'], leaf_index: 5, tree_depth: 32 },
         });
-        await new PrivacyModule(substrate).getMerkleProof('0xabc123');
-        expect(substrate.request).toHaveBeenCalledWith('privacy_getMerkleProof', ['0xabc123']);
+
+        await new PrivacyModule(substrate).getMerkleProof(5);
+
+        expect(substrate.request).toHaveBeenCalledWith('privacy_getMerkleProof', [5]);
     });
 });
 

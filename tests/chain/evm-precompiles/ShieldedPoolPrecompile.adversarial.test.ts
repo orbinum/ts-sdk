@@ -145,9 +145,7 @@ describe('values that cannot be encoded are refused, not truncated', () => {
     it('rejects a negative fee rather than encoding it as a huge uint', () => {
         // Two's-complement wraparound would encode -1 as 2^256-1, clearing every
         // fee floor the relay applies while the user believes they paid nothing.
-        expect(() =>
-            p().buildPrivateTransferCalldata({ ...TRANSFER_PARAMS, fee: -1n })
-        ).toThrow();
+        expect(() => p().buildPrivateTransferCalldata({ ...TRANSFER_PARAMS, fee: -1n })).toThrow();
     });
 
     it('rejects a fee that does not fit in a uint256', () => {

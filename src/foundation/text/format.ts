@@ -1,3 +1,16 @@
+/**
+ * Rendering on-chain amounts for people.
+ *
+ * Chain amounts are integers in the smallest unit — 18 decimals for ORB — and
+ * every one of these keeps them that way internally: BigInt arithmetic only, no
+ * float ever touches a balance. A `number` intermediate would silently lose
+ * precision past 2^53, which for 18 decimals starts at about 0.009 ORB.
+ *
+ * Malformed input yields ZERO rather than a guess. Grouped digits, scientific
+ * notation and a leading `+` are all rejected: coercing them would render an
+ * amount that is not the one on chain, and a balance nobody can explain is
+ * worse than a visible zero.
+ */
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 const LOCALE_DECIMAL_SEP: string =
@@ -83,6 +96,7 @@ export interface FormatOptions {
     /** Whether to append the symbol. Defaults to `true`. */
     showSymbol?: boolean;
     /** Maximum number of decimal digits shown in output. Defaults to `6`. */
+    /** MAXIMUM decimal digits shown. Trailing zeros are trimmed, never padded. */
     precision?: number;
 }
 
@@ -104,7 +118,7 @@ export interface FormatOptions {
  *
  * @example
  * formatBalance('1000000000000000000') // '1 ORB'
- * formatBalance(500000000000000000n, { precision: 2 }) // '0.50 ORB'
+ * formatBalance(500000000000000000n, { precision: 2 }) // '0.5 ORB'  (max, not pad)
  * formatBalance('0x0de0b6b3a7640000', { showSymbol: false }) // '1'
  * formatBalance(null) // '0 ORB'
  */

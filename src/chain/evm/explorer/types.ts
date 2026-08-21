@@ -20,7 +20,11 @@ export interface EvmTransaction {
     nonce: number;
     /** ABI-encoded call data (0x-prefixed hex). `'0x'` for plain transfers. */
     input: string;
-    /** `1` for success, `0` for revert. */
+    /**
+     * `1` for success, `0` for revert — and `0` ALSO when no receipt could be
+     * read, which is what a pending transaction or a failed receipt call looks
+     * like. Not proof of a revert on its own.
+     */
     status: number;
     /** Deployed contract address for contract-creation transactions; `null` otherwise. */
     contractAddress: string | null;
@@ -58,7 +62,12 @@ export interface EvmAddressInfo {
     codeSize: number;
     /** Deployed bytecode (truncated to 100 bytes + ellipsis for display). `'0x'` for EOAs. */
     code: string;
-    /** Up to 50 most recent logs emitted by or received by this address. */
+    /**
+     * Up to 50 recent logs EMITTED BY this address — `eth_getLogs` filters on
+     * the emitting contract, so nothing where the address merely appears as an
+     * indexed topic is here. A plain EOA emits nothing and gets an empty list;
+     * `getTokenTransfers` is the call that finds received activity.
+     */
     recentLogs: EvmLog[];
 }
 
@@ -102,7 +111,12 @@ export interface EvmTxSummary {
     gasUsed: number;
     /** Gas price in wei, as a 0x-prefixed hex string. */
     gasPrice: string;
-    /** `true` when the transaction succeeded (receipt status `0x1`). */
+    /**
+     * `true` on receipt status `0x1` — and ALSO when no receipt could be read,
+     * since a transaction still in the pool has not failed. Optimistic by
+     * design, and the opposite default from `EvmTransaction.status`: read it as
+     * "not known to have failed", never as confirmed success.
+     */
     status: boolean;
     /** `true` when the transaction created a new contract (`to` is `null`). */
     isContractCreation: boolean;

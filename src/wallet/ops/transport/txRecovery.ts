@@ -4,12 +4,11 @@
  * A WebSocket drop between submit and finalization surfaces as an error for a
  * tx that may have landed anyway. Reporting that as "failed" is the dangerous
  * outcome: the user retries, and the retry double-spends (shield) or dies on a
- * duplicate nullifier (transfer/unshield). Every wallet has this bug until it
- * explicitly does not.
+ * duplicate nullifier (transfer/unshield).
  *
- * The fix is to distinguish "the chain rejected it" from "we lost the line":
- * only the second is worth polling, and the poll asks an on-chain predicate the
- * caller supplies — a nullifier turned spent, a commitment now in the tree.
+ * So "the chain rejected it" and "we lost the line" are told apart, and only
+ * the second is polled — against an on-chain predicate the caller supplies: a
+ * nullifier turned spent, a commitment now in the tree.
  */
 import type { TxResult } from '../../../chain/client/types';
 

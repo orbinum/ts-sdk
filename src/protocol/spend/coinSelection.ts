@@ -1,3 +1,16 @@
+/**
+ * Which notes pay an amount, and what the forest allows.
+ *
+ * The circuit is 2-in/2-out, so a spend draws on at most TWO notes and the
+ * selection is a search over pairs rather than a greedy sum. A pair must agree
+ * on two things beyond covering the amount: the same CIRCUIT VERSION, since one
+ * proof is verified against one VK, and the same FOREST TREE, since both paths
+ * resolve under one root and a cross-tree pair can never converge.
+ *
+ * Pure arithmetic over notes: nothing here reserves anything or touches the
+ * chain, and every guard it applies is one the circuit would apply anyway,
+ * seconds later and without naming the note.
+ */
 import type { ZkNote } from '../types';
 import type { TransferInputNote } from '../proving/transfer';
 
@@ -5,11 +18,17 @@ import type { TransferInputNote } from '../proving/transfer';
 const TRANSFER_TREE_DEPTH = 20;
 
 /**
- * Leaves one forest tree holds. Pinned to the runtime's `MaxLeavesPerTree`
- * (2^20), guarded on-chain by the pallet's `integrity_test` — it can never
- * change on a live chain, so deriving tree membership locally is safe.
+ * Leaves one forest tree holds — the value this SDK assumes for the chain's
+ * `MaxLeavesPerTree`.
  *
- * Exported so a host can reason about tree boundaries.
+ * The pallet's `integrity_test` requires that constant to be a power of two no
+ * greater than `2^MAX_TREE_DEPTH`, and forbids changing it on a live chain,
+ * precisely because clients derive `tree_id` from a global leaf index with it.
+ * It does NOT pin it to 2^20: a chain configured lower still passes, and this
+ * constant would then place notes in the wrong tree.
+ *
+ * Exported so a host can reason about tree boundaries — and so a deployment on
+ * a differently-configured chain has one place to look.
  */
 export const LEAVES_PER_TREE = 1 << TRANSFER_TREE_DEPTH;
 

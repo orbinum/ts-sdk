@@ -104,6 +104,25 @@ describe('hexToNumber', () => {
         expect(hexToNumber('0x0')).toBe(0);
     });
 
+    it('rechaza casi-hex en vez de truncarlo', () => {
+        // `parseInt` acepta un prefijo válido y tira el resto: `"0x12zz"` daba
+        // `18`, un número de bloque plausible y equivocado. Y esto viene de un
+        // servidor.
+        expect(() => hexToNumber('0x12zz')).toThrow(/Invalid hex quantity/);
+        // Pero `0X` en mayúsculas es una entrada que esta función SIEMPRE ha
+        // aceptado — endurecerla no puede empezar a rechazarla.
+        expect(hexToNumber('0XFF')).toBe(255);
+        expect(() => hexToNumber('zz')).toThrow(/Invalid hex quantity/);
+        expect(() => hexToNumber('')).toThrow(/Invalid hex quantity/);
+        expect(() => hexToNumber('0x')).toThrow(/Invalid hex quantity/);
+    });
+
+    it('rechaza una cantidad que no cabe en un entero seguro', () => {
+        // Más allá de 2^53 el número pierde precisión en silencio.
+        expect(() => hexToNumber('0x' + 'f'.repeat(16))).toThrow(/safe integer/);
+        expect(hexToNumber('0x1fffffffffffff')).toBe(2 ** 53 - 1);
+    });
+
     it('handles typical JSON-RPC block number', () => {
         expect(hexToNumber('0x4b7')).toBe(1207);
     });
@@ -179,6 +198,18 @@ describe('scalarToHex', () => {
     it('is big-endian — the low byte lands last', () => {
         // Commitments and nullifiers travel LITTLE-endian and must NOT use this.
         expect(scalarToHex(0x1234n).endsWith('1234')).toBe(true);
+    });
+
+    it('rechaza lo que rompe la invariante de una grafía por escalar', () => {
+        // Un negativo emitía un literal `0x-…` y un valor por encima de 2^256
+        // desbordaba los 64 caracteres. Las dos cosas se comparan como cadena
+        // contra una grafía correcta y simplemente no casan — en silencio.
+        expect(() => scalarToHex(-1n)).toThrow(/32 unsigned bytes/);
+        expect(() => scalarToHex(1n << 256n)).toThrow(/32 unsigned bytes/);
+    });
+
+    it('acepta el máximo que sí cabe', () => {
+        expect(scalarToHex((1n << 256n) - 1n)).toHaveLength(66);
     });
 });
 

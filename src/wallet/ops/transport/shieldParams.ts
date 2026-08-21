@@ -6,9 +6,7 @@
  * "32-byte hex", so a caller reaching for the obvious big-endian encoding
  * produces a commitment the chain accepts and a note NOBODY can ever find —
  * not the sender's scan, not a rescan, not the recipient. The funds are gone.
- *
- * The transfer and unshield paths already own their marshalling; this closes
- * the gap for shield.
+
  */
 import { bigintTo32LeArr } from '../../../foundation/encoding/bytes';
 import { toHex } from '../../../foundation/encoding/hex';

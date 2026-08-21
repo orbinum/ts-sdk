@@ -1,8 +1,17 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { PrivacyKeyManager } from '../../../src/protocol/keys/PrivacyKeyManager';
-import { deriveViewingSecretKey, deriveOwnerPk } from '../../../src/protocol/keys/PrivacyKeys';
+import {
+    deriveViewingSecretKey,
+    deriveViewingPublicKey,
+    deriveOwnerPk,
+} from '../../../src/protocol/keys/PrivacyKeys';
 import { bigintTo32Le } from '../../../src/foundation/encoding/bytes';
-import { toHex } from '../../../src/foundation/encoding/hex';
+import { toHex, scalarToHex } from '../../../src/foundation/encoding/hex';
+import {
+    deriveSpendingKeyV3,
+    deriveViewingSecretKeyV3,
+    deriveOutgoingViewingKeyV3,
+} from '../../../src/protocol/keys/PrivacyKeys';
 import { BABYJUB_SUBORDER } from '../../../src/foundation/crypto/constants';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
@@ -10,18 +19,17 @@ import { BABYJUB_SUBORDER } from '../../../src/foundation/crypto/constants';
 // Stable 32-byte master bytes fixture (deterministic, distinct from all-zeros)
 const MASTER_BYTES = new Uint8Array(32).fill(0xab);
 
-// Expected sk derived from MASTER_BYTES (same formula as importFromHex)
-const MASTER_BIGINT = BigInt(
-    '0x' + Array.from(MASTER_BYTES, (b) => b.toString(16).padStart(2, '0')).join('')
-);
-const TEST_SK = MASTER_BIGINT % BABYJUB_SUBORDER || 1n;
+// La clave de gasto que `load` deriva de esas mismas raíces.
+//
+// Bajo v2 el escalar era `master % suborden` y `load` lo aceptaba del llamador;
+// bajo v3 es una rama HKDF de la raíz, así que la identidad la fija el MASTER y
+// el escalar que se pase se ignora. Derivarlo aquí es lo que mantiene al test
+// describiendo la identidad que el wallet abre de verdad.
+const TEST_SK = deriveSpendingKeyV3(MASTER_BYTES);
 
 // Second distinct masterBytes for isolation tests
 const OTHER_MASTER_BYTES = new Uint8Array(32).fill(0x12);
-const OTHER_BIGINT = BigInt(
-    '0x' + Array.from(OTHER_MASTER_BYTES, (b) => b.toString(16).padStart(2, '0')).join('')
-);
-const OTHER_SK = OTHER_BIGINT % BABYJUB_SUBORDER || 1n;
+const OTHER_SK = deriveSpendingKeyV3(OTHER_MASTER_BYTES);
 
 const MASTER_HEX =
     'mk:0x' + Array.from(MASTER_BYTES, (b) => b.toString(16).padStart(2, '0')).join('');
@@ -106,12 +114,15 @@ describe('pkm.getMasterBytes', () => {
 // ─── getViewingSecretKey ─────────────────────────────────────────────────────────────────────────
 
 describe('pkm.getViewingSecretKey', () => {
-    it('returns a 32-byte Uint8Array equal to deriveViewingSecretKey(sk)', async () => {
+    it('devuelve la rama de visión v3 del MASTER, no una cadena desde el escalar', async () => {
+        // Bajo v2 la clave de visión colgaba de la de gasto. Bajo v3 son
+        // hermanas de la raíz — y ésa es la propiedad que hace posible una
+        // cartera watch-only.
         await pkm.load(TEST_SK, MASTER_BYTES);
         const vk = pkm.getViewingSecretKey();
         expect(vk).toBeInstanceOf(Uint8Array);
         expect(vk).toHaveLength(32);
-        expect(vk).toEqual(deriveViewingSecretKey(TEST_SK));
+        expect(vk).toEqual(deriveViewingSecretKeyV3(MASTER_BYTES));
     });
 
     it('throws if not loaded', () => {
@@ -242,12 +253,55 @@ describe('pkm.importFromHex', () => {
         await expect(pkm.importFromHex(long)).rejects.toThrow(/32 bytes/i);
     });
 
-    it('clamps sk to 1n when masterBytes BigInt reduces to 0 mod BABYJUB_SUBORDER (all-zero bytes)', async () => {
-        // all-zero bytes → BigInt = 0n → 0n % BABYJUB_SUBORDER = 0n → clamped to 1n
-        const zeroHex = 'mk:0x' + '00'.repeat(32);
-        await pkm.importFromHex(zeroHex);
-        expect(pkm.getSpendingKey()).toBe(1n);
-        expect(pkm.getMasterBytes()).toEqual(new Uint8Array(32));
+    it('RECHAZA un master de ceros', async () => {
+        // No es una entrada válida por ninguna puerta: todo wallet derivaría la
+        // misma identidad. `deriveIdentity` ya lo rechazaba, pero un nivel más
+        // adentro — aquí se corta antes de cargar nada.
+        await expect(pkm.importFromHex('mk:0x' + '00'.repeat(32))).rejects.toThrow(/zero/i);
+        expect(pkm.isLoaded()).toBe(false);
+    });
+
+    it('RECHAZA hex inválido en vez de decodificarlo a ceros', async () => {
+        // El fallo silencioso que esto cierra: `parseInt('zz', 16)` es NaN y
+        // `Uint8Array` lo guarda como 0, así que un cache corrupto decodificaba
+        // a 32 bytes de ceros — con la longitud correcta, o sea pasando la única
+        // comprobación que había. El wallet se abría sobre una identidad que no
+        // era la suya y que cualquiera puede derivar.
+        await expect(pkm.importFromHex('mk:0x' + 'zz'.repeat(32))).rejects.toThrow();
+        expect(pkm.isLoaded()).toBe(false);
+    });
+
+    it('el escalar v3 no tiene el punto muerto que tenía v2', async () => {
+        // Bajo v2 el escalar era `master % suborden`, así que un master de ceros
+        // daba 0 y había que sujetarlo a 1n. Bajo v3 pasa por HKDF, que no tiene
+        // ese punto muerto. Se comprueba sobre la derivación directamente: la
+        // propiedad es de `deriveSpendingKeyV3`, no de la puerta de importación
+        // — que ahora rechaza esa entrada, y con razón.
+        const sk = deriveSpendingKeyV3(new Uint8Array(32));
+
+        expect(sk).toBeGreaterThan(0n);
+    });
+});
+
+describe('pkm.getOutgoingViewingKey', () => {
+    const pkm = new PrivacyKeyManager();
+
+    it('devuelve la rama saliente del master', async () => {
+        await pkm.load(TEST_SK, MASTER_BYTES);
+
+        expect(pkm.getOutgoingViewingKey()).toEqual(deriveOutgoingViewingKeyV3(MASTER_BYTES));
+    });
+
+    it('NO coincide con la clave de visión entrante', async () => {
+        // Son ramas hermanas: entregar una no entrega la otra. Confundirlas
+        // daría el grafo de pagos a quien sólo debía ver importes.
+        await pkm.load(TEST_SK, MASTER_BYTES);
+
+        expect(toHex(pkm.getOutgoingViewingKey())).not.toBe(toHex(pkm.getViewingSecretKey()));
+    });
+
+    it('lanza sin identidad cargada', () => {
+        expect(() => new PrivacyKeyManager().getOutgoingViewingKey()).toThrow(/no key loaded/);
     });
 });
 
@@ -258,9 +312,9 @@ describe('pkm.encodePrivacyAddress', () => {
         expect(() => pkm.encodePrivacyAddress()).toThrow(/no key loaded/i);
     });
 
-    it('returns a string starting with "orbpriv2:"', async () => {
+    it('returns a string starting with "orbpriv3:"', async () => {
         await pkm.load(TEST_SK, MASTER_BYTES);
-        expect(pkm.encodePrivacyAddress()).toMatch(/^orbpriv2:/);
+        expect(pkm.encodePrivacyAddress()).toMatch(/^orbpriv3:/);
     });
 
     it('has exactly 4 colon-separated parts (adds a checksum)', async () => {
@@ -366,26 +420,40 @@ describe('PrivacyKeyManager.decodePrivacyAddress', () => {
 
     it('returns ownerPkHex and viewingPublicKeyHex for a valid legacy orbpriv1 address', () => {
         // orbpriv1 has no checksum — still read for backwards compat.
-        const result = PrivacyKeyManager.decodePrivacyAddress('orbpriv1:0xabcd:0xef01');
-        expect(result).toEqual({ ownerPkHex: '0xabcd', viewingPublicKeyHex: '0xef01' });
+        // Campos REALES: la vía legacy no tiene checksum, así que es la más
+        // fácil de forjar — por eso valida los campos igual que las demás.
+        const pk = '0x' + 'ab'.repeat(32);
+        // Una ivk REAL, no bytes repetidos: `0xef…` ni siquiera es un punto de
+        // la curva, y la validación ahora lo comprueba — un decodificador que
+        // aceptara ese valor estaría aceptando una clave contra la que el ECDH
+        // no significa nada.
+        const ivk = toHex(deriveViewingPublicKey(deriveViewingSecretKey(777n)));
+        const result = PrivacyKeyManager.decodePrivacyAddress(`orbpriv1:${pk}:${ivk}`);
+        // Reportada como v2: predate el token de versión, y su identidad se
+        // derivó con la cadena vieja.
+        expect(result).toEqual({
+            ownerPkHex: pk,
+            viewingPublicKeyHex: ivk,
+            scheme: 'orbpriv1',
+        });
     });
 
-    it('accepts a well-formed orbpriv2 address (checksum matches)', async () => {
+    it('accepts a well-formed emitted address (checksum matches)', async () => {
         const pkm2 = new PrivacyKeyManager();
         await pkm2.load(TEST_SK, MASTER_BYTES);
         const addr = pkm2.encodePrivacyAddress();
-        expect(addr).toMatch(/^orbpriv2:/);
+        expect(addr).toMatch(/^orbpriv3:/);
         const result = PrivacyKeyManager.decodePrivacyAddress(addr);
         expect(BigInt(result!.ownerPkHex)).toBe(pkm2.getOwnerPk());
     });
 
-    it('rejects an orbpriv2 address with a corrupted body (checksum fails)', async () => {
+    it('rejects an address with a corrupted body (checksum fails)', async () => {
         const pkm2 = new PrivacyKeyManager();
         await pkm2.load(TEST_SK, MASTER_BYTES);
-        const [, ownerPkHex, ivkHex, checksum] = pkm2.encodePrivacyAddress().split(':');
+        const [scheme, ownerPkHex, ivkHex, checksum] = pkm2.encodePrivacyAddress().split(':');
         // Flip one nibble of the ownerPk — checksum no longer matches.
         const flipped = ownerPkHex!.slice(0, -1) + (ownerPkHex!.at(-1) === '0' ? '1' : '0');
-        const corrupted = `orbpriv2:${flipped}:${ivkHex}:${checksum}`;
+        const corrupted = `${scheme}:${flipped}:${ivkHex}:${checksum}`;
         expect(PrivacyKeyManager.decodePrivacyAddress(corrupted)).toBeNull();
     });
 
@@ -410,39 +478,55 @@ describe('PrivacyKeyManager.decodePrivacyAddress', () => {
     });
 });
 
-// ─── getOutgoingViewingKey (ovk) ─────────────────────────────────────────────
+// ─── El esquema de la dirección ES la versión de derivación ──────────────────
 
-describe('pkm.getOutgoingViewingKey', () => {
-    it('throws if not loaded', () => {
-        expect(() => pkm.getOutgoingViewingKey()).toThrow(/no key loaded/i);
+describe('orbpriv3 — la dirección dice de qué esquema viene', () => {
+    // Sin esto, una dirección v2 copiada antes de una migración sigue pareciendo
+    // válida y el pago cae donde el wallet v3 nunca mira. Los campos son dos
+    // escalares en ambos casos, así que el prefijo es el único sitio donde cabe
+    // la distinción.
+    const pkm = new PrivacyKeyManager();
+
+    beforeEach(async () => {
+        await pkm.load(TEST_SK, MASTER_BYTES);
     });
 
-    it('returns a 32-byte ovk after load()', async () => {
-        await pkm.load(TEST_SK, MASTER_BYTES);
-        const ovk = pkm.getOutgoingViewingKey();
-        expect(ovk).toBeInstanceOf(Uint8Array);
-        expect(ovk).toHaveLength(32);
+    it('SÓLO emite v3 — no hay otra cosa que emitir', () => {
+        expect(pkm.encodePrivacyAddress()).toMatch(/^orbpriv3:/);
+        expect(pkm.encodePrivacyAddress('v3')).toMatch(/^orbpriv3:/);
     });
 
-    it('is derived from masterBytes — differs across identities', async () => {
-        await pkm.load(TEST_SK, MASTER_BYTES);
-        const a = pkm.getOutgoingViewingKey();
-        await pkm.load(OTHER_SK, OTHER_MASTER_BYTES);
-        const b = pkm.getOutgoingViewingKey();
-        expect(a).not.toEqual(b);
+    it('pero sigue LEYENDO los esquemas viejos', () => {
+        // Leer una dirección ajena no es soportar su identidad: una dirección
+        // son dos claves públicas, y pagarla funciona venga del esquema que
+        // venga. Quien la comparte puede no haber actualizado todavía.
+        const ownerPkHex = scalarToHex(deriveOwnerPk(TEST_SK));
+        const ivkHex = toHex(deriveViewingPublicKey(deriveViewingSecretKey(TEST_SK)));
+
+        const legacy = PrivacyKeyManager.decodePrivacyAddress(`orbpriv1:${ownerPkHex}:${ivkHex}`);
+
+        expect(legacy?.scheme).toBe('orbpriv1');
+        expect(legacy?.ownerPkHex).toBe(ownerPkHex);
     });
 
-    it('clear() drops the ovk', async () => {
-        await pkm.load(TEST_SK, MASTER_BYTES);
-        pkm.clear();
-        expect(() => pkm.getOutgoingViewingKey()).toThrow(/no key loaded/i);
+    it('el decodificador informa del ESQUEMA que traía la dirección', () => {
+        expect(PrivacyKeyManager.decodePrivacyAddress(pkm.encodePrivacyAddress())?.scheme).toBe(
+            'orbpriv3'
+        );
     });
 
-    it('is absent from the privacy address', async () => {
-        await pkm.load(TEST_SK, MASTER_BYTES);
-        const ovkHex = toHex(pkm.getOutgoingViewingKey());
-        const addr = pkm.encodePrivacyAddress();
-        // The ovk is secret — its bytes must never appear in the shareable address.
-        expect(addr).not.toContain(ovkHex.slice(2));
+    it('una dirección RE-ETIQUETADA no pasa el checksum', () => {
+        // El esquema va DENTRO del cuerpo firmado, así que cambiar el prefijo a
+        // mano rompe la suma en vez de producir una dirección creíble.
+        const v3 = pkm.encodePrivacyAddress();
+        const relabelled = v3.replace('orbpriv3:', 'orbpriv2:');
+
+        expect(PrivacyKeyManager.decodePrivacyAddress(relabelled)).toBeNull();
+    });
+
+    it('un checksum corrupto sigue rechazándose en v3', () => {
+        const v3 = pkm.encodePrivacyAddress();
+
+        expect(PrivacyKeyManager.decodePrivacyAddress(v3.slice(0, -1) + '0')).toBeNull();
     });
 });

@@ -34,7 +34,7 @@ async function selfHint(index: number, leafIndex: number, value: bigint) {
         spendingKey: SPENDING_KEY,
         viewingPublicKey: ivk,
         circuitVersion: 1,
-        ephSkOverride: deriveSelfEphSk(SPENDING_KEY, index),
+        ephSkOverride: deriveSelfEphSk(ivsk, index),
     });
     const memo = new Uint8Array(note.memo);
     return {

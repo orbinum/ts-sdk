@@ -1,54 +1,48 @@
 /**
- * Pairwise ephemeral keys — deterministic ephSk for notes sent BETWEEN two
+ * Pairwise ephemeral keys — a deterministic ephSk for notes sent BETWEEN two
  * parties who already know each other.
  *
  * `selfEph` removed the ECDH for a wallet's own notes, but a note from someone
- * else still costs one elliptic-curve multiplication per pool hint, because
- * the sender picked a random ephemeral the receiver cannot predict. That is
- * the ~99.6% case and it is what makes a rescan O(pool).
+ * else still costs one EC multiplication per pool hint: the sender picked a
+ * random ephemeral the receiver cannot predict. That is ~99.6% of the pool and
+ * what makes a rescan O(pool).
  *
- * A sender and receiver who share a secret can predict it. Derive the
- * ephemeral from that shared secret and a counter:
+ * Two parties who share a secret can predict it:
  *
  *   sharedSecret = ECDH(myViewingSk, theirViewingPk)          (symmetric)
  *   ephSk_i      = SHA256("orbinum-pairwise-eph-v1" || ss || u32le(i))
  *
  * The receiver precomputes a window of ephPk values per known sender and
- * matches published hints by hash lookup — the same zero-EC path selfEph
- * already uses. Nothing about the wire format changes: the ephPk still travels
- * as the memo's last 32 bytes and is already indexed. No pallet change, no new
- * field, no migration.
+ * matches hints by hash lookup — the same zero-EC path as selfEph, and no wire
+ * change: the ephPk still travels as the memo's last 32 bytes.
  *
- * Where the counterparty comes from: the memo's plaintext carries
- * `sourcePk`, so the FIRST payment from a stranger is discovered by
- * ordinary trial decryption, and every payment after it is a hash lookup.
- * This makes recurring relationships — the common case for a wallet in daily
- * use — nearly free, while leaving first contact exactly as it is today.
+ * FIRST CONTACT IS UNCHANGED. The memo's `sourcePk` names the counterparty, so
+ * a stranger's first payment is found by ordinary trial decryption and every
+ * one after it is a hash lookup.
  *
  * ## Privacy
  *
  * The published ephPk is a PRF-derived curve point, uniformly distributed and
- * indistinguishable from a random ephemeral to anyone without the pair secret
- * — the same argument that makes selfEph and BIP-32 public keys safe.
+ * indistinguishable from random without the pair secret — the same argument
+ * that makes selfEph and BIP-32 public keys safe.
  *
- * Reusing a counter republishes the same ephPk, which publicly links the two
- * notes as sharing a sender-receiver pair. The counter must be persisted and
- * never reused; `pairwiseEphWindow` is deliberately a pure function of
- * (secret, range) so the caller owns that state, exactly as with selfEph.
+ * REUSING A COUNTER republishes an ephPk and publicly links the two notes as
+ * one sender-receiver pair. This module is a pure function of (secret, range)
+ * so the caller owns that state, exactly as with selfEph.
  *
- * Viewing keys are used rather than spending keys on purpose. The pair secret
- * is held by both sides, so it will exist on two devices and inside whatever
- * backup either party keeps; deriving it from spending keys would make a
- * compromise of one party's stored secrets bear on the other's ability to
- * spend. With viewing keys the worst case is disclosure of which notes were
- * exchanged between those two parties — the visibility a viewing key already
- * confers — and nothing about authority to spend.
+ * VIEWING KEYS, NOT SPENDING KEYS. The pair secret lives on two devices and in
+ * whatever backup either party keeps; deriving it from spending keys would let
+ * one party's compromised storage bear on the other's authority to spend. The
+ * worst case here is disclosure of which notes those two exchanged — visibility
+ * a viewing key already confers.
  *
- * Matching is CLIENT-SIDE only. Asking a server for a specific ephPk would
- * tell it which notes are yours, which is precisely what the scan's
- * download-everything design exists to avoid.
+ * Matching is CLIENT-SIDE. Asking a server about a specific ephPk would tell it
+ * which notes are yours, which the download-everything design exists to avoid.
  */
 import { sha256 } from '@noble/hashes/sha2.js';
+import { MAX_EPH_WINDOW } from './windowBounds';
+import { assertSecretKeyBytes } from '../../foundation/crypto/keyGuards';
+import { unpackUsableViewingKey } from '../../foundation/crypto/bjj';
 import { packPoint, unpackPoint } from '@zk-kit/baby-jubjub';
 import { fastMulBase, fastMulPoint } from '../../foundation/crypto/bjj-fast';
 import { bigintTo32Le, bytesToBigintLE } from '../../foundation/encoding/bytes';
@@ -70,8 +64,12 @@ export function derivePairwiseSharedSecret(
     myViewingSk: Uint8Array,
     theirIvkPacked: Uint8Array
 ): Uint8Array {
-    const theirPoint = unpackPoint(bytesToBigintLE(theirIvkPacked));
+    // Both sides checked, not just theirs. `unpackUsableViewingKey` also
+    // rejects the cofactor-8 subgroup, where the shared secret collapses to at
+    // most 8 values — plain `unpackPoint` accepts those.
+    const theirPoint = unpackUsableViewingKey(bytesToBigintLE(theirIvkPacked));
     if (!theirPoint) throw new Error('derivePairwiseSharedSecret: invalid viewing public key');
+    assertSecretKeyBytes(myViewingSk, 'derivePairwiseSharedSecret: myViewingSk');
     const shared = fastMulPoint(theirPoint, bytesToBjjScalar(myViewingSk));
     return bigintTo32Le(shared[0]);
 }
@@ -81,6 +79,15 @@ export function derivePairwiseSharedSecret(
  * `EncryptedMemo.encrypt` / `NoteBuilder.build` as `ephSkOverride`.
  */
 export function derivePairwiseEphSk(pairSecret: Uint8Array, index: number): Uint8Array {
+    // Rejected rather than coerced, exactly as in `deriveSelfEphSk` and
+    // `deriveOutgoingEphSk`. `>>> 0` maps -1 onto 0xffffffff and 2^32 onto 0,
+    // so an overflowing or negative counter lands on an index ALREADY
+    // published — and republishing an ephPk publicly links the two payments
+    // that carry it.
+    if (!Number.isInteger(index) || index < 0 || index > 0xffff_ffff) {
+        throw new Error(`derivePairwiseEphSk: index must be a u32, got ${index}`);
+    }
+    assertSecretKeyBytes(pairSecret, 'derivePairwiseEphSk: pairSecret');
     const h = sha256.create();
     h.update(PAIRWISE_EPH_DOMAIN);
     h.update(pairSecret);
@@ -124,6 +131,18 @@ export function pairwiseEphWindow(
     if (!ivkPoint) throw new Error('pairwiseEphWindow: invalid viewing public key');
 
     const entries: PairwiseEphWindowEntry[] = [];
+    // Bounded, because `count` decides how many elliptic-curve multiplications
+    // run and it usually comes from stored config — a corrupt or hostile value
+    // is an unbounded loop, not a wrong answer. The cap is far above any real
+    // window; `windowSizeForCounter` never approaches it.
+    if (!Number.isInteger(from) || from < 0) {
+        throw new Error(`pairwiseEphWindow: from must be a non-negative integer, got ${from}`);
+    }
+    if (!Number.isInteger(count) || count > MAX_EPH_WINDOW) {
+        throw new Error(
+            `pairwiseEphWindow: count must be an integer <= ${MAX_EPH_WINDOW}, got ${count}`
+        );
+    }
     for (let i = from; i < from + count; i++) {
         // Same bytes→scalar clamp EncryptedMemo.encrypt applies to ephSkOverride,
         // so the published point matches the memo byte-for-byte.

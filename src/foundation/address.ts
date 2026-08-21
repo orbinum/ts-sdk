@@ -1,4 +1,24 @@
+/**
+ * Address forms, and the conversions between them.
+ *
+ * Orbinum accounts appear in three shapes — a 20-byte EVM address, a 32-byte
+ * AccountId32, and its SS58 rendering — and a wallet meets all three: the user
+ * pastes one, the chain reports another, the circuit takes a third.
+ *
+ * ONE mapping is structural and the one the runtime applies:
+ *
+ *   AccountId32 = H160 ++ [0x00; 12]      (EeSuffixAddressMapping)
+ *
+ * Suffix, not prefix. Ethereum's own convention pads the other way, and a
+ * function that follows it produces a well-formed account that this chain has
+ * never heard of — see `evmAddressToAccountId`.
+ *
+ * Every decode returns null rather than throwing: an address arrives from a
+ * paste, a QR or an RPC, so a malformed one is ordinary input and the caller
+ * decides what to say about it.
+ */
 import { bytesToBigintLE } from './encoding/bytes';
+import { isHexOfLength, fromHex } from './encoding/hex';
 import { BN254_R } from './crypto/constants';
 
 /**
@@ -27,14 +47,6 @@ export function parseEvmAddress(addr: string): string | null {
 }
 
 /**
- * Returns true if the string looks like an SS58 encoded address
- * (not a 0x-prefixed hex).
- */
-export function isSs58(addr: string): boolean {
-    return !addr.startsWith('0x') && addr.length >= 46 && addr.length <= 50;
-}
-
-/**
  * Returns true if the string looks like a 20-byte EVM address.
  */
 export function isEvmAddress(addr: string): boolean {
@@ -42,8 +54,14 @@ export function isEvmAddress(addr: string): boolean {
 }
 
 /**
- * Pads a 20-byte EVM address to a 32-byte account ID (H256)
- * by prepending 12 zero bytes (Ethereum-compatible mapping).
+ * Pads a 20-byte EVM address to 32 bytes by PREPENDING 12 zero bytes.
+ *
+ * The Ethereum convention, NOT Orbinum's. This chain maps an H160 to an account
+ * by appending — `evmToImplicitSubstrate` is the one that matches the runtime,
+ * and the two produce different accounts for the same address.
+ *
+ * Kept for callers that need the Ethereum-shaped padding (an H256 topic, an ABI
+ * word). Anything that has to name an Orbinum account wants the other one.
  */
 export function evmAddressToAccountId(evmAddr: string): Uint8Array {
     const clean = cleanEvmAddress(evmAddr);
@@ -276,10 +294,15 @@ export function addressToAccountIdHex(addr: string): string | null {
 export function addressToFieldElement(address: string): bigint {
     const accountIdHex = addressToAccountIdHex(address);
     if (!accountIdHex) throw new Error(`Cannot resolve address to AccountId32: ${address}`);
-    const hex = accountIdHex.slice(2);
-    const bytes = new Uint8Array(32);
-    for (let i = 0; i < 32; i++) {
-        bytes[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+    // Shape-checked before the decode, even though every branch of
+    // `addressToAccountIdHex` already produces or validates 32-byte hex today.
+    // The decode below is `parseInt`, which yields NaN for non-hex and stores
+    // it as byte 0 — so a future branch that forgot to validate would not fail
+    // here, it would silently name a DIFFERENT recipient, which is the exact
+    // failure this function's contract calls out.
+    if (!isHexOfLength(accountIdHex, 32)) {
+        throw new Error(`AccountId32 must be 32 bytes of hex: ${accountIdHex}`);
     }
+    const bytes = fromHex(accountIdHex);
     return bytesToBigintLE(bytes) % BN254_R;
 }

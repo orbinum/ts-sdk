@@ -3,7 +3,7 @@
  *
  * These interfaces mirror on-chain arg shapes as they appear after JSON
  * decoding (snake_case keys, string amounts).  They are intentionally
- * different from the call-builder types in shielded-pool/types/pallet-extrinsics.ts
+ * different from the call-builder types in `pallet/shielded-pool/extrinsics.ts`,
  * which use camelCase and bigint/Bytes32 for SCALE construction.
  */
 

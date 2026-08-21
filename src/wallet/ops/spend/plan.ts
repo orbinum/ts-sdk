@@ -2,10 +2,9 @@
  * Pre-flight planning for a spend: which notes cover the amount, what change
  * comes back, and how much is spendable at all.
  *
- * The arithmetic is small but it is protocol arithmetic, and every wallet UI
- * needs the same answers before it can enable a button. Left to each host it
- * gets reimplemented per screen — which is how one screen ends up enforcing
- * only half of what the circuit requires.
+ * Small arithmetic, but PROTOCOL arithmetic that every wallet UI needs before
+ * it can enable a button. Left to each host it gets reimplemented per screen,
+ * which is how one screen ends up enforcing half of what the circuit requires.
  *
  * These are PLANS, not commitments: nothing here reserves anything or touches
  * the chain. The real guards run inside `transferNotes` / `unshieldNote`.
@@ -19,18 +18,14 @@ import type { ZkNote } from '../../../protocol/types';
  * The notes a spend may actually draw on.
  *
  * `isSpendable` answers the circuit's question — unspent, non-zero — but not
- * the ownership one: a note whose stored `spendingKey` does not derive its
- * `ownerPk` can never be spent, because every spend path rebuilds the
- * commitment from `BabyPbk(spendingKey).Ax` and rejects the mismatch. Such a
- * note reaches the vault from a rescan that repaired it wrongly, or from a
- * record written by an older build.
+ * the OWNERSHIP one: a note whose `spendingKey` does not derive its `ownerPk`
+ * can never be spent, since every spend path rebuilds the commitment from
+ * `BabyPbk(spendingKey).Ax`. Counting one overstates the balance with money
+ * that cannot move; selecting one fails opaquely seconds into proving.
  *
- * Counting it would overstate the balance with money that cannot move, and
- * selecting it sends the user into an opaque failure seconds into proving.
- *
- * The ownership check costs one EC derivation (~0.1 ms), which is why it lives
- * here and not in `isSpendable`: that one runs inside `selectNotes`, whose pair
- * search is O(n²) and would pay the cost thousands of times over.
+ * The check costs one EC derivation (~0.1 ms), which is why it lives here and
+ * not in `isSpendable` — that runs inside `selectNotes`, whose pair search is
+ * O(n²) and would pay the cost thousands of times over.
  */
 function usableNotes(notes: ZkNote[]): ZkNote[] {
     return notes.filter((note) => isSpendable(note) && isNoteSelfConsistent(note));

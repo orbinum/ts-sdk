@@ -22,8 +22,8 @@ export interface ProofOptions {
      * `Data cannot be cloned, out of memory`.
      *
      * Pass it only when the host knows better than the heuristic — a desktop
-     * app certain of its environment, or a benchmark pinning one mode. The
-     * proof is byte-identical either way; only the wall-clock changes.
+     * app certain of its environment, or a benchmark pinning one mode. Either
+     * mode yields a proof the chain verifies; only the wall-clock changes.
      */
     singleThread?: boolean;
 }

@@ -158,6 +158,14 @@ describe('formatBalance — options: precision', () => {
         expect(formatBalance('1234567890000000000', { precision: 2 })).toBe('1.23 ORB');
     });
 
+    it('`precision` es un TOPE: no rellena con ceros', () => {
+        // El JSDoc prometía '0.50 ORB' para este caso. `precision` limita los
+        // decimales y `normalizeDecimalForDisplay` recorta los ceros finales,
+        // así que rellenar nunca ocurre — el test de arriba no lo veía porque
+        // su valor llena los dos decimales de todas formas.
+        expect(formatBalance(500000000000000000n, { precision: 2 })).toBe('0.5 ORB');
+    });
+
     it('limits to 0 decimal places (integer only)', () => {
         expect(formatBalance('1500000000000000000', { precision: 0 })).toBe('1 ORB');
     });

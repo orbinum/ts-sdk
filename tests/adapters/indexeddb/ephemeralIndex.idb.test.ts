@@ -18,7 +18,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { IndexedDbVaultStorage } from '../../../src/adapters/indexeddb/index';
 import {
     reserveSelfEphIndex,
-    reservePairwiseIndex,
+    reserveOutgoingIndex,
+    registerPairwiseCounterparty,
 } from '../../../src/wallet/vault/storage/ephemeralIndex';
 import { buildConfig } from '../../../src/wallet/vault/storage/config';
 import { createFakeIndexedDB, type FakeIDB } from './fakeIndexedDB';
@@ -53,24 +54,20 @@ describe('reservation through the IndexedDB backend', () => {
         expect(new Set(indexes).size).toBe(50);
     });
 
-    it('never hands the same pairwise index to two concurrent callers', async () => {
-        const results = await Promise.all(
-            Array.from({ length: 50 }, () => reservePairwiseIndex(storage, IVK))
+    it('never hands the same outgoing index to two concurrent callers', async () => {
+        const indexes = await Promise.all(
+            Array.from({ length: 50 }, () => reserveOutgoingIndex(storage))
         );
 
-        const indexes = results.filter((r): r is number => r !== null);
-        expect(new Set(indexes).size).toBe(indexes.length);
-        // The first reservation reports "no history", so index 0 is never used
-        // — that is the leak this fix exists to close.
-        expect(indexes).not.toContain(0);
+        expect(new Set(indexes).size).toBe(50);
     });
 
-    it('keeps counters separate per counterparty across the round trip', async () => {
-        await reservePairwiseIndex(storage, '0xa1');
-        await reservePairwiseIndex(storage, '0xb2');
+    it('registers counterparties across the round trip', async () => {
+        await registerPairwiseCounterparty(storage, '0xa1');
+        await registerPairwiseCounterparty(storage, '0xb2');
 
-        expect(await reservePairwiseIndex(storage, '0xa1')).toBe(1);
-        expect(await reservePairwiseIndex(storage, '0xb2')).toBe(1);
+        const parties = (await storage.getConfig())?.pairwiseCounterparties ?? {};
+        expect(Object.keys(parties).sort()).toEqual(['0xa1', '0xb2']);
     });
 
     it('restarts a corrupt self counter that came back from the store', async () => {
@@ -84,12 +81,13 @@ describe('reservation through the IndexedDB backend', () => {
         expect(await reserveSelfEphIndex(storage)).toBe(1);
     });
 
-    it('treats a corrupt pairwise entry from the store as no history', async () => {
+    it('restarts a corrupt outgoing counter that came back from the store', async () => {
         await poison((c) => {
-            c['pairwiseCounterparties'] = { '0xaabb': { nextIndex: NaN, addedAt: 1 } };
+            c['outgoingEphCounter'] = NaN;
         });
 
-        expect(await reservePairwiseIndex(storage, IVK)).toBeNull();
+        expect(await reserveOutgoingIndex(storage)).toBe(0);
+        expect(await reserveOutgoingIndex(storage)).toBe(1);
     });
 
     it('a valid stored counter resumes rather than restarting', async () => {
@@ -97,11 +95,11 @@ describe('reservation through the IndexedDB backend', () => {
         // the leak, reached by the fix itself.
         await poison((c) => {
             c['selfEphCounter'] = 7;
-            c['pairwiseCounterparties'] = { '0xaabb': { nextIndex: 9, addedAt: 1 } };
+            c['outgoingEphCounter'] = 9;
         });
 
         expect(await reserveSelfEphIndex(storage)).toBe(7);
-        expect(await reservePairwiseIndex(storage, IVK)).toBe(9);
+        expect(await reserveOutgoingIndex(storage)).toBe(9);
     });
 
     it('survives the connection dying mid-reservation', async () => {

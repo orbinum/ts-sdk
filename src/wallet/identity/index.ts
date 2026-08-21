@@ -33,6 +33,9 @@ export type { SessionCacheDeps } from './sessionCache';
 export { generateDeviceKey, importDeviceKey, createDeviceKeyProvider } from './deviceKey';
 export type { DeviceKeyStore } from './deviceKey';
 export { vaultStorageName } from './vaultName';
+export type { IdentityVersion } from './vaultName';
+export { deriveIdentity, exportViewingCredential } from './walletIdentity';
+export type { WalletIdentity, ViewingCredential } from './walletIdentity';
 export {
     connectInjectedExtension,
     getInjectedExtensions,

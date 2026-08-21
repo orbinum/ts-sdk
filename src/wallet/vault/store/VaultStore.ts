@@ -90,8 +90,10 @@ function txHashPatch(existing: ZkNote, incoming: ZkNote): Partial<NoteWithMeta> 
  * rescan can repair it from the on-chain memo — discarding it would lose the
  * only local record that the note exists.
  *
- * Reported once per write with a COUNT, not once per note: a rescan that
+ * Reported once per CALL with a count, not once per note: a rescan that
  * repaired a batch wrongly would otherwise emit hundreds of identical lines.
+ * `save` only reports a note it is seeing for the first time — re-saving one
+ * already known to be broken says nothing new.
  * No commitment or nullifier is logged — printing a note identifier leaks it to
  * the console, which extensions, shared screens and bug reports all read.
  */

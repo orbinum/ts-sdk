@@ -34,7 +34,7 @@ export function normalizeChainFingerprint(chainFingerprint?: string | null): str
 /** The counters a config write must never drop. */
 export type EphemeralCounters = Pick<
     VaultConfigRecord,
-    'createdAt' | 'selfEphCounter' | 'pairwiseCounterparties'
+    'createdAt' | 'selfEphCounter' | 'outgoingEphCounter' | 'pairwiseCounterparties'
 >;
 
 /**
@@ -66,6 +66,9 @@ export function buildConfig(
         ...(chainFingerprint ? { chainFingerprint } : {}),
         ...(existing?.selfEphCounter !== undefined
             ? { selfEphCounter: existing.selfEphCounter }
+            : {}),
+        ...(existing?.outgoingEphCounter !== undefined
+            ? { outgoingEphCounter: existing.outgoingEphCounter }
             : {}),
         ...(existing?.pairwiseCounterparties !== undefined
             ? { pairwiseCounterparties: existing.pairwiseCounterparties }
@@ -127,6 +130,7 @@ export function mergeCounters(
     fallback: EphemeralCounters | null
 ): EphemeralCounters {
     const selfEphCounter = higher(current.selfEphCounter, fallback?.selfEphCounter);
+    const outgoingEphCounter = higher(current.outgoingEphCounter, fallback?.outgoingEphCounter);
     const parties = mergePairwise(current.pairwiseCounterparties, fallback?.pairwiseCounterparties);
 
     return {
@@ -135,6 +139,7 @@ export function mergeCounters(
         // is exactOptionalPropertyTypes, so an explicit undefined is a type
         // error AND would round-trip through structured clone as a present key.
         ...(selfEphCounter !== undefined ? { selfEphCounter } : {}),
+        ...(outgoingEphCounter !== undefined ? { outgoingEphCounter } : {}),
         ...(parties !== undefined ? { pairwiseCounterparties: parties } : {}),
     } as EphemeralCounters;
 }

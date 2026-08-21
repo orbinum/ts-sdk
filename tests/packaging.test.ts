@@ -129,3 +129,39 @@ describe('no deprecated or legacy surface', () => {
         }
     );
 });
+
+/**
+ * Lo que la entrada raíz expone, y lo que NO.
+ *
+ * `src/index.ts` afirma que el barrel de EVM se re-exporta POR NOMBRE en vez de
+ * con `export *`, precisamente para no arrastrar el codificador ABI que usa por
+ * dentro. Nada lo fijaba: cambiar esas líneas por un splat compila, pasa todos
+ * los tests, y convierte `decodeUint` en API pública que después hay que
+ * mantener.
+ */
+describe('la superficie de la entrada raíz', () => {
+    it('no filtra los internals del codificador ABI', async () => {
+        const sdk = await import('../src/index');
+
+        const leaked = ['decodeUint', 'decodeBytes32', 'encodeAbi', 'uint32'].filter(
+            (name) => name in sdk
+        );
+
+        expect(leaked).toEqual([]);
+    });
+
+    it('sí exporta lo que su cabecera promete', async () => {
+        // El contraste: sin esto, un `export {}` vacío pasaría el test anterior.
+        const sdk = await import('../src/index');
+
+        for (const name of [
+            'EvmClient',
+            'EvmExplorer',
+            'SPENDING_KEY_WARNING',
+            'PRECOMPILE_ADDR',
+            'decodePrecompileCalldata',
+        ]) {
+            expect(name in sdk, name).toBe(true);
+        }
+    });
+});

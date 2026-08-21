@@ -19,8 +19,14 @@ export class PrivacyModule {
         return this.substrate.request<string>('privacy_getMerkleRoot', []);
     }
 
-    /** Returns the Merkle proof for the given leaf index or commitment hex. */
-    async getMerkleProof(leafIndex: number | string): Promise<RpcV2MerkleProof> {
+    /**
+     * Returns the Merkle proof for a LEAF INDEX.
+     *
+     * The node declares this parameter `u32`, so a commitment hex is rejected
+     * by deserialisation before any lookup runs — `getMerkleProofByCommitment`
+     * is the one that takes a string.
+     */
+    async getMerkleProof(leafIndex: number): Promise<RpcV2MerkleProof> {
         const raw = await this.substrate.request<RawRpcV2MerkleProof>('privacy_getMerkleProof', [
             leafIndex,
         ]);

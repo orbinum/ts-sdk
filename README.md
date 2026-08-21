@@ -259,30 +259,27 @@ same `selfEphCounter` derive the same ephemeral index and publish the same
 ephemeral point, which publicly links the two notes. That is a privacy leak, not
 a lost update.
 
-### Moving notes between clients
+### Backing notes up
 
-`orbinum://notes/v1/` is the format for handing notes from one Orbinum client to
-another — desktop to mobile, as scannable pages. Both halves ship here so the
-encoder and decoder cannot drift apart:
+A backup is **JSON**, and it is closed: each entry carries the note's
+commitment and its encrypted memo, never a spending key. Ownership is proved on
+import by decrypting the memo, so a backup file that leaks reveals nothing an
+observer could not already read off the chain.
 
 ```ts
-import {
-    encodeNoteTransferPages,
-    decodeNoteTransferPage,
-    assembleNoteTransfer,
-} from '@orbinum/sdk';
+import { encodeNoteBackup, decodeNoteBackup, importNotesFromBackup } from '@orbinum/sdk';
 
-const pages = encodeNoteTransferPages(notes); // render each as a QR
-const entries = assembleNoteTransfer(scanned.map(decodeNoteTransferPage));
+const file = JSON.stringify(encodeNoteBackup(notes));
+const mine = importNotesFromBackup(decodeNoteBackup(file), {
+    viewingSecretKey,
+    spendingKey,
+    ownerPk,
+});
 ```
 
-`assembleNoteTransfer` refuses an incomplete or mixed batch rather than importing
-what it has — a partial import looks like a successful one, and the user would
-never learn which notes never arrived.
-
-The payload carries **spending keys**: anyone who scans these codes can spend the
-notes. It is for an in-person transfer between two devices the same person owns,
-and a host must say so before showing one.
+`importNotesFromBackup` silently skips entries that do not decrypt — they belong
+to someone else. A malformed entry is rejected by `decodeNoteBackup` before that,
+so a hand-edited file cannot plant a note with a broken commitment.
 
 ### Porting to another platform
 

@@ -94,6 +94,11 @@ describe('createDecryptPool — worker pool', () => {
             selfMatched: 0,
             pairwiseMatched: 0,
             maxSelfEphIndex: null,
+            maxOutgoingEphIndex: null,
+            sentNotes: [],
+            learnedRecipients: [],
+            unmatchedSent: [],
+            sealedBookEntries: [],
         });
         expect(factory).not.toHaveBeenCalled();
     });

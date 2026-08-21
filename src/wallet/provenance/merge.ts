@@ -1,16 +1,12 @@
 /**
  * Merging what a rescan learned into what the wallet already knew.
  *
- * The hazard this exists to remove: reconstruction runs after every scan, over
- * records the wallet may have written itself at submit time. Those local
- * records hold what a recovery path cannot: the amount and the recipient, which
- * live inside a memo sealed toward someone else. Overwriting one loses them.
+ * Reconstruction runs after every scan, over records the wallet may have
+ * written ITSELF at submit time — and those hold what no recovery path can
+ * reach: the amount and the recipient, which live inside a memo sealed toward
+ * someone else. A thin `chain` record must never replace a rich local one.
  *
- * The payment slip itself is not at risk — it can be re-issued from public
- * fields — but a thin `chain` record must never replace a rich local one.
- *
- * Before this, the protection was a single spread expression in the
- * reconstruction loop. The rule is now explicit and testable on its own.
+ * The slip is the exception: it can always be re-issued from public fields.
  */
 import type {
     NoteProvenanceRecord,

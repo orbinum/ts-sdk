@@ -17,10 +17,7 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { mulPointEscalar, Base8 } from '@zk-kit/baby-jubjub';
 import { poseidon2 } from 'poseidon-lite';
 import { NoteBuilder } from '../../../src/protocol/note/NoteBuilder';
-import {
-    tryDecryptNote,
-    tryDecryptNoteVerbose,
-} from '../../../src/protocol/note/NoteDecryptor';
+import { tryDecryptNote, tryDecryptNoteVerbose } from '../../../src/protocol/note/NoteDecryptor';
 import {
     deriveViewingSecretKey,
     deriveViewingPublicKey,

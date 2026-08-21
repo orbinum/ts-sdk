@@ -8,6 +8,7 @@
  * result.
  */
 import { scanAbortError } from '../../../foundation/errors/abort';
+import type { SentNoteMatch, UnmatchedSentHint } from '../kernel/types';
 import { WORKER_CRASHED, type DecryptRequest, type WorkerLike } from './types';
 import type { DecryptBatchResult } from '../kernel/types';
 import type { ZkNote } from '../../../protocol/types';
@@ -19,6 +20,11 @@ interface WorkerReply {
     selfMatched?: number;
     pairwiseMatched?: number;
     maxSelfEphIndex?: number | null;
+    maxOutgoingEphIndex?: number | null;
+    sentNotes?: SentNoteMatch[];
+    learnedRecipients?: string[];
+    unmatchedSent?: UnmatchedSentHint[];
+    sealedBookEntries?: string[];
     error?: string;
 }
 
@@ -56,6 +62,11 @@ export function runOnWorker(
                 selfMatched: data.selfMatched ?? 0,
                 pairwiseMatched: data.pairwiseMatched ?? 0,
                 maxSelfEphIndex: data.maxSelfEphIndex ?? null,
+                maxOutgoingEphIndex: data.maxOutgoingEphIndex ?? null,
+                sentNotes: data.sentNotes ?? [],
+                learnedRecipients: data.learnedRecipients ?? [],
+                unmatchedSent: data.unmatchedSent ?? [],
+                sealedBookEntries: data.sealedBookEntries ?? [],
             });
         };
         worker.onerror = () => {

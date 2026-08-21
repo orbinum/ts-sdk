@@ -22,10 +22,11 @@ import type { ZkNote } from '../../../protocol/types';
 import { isValidLeafIndex } from '../../../protocol/spend/index';
 import { stampCreatedAt, stampCreatedTxHash } from '../../vault/index';
 import type { DecryptPool } from '../../worker/index';
-import type { ScanKeys } from '../../worker/index';
+import type { ScanKeys, SentNoteMatch, UnmatchedSentHint } from '../../worker/index';
 import type { ScanHint, ScanHintPage, ScanHintSource } from '../feed/sources';
 import type { ScanProgress } from '../types';
 import { scanAbortError, isAbortError } from '../../../foundation/errors/abort';
+import { toHex, fromHex } from '../../../foundation/encoding/hex';
 
 /**
  * Page size for hint pagination. Round-trip overhead dominates this feed
@@ -96,8 +97,41 @@ export interface ScanOutcome {
      * path fired rather than the notes quietly taking the expensive route.
      */
     pairwiseDiscovered: number;
+    /**
+     * Notes this wallet SENT, recovered in the same sweep.
+     *
+     * Free of extra requests: the outgoing ephPk window recognises our own
+     * payments, and the change notes in the same feed carry the recipient keys
+     * that open them. Kept out of `scanEntries` — the sender does not own them.
+     */
+    sentNotes: SentNoteMatch[];
+    /**
+     * Recipient viewing keys learned while opening payments, as lowercase hex.
+     *
+     * Accumulated across the whole scan and fed forward, so a second payment to
+     * the same person opens from the first one's key.
+     */
+    learnedRecipients: Set<string>;
+    /**
+     * Payments recognised as ours that no batch managed to open.
+     *
+     * Their book entry sits in a change note that landed in a different page.
+     * Kept so the caller can retry them once the whole feed has been read —
+     * dropping one costs a history row and a re-issuable slip for good.
+     */
+    unmatchedSent: UnmatchedSentHint[];
+    /**
+     * Every sealed book entry the scan saw, as decimal `sourcePk` strings.
+     *
+     * A payment and its change can land in different pages, and then neither
+     * half is usable alone. Accumulating both across the whole scan is what lets
+     * the final retry pair them up.
+     */
+    sealedBookEntries: Set<string>;
     /** Highest self-eph index seen — the caller bumps the vault counter past it. */
     maxSelfEphIndex: number | null;
+    /** Highest outgoing index seen — same repair, for the payment sequence. */
+    maxOutgoingEphIndex: number | null;
 }
 
 export interface CollectScanEntriesParams {
@@ -135,7 +169,7 @@ export interface CollectScanEntriesParams {
      * discoveries into the set; harmless, since the ghost purge filters them.
      */
     vaultHexes?: Set<string> | undefined;
-    /** Sink for the two non-fatal warnings this phase can emit. */
+    /** Sink for the one non-fatal warning this phase emits: the chunk fallback. */
     onWarning?: ((message: string, cause?: unknown) => void) | undefined;
 }
 
@@ -168,11 +202,11 @@ async function processHints(ctx: ScanContext, hints: ScanHint[], total: number) 
     for (const hint of hints) {
         // Only the wallet's own commitments are worth keeping — see ScanOutcome.
         if (ctx.vaultHexes.has(hint.commitmentHex)) outcome.onChainHexes.add(hint.commitmentHex);
-        // Validated, not trusted: this value comes from the feed and is PERSISTED
-        // as the scan cursor. `Infinity` or `NaN` there makes every later
-        // incremental scan resume past the end of the tree — no hint ever clears
-        // `leafIndex >= startLeaf`, so the wallet silently stops finding notes
-        // and nothing reports an error.
+        // Validated, not trusted: this comes from the feed and is PERSISTED as
+        // the scan cursor. `Infinity` or `NaN` there resumes every later
+        // incremental scan past the end of the tree — no hint clears
+        // `leafIndex >= startLeaf`, and the wallet stops finding notes in
+        // silence.
         if (isValidLeafIndex(hint.leafIndex)) {
             if (outcome.maxLeafIndex === undefined || hint.leafIndex > outcome.maxLeafIndex) {
                 outcome.maxLeafIndex = hint.leafIndex;
@@ -180,7 +214,12 @@ async function processHints(ctx: ScanContext, hints: ScanHint[], total: number) 
         }
         outcome.scanned++;
 
-        if (!hint.encryptedMemo || !hint.ephPkHex) {
+        // The MEMO decides, never the feed's `ephPkHex` — that field is a
+        // serving convenience the type declares nullable, and the kernel reads
+        // the ephemeral out of the memo's last 32 bytes anyway. Gating on it
+        // here would drop every such hint before the kernel saw it: a feed that
+        // omits the field would make the wallet find NOTHING, cleanly.
+        if (!hint.encryptedMemo) {
             outcome.noMemo++;
             continue;
         }
@@ -188,13 +227,42 @@ async function processHints(ctx: ScanContext, hints: ScanHint[], total: number) 
     }
 
     // ── Trial-decrypt the batch in the pool ───────────────────────────────────
-    const { notes, tagFiltered, selfMatched, pairwiseMatched, maxSelfEphIndex } =
-        await ctx.pool.decryptBatch(toDecrypt, ctx.keys, ctx.signal);
+    // Recipients learned so far ride along: a change note from an earlier page
+    // is what opens the payment beside it, and the two rarely land in the same
+    // batch.
+    const {
+        notes,
+        tagFiltered,
+        selfMatched,
+        pairwiseMatched,
+        maxSelfEphIndex,
+        maxOutgoingEphIndex,
+        sentNotes,
+        learnedRecipients,
+        unmatchedSent,
+        sealedBookEntries,
+    } = await ctx.pool.decryptBatch(
+        toDecrypt,
+        { ...ctx.keys, recipientCandidates: [...outcome.learnedRecipients].map(fromHex) },
+        ctx.signal
+    );
     outcome.tagFiltered += tagFiltered;
     outcome.selfDiscovered += selfMatched;
     outcome.pairwiseDiscovered += pairwiseMatched;
+    // Defaulted: a host may supply its own pool, and an older one returns a
+    // result without this field. Missing sent notes cost history, never the scan.
+    outcome.sentNotes.push(...(sentNotes ?? []));
+    outcome.unmatchedSent.push(...(unmatchedSent ?? []));
+    for (const e of sealedBookEntries ?? []) outcome.sealedBookEntries.add(e);
+    for (const r of learnedRecipients ?? []) outcome.learnedRecipients.add(r);
     if (maxSelfEphIndex !== null) {
         outcome.maxSelfEphIndex = Math.max(outcome.maxSelfEphIndex ?? -1, maxSelfEphIndex);
+    }
+    if (maxOutgoingEphIndex != null) {
+        outcome.maxOutgoingEphIndex = Math.max(
+            outcome.maxOutgoingEphIndex ?? -1,
+            maxOutgoingEphIndex
+        );
     }
 
     // ── Tag new vs already-present and accumulate ─────────────────────────────
@@ -376,7 +444,12 @@ export async function collectScanEntries(params: CollectScanEntriesParams): Prom
         tagFiltered: 0,
         selfDiscovered: 0,
         pairwiseDiscovered: 0,
+        sentNotes: [],
+        unmatchedSent: [],
+        sealedBookEntries: new Set<string>(),
+        learnedRecipients: new Set((params.keys.recipientCandidates ?? []).map((c) => toHex(c))),
         maxSelfEphIndex: null,
+        maxOutgoingEphIndex: null,
     };
 
     const ctx: ScanContext = {

@@ -6,10 +6,16 @@
  *
  * ```
  * foundation/  encoding, crypto, formatting     no dependencies of its own
- * protocol/    what a note IS                   pure and offline, no chain
+ * protocol/    what a note IS                   offline: no node in reach
  * chain/       talking to a node                needs a connection
  * wallet/      using notes                      needs both
  * ```
+ *
+ * `protocol` reaches DOWN into `chain` in exactly one place that survives
+ * compilation: `SPENDING_KEY_VERIFYING_CONTRACT` re-exports the shielded-pool
+ * precompile address rather than writing it out twice, because that value is
+ * part of the EIP-712 digest and a second copy that drifted would orphan every
+ * note. Nothing there opens a connection.
  *
  * Two capabilities are NOT here, because each needs something a platform
  * supplies rather than the SDK:

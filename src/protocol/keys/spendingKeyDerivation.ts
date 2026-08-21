@@ -80,14 +80,19 @@ function assertUsableSignature(sigBytes: Uint8Array): void {
  *
  * masterBytes = HKDF-SHA256(ikm=sigBytes, salt=empty, info="orbinum-sk-v2:{chainId}:{address}")
  *
- * These bytes are the stable root for ALL derived keys:
- *   - spendingKey (circuit scalar) = BigInt(masterBytes) % BABYJUB_SUBORDER
- *   - viewingSecretKey              = HKDF(bigintTo32Le(spendingKey), info="orbinum-ivk-v1")
+ * These bytes are the stable root for ALL derived keys, each its own HKDF
+ * branch of the SAME root — none derived from another:
+ *   - spendingKey (circuit scalar) = HKDF(masterBytes, info="orbinum-spend-v3")
+ *   - viewingSecretKey             = HKDF(masterBytes, info="orbinum-ivk-v3")
+ *   - outgoingViewingKey           = HKDF(masterBytes, info="orbinum-ovk-v3")
  *   - vaultKey                     = HKDF(masterBytes, info="orbinum-vault-key-v1")
  *
- * Separating masterBytes from the circuit scalar means the viewingSecretKey and
- * vault key are STABLE across any future change to the modulus — they never
- * depend on which prime field the circuit uses.
+ * Disjoint branches are what make a viewing key delegable: handing one out
+ * grants sight and never the ability to spend.
+ *
+ * Separating masterBytes from the circuit scalar also keeps the viewing and
+ * vault keys STABLE across any future change to the modulus — they never depend
+ * on which prime field the circuit uses.
  *
  * @throws If the signature is not valid hex, or carries less entropy than the
  *         shortest real signing scheme (see {@link MIN_SIGNATURE_BYTES}).
@@ -108,12 +113,13 @@ export async function deriveMasterKeyBytes(
 /**
  * Derives an Orbinum spending key from a wallet signature.
  *
- * Uses HKDF-SHA256(ikm=sigBytes, salt=empty, info="orbinum-sk-v2:{chainId}:{address}")
- * and reduces the resulting 32-byte value modulo BABYJUB_SUBORDER.
+ * Reduces the master bytes modulo BABYJUB_SUBORDER directly. NOT the v3
+ * branch — a v3 wallet derives its spending key with
+ * `deriveSpendingKeyV3(masterBytes)`, through HKDF under `orbinum-spend-v3`,
+ * and the two produce different scalars from the same signature.
  *
- * IMPORTANT: viewingSecretKey and vaultKey must be derived from masterBytes (via
- * deriveMasterKeyBytes), NOT from this spending key scalar. This ensures those
- * keys remain stable if the circuit's modulus ever changes again.
+ * Kept for reading material derived under the older scheme. Every other key
+ * comes from `masterBytes` and never from this scalar, so it is not a root.
  *
  * @param signatureHex  0x-prefixed or bare hex of the wallet signature.
  * @param chainId       Chain ID used when building the signing message.

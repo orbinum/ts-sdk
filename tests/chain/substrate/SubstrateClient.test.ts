@@ -1047,7 +1047,7 @@ describe('SubstrateClient.getBlock', () => {
         const { client, papi } = await makeClient();
         papi._request.mockImplementation((method: string) => {
             if (method === 'chain_getBlock')
-                // extrinsic bytes[4] !== 0x03 → heuristic skips it
+                // No es `timestamp.set`: b[2] no es el índice del pallet.
                 return Promise.resolve({
                     block: { header: BLOCK_HEADER, extrinsics: ['0x01020304'] },
                 });
@@ -1056,6 +1056,33 @@ describe('SubstrateClient.getBlock', () => {
         });
         const result = await client.getBlock(VALID_HASH);
         expect(result!.timestampMs).toBeNull();
+    });
+
+    it('LEE la hora del bloque del `timestamp.set` cuando el storage falla', async () => {
+        // El camino que nunca funcionó: buscaba el pallet 0x03 (que es Grandpa,
+        // no Timestamp) en b[4] (que ya es argumento), y luego leía un entero
+        // COMPACT como si fuera u64 crudo. Nunca casaba, así que el fallback
+        // devolvía null en silencio y el bloque salía sin hora.
+        //
+        // Extrínseco real: Compact(len) || 0x04 version || 0x01 pallet ||
+        // 0x00 call || Compact(1700000000000).
+        makeBuilderMock();
+        const { client, papi } = await makeClient();
+        papi._request.mockImplementation((method: string) => {
+            if (method === 'chain_getBlock')
+                return Promise.resolve({
+                    block: {
+                        header: BLOCK_HEADER,
+                        extrinsics: ['0x280401000b0068e5cf8b01'],
+                    },
+                });
+            if (method === 'state_getStorage') return Promise.resolve(null);
+            return Promise.resolve(null);
+        });
+
+        const result = await client.getBlock(VALID_HASH);
+
+        expect(result!.timestampMs).toBe(1_700_000_000_000);
     });
 
     it('uses dynamic builder cache — getMetadata called only once across two getBlock calls', async () => {
@@ -1332,14 +1359,12 @@ describe('SubstrateClient.adopt', () => {
         // transport. `fetch` is stubbed because otherwise this test POSTs to a
         // real localhost:9944 — it passed or failed depending on whether a dev
         // node happened to be running, which is not a property of the code.
-        const fetchSpy = vi
-            .spyOn(globalThis, 'fetch')
-            .mockResolvedValue(
-                new Response(JSON.stringify([{ jsonrpc: '2.0', id: 0, result: 'ok' }]), {
-                    status: 200,
-                    headers: { 'Content-Type': 'application/json' },
-                })
-            );
+        const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+            new Response(JSON.stringify([{ jsonrpc: '2.0', id: 0, result: 'ok' }]), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+            })
+        );
         try {
             const withHttp = SubstrateClient.adopt(
                 makeMockPapi() as never,

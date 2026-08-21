@@ -10,11 +10,17 @@ station of a note's life.
 
 ## 1. The three operations
 
-| Operation       | Circuit shape | Fee                                 | Origin             |
-| --------------- | ------------- | ----------------------------------- | ------------------ |
-| `transferNotes` | 2-in / 2-out  | sender's choice ≥ `MIN_GASLESS_FEE` | unsigned (gasless) |
-| `unshieldNote`  | 1-in          | fixed at exactly `MIN_GASLESS_FEE`  | unsigned (gasless) |
-| `claimFees`     | value proof   | —                                   | unsigned (gasless) |
+| Operation       | Circuit shape              | Fee             | Origin             |
+| --------------- | -------------------------- | --------------- | ------------------ |
+| `transferNotes` | 2-in / 2-out               | caller-supplied | unsigned (gasless) |
+| `unshieldNote`  | 1-in / optional change out | caller-supplied | unsigned (gasless) |
+| `claimFees`     | value proof                | —               | unsigned (gasless) |
+
+**The fee is the caller's, not the SDK's.** Every op takes it as a parameter and
+the plan nets it; the SDK does not clamp it to `MIN_GASLESS_FEE` — that floor is
+the pallet's, and a submission below it is rejected on chain. The host reads the
+constant and decides, because a fee the SDK silently raised would break a Max
+button that already netted the caller's own number.
 
 Each takes a `submit` callback: **the SDK owns protocol, the host owns
 transport.** A spend can be relayed, submitted bare, or routed through the EVM
@@ -40,7 +46,9 @@ pure arithmetic a UI calls on every keystroke, no chain access:
   operation then refuses.
 - `planUnshield` encodes that the unshield circuit proves exactly **one**
   input: a balance spread across two notes cannot cover an amount either note
-  alone can't (`no-single-note`).
+  alone can't (`no-single-note`). Its _output_ side is not so limited — a
+  partial withdrawal emits a change note back to the sender, stealth-derived
+  like any other.
 - Pairing rules for a manual selection are `canPairWith`: two inputs must share
   a circuit version **and** a forest tree. Funds spread across trees are
   reported as `needs-consolidation` — an offer to consolidate, not an
@@ -96,11 +104,16 @@ is a chain under load, and retrying harder makes that worse.
   address present, stealth derivation activates and the note's `ownerPk` is a
   one-time key only the recipient can spend from.
 - **Change note** — back to the sender, and two details are load-bearing:
-    - its viewing key derives from the **input's** spending key, so a rescan
-      under the same identity always reopens it;
-    - its `sourcePk` records the recipient's **one-time stealth key**,
-      never their stable identifier — the vault must not become a ledger of who
-      was paid.
+    - it is sealed toward the wallet's **global** viewing key, never anything
+      derived from the input note. Most inputs are notes the wallet RECEIVED,
+      and those are stealth: their keys are one-time values a rescan never
+      derives again, so a change note built from them would be unrecoverable;
+    - its `sourcePk` carries the **recipient book** — the recipient's stable
+      viewing key, XOR-sealed under the wallet's OUTGOING viewing key. That is
+      what lets a restored wallet name who it paid and re-issue a payment slip.
+      Sealed, not stored in the clear: a viewing key is meant to be handed out,
+      and disclosing one must not hand over the payment graph with it. Before
+      the book, this field held the recipient's one-time stealth key.
 
 ### Self-transfers (step 8)
 

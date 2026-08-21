@@ -19,14 +19,27 @@ import type { DecryptPool } from '../../../../src/index';
 import type { ScanKeys, DecryptBatchResult } from '../../../../src/index';
 import type { ZkNote } from '../../../../src/protocol/types';
 
-const KEYS: ScanKeys = { viewingKey: new Uint8Array([1]), spendingKey: 2n, ownerPk: 3n };
+// Una clave de visión de 32 bytes, como la que deriva un wallet real. Un
+// valor más corto se cuela sin error —`getKnownEphWindow` se traga el fallo y
+// devuelve «descubrimiento apagado»—, así que todo este archivo pasaría a
+// probar una configuración que producción no produce nunca.
+const KEYS: ScanKeys = {
+    viewingKey: new Uint8Array(32).fill(1),
+    spendingKey: 2n,
+    ownerPk: 3n,
+};
 
 const EMPTY_COUNTS = {
     tagFiltered: 0,
     selfMatched: 0,
     pairwiseMatched: 0,
     maxSelfEphIndex: null,
-} as const;
+    maxOutgoingEphIndex: null,
+    sentNotes: [],
+    learnedRecipients: [],
+    unmatchedSent: [],
+    sealedBookEntries: [],
+};
 
 /**
  * A pool that decrypts via `decrypt`, defaulting to "nothing is ours". Injected
@@ -165,6 +178,11 @@ describe('collectScanEntries — note filtering', () => {
     });
 
     it('counts hints without a memo as noMemo and never decrypts them', async () => {
+        // The MEMO is the only thing a hint cannot be decrypted without. A
+        // missing `ephPkHex` is NOT disqualifying: the field is nullable by
+        // contract and the kernel reads the ephemeral from the memo's last 32
+        // bytes instead. Skipping those hints here made a feed that omits the
+        // field yield zero notes and a clean-looking scan.
         const source: ScanHintSource = {
             async listHints() {
                 return {
@@ -186,9 +204,10 @@ describe('collectScanEntries — note filtering', () => {
             existingHexes: new Set<string>(),
         });
 
-        expect(outcome.noMemo).toBe(2);
+        expect(outcome.noMemo).toBe(1);
         expect(outcome.scanned).toBe(3);
-        expect(decrypt).toHaveBeenCalledTimes(1);
+        // Both memo-carrying hints reach the kernel, ephPkHex or not.
+        expect(decrypt).toHaveBeenCalledTimes(2);
     });
 
     it('separates new notes from ones the vault already holds', async () => {
@@ -434,5 +453,61 @@ describe('collectScanEntries — hostile leaf indexes', () => {
         const outcome = await run({ source: withLeafIndex(2 ** 32 - 1) });
 
         expect(outcome.maxLeafIndex).toBe(2 ** 32 - 1);
+    });
+});
+
+/**
+ * El orden estricto bajo la ventana de prefetch.
+ *
+ * `runPrefetched` mantiene hasta PREFETCH descargas en vuelo pero entrega los
+ * lotes ESTRICTAMENTE en orden. El cursor depende de ello: los checkpoints
+ * persisten las notas de un lote antes de avanzar, así que un lote fuera de
+ * turno guardaría notas de una página posterior con el cursor aún atrás.
+ *
+ * Se mide con `onProgress`, que reporta el acumulado tras CADA lote: una
+ * entrega desordenada procesa la misma página dos veces y se salta otra, y el
+ * total acumulado deja de cuadrar con el número de hints únicos servidos.
+ */
+describe('el prefetch no reordena', () => {
+    /**
+     * Una fuente donde una página INTERMEDIA tarda de verdad.
+     *
+     * La primera no sirve: se pide antes de entrar en el prefetch y llega ya
+     * resuelta. La página 2 sí compite con la 3, que es donde se vería.
+     */
+    function slowMiddlePageSource(size: number): ScanHintSource {
+        const data = Array.from({ length: size }, (_, i) => hintAt(i));
+        return {
+            async listHints({ page, limit: lim }) {
+                // Un macrotask, no un microtask: `await Promise.resolve()` no
+                // deja que otra descarga se adelante.
+                if (page === 2) await new Promise((r) => setTimeout(r, 20));
+                return {
+                    data: data.slice((page - 1) * lim, page * lim),
+                    pagination: { limit: lim, total: size },
+                };
+            },
+        };
+    }
+
+    it('escanea cada hint exactamente una vez, sin repetir ni saltarse una página', async () => {
+        const outcome = await run({ source: slowMiddlePageSource(7500) });
+
+        // 3 páginas de 2500. Reordenar entrega una dos veces y omite otra: el
+        // total sigue siendo 7500, pero `onChainHexes` pierde una página entera.
+        expect(outcome.scanned).toBe(7500);
+        expect(outcome.maxLeafIndex).toBe(7499);
+    });
+
+    it('y el conjunto on-chain cubre las tres páginas, no dos', async () => {
+        const vaultHexes = new Set(Array.from({ length: 7500 }, (_, i) => `0xc${i}`));
+
+        const outcome = await run({
+            source: slowMiddlePageSource(7500),
+            existingHexes: new Set(vaultHexes),
+            vaultHexes,
+        });
+
+        expect(outcome.onChainHexes.size).toBe(7500);
     });
 });

@@ -7,9 +7,11 @@
  * phases/       collect → spentStatus → persist → persistCursor
  * feed/         the source contracts every phase reads through
  * history/      outgoing-record reconstruction (NOT part of the pipeline)
- * abort.ts      the one abort shape every phase throws
  * selfEphGap.ts the gap-limit sweep that keeps the eph counter honest
  * ```
+ *
+ * The abort shape every phase throws is `foundation/errors/abort.ts`,
+ * re-exported below so a host handles one error type.
  *
  * Everything environment-specific is injected — the feed sources, the decrypt
  * pool, the vault — so the same scan runs in a browser tab, in Node, or in a

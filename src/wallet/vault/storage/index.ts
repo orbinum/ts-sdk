@@ -19,4 +19,8 @@ export type {
 } from './contract';
 export { MemoryVaultStorage } from './MemoryVaultStorage';
 export { buildConfig, normalizeChainFingerprint, VAULT_SCHEMA_VERSION } from './config';
-export { reserveSelfEphIndex, reservePairwiseIndex } from './ephemeralIndex';
+export {
+    reserveSelfEphIndex,
+    reserveOutgoingIndex,
+    registerPairwiseCounterparty,
+} from './ephemeralIndex';

@@ -34,10 +34,9 @@ async function selfNote(index: number): Promise<ZkNote> {
         assetId: 0n,
         ownerPk,
         blinding: 500n + BigInt(index),
-        spendingKey: SPENDING_KEY,
         viewingPublicKey: ivk,
         circuitVersion: 1,
-        ephSkOverride: deriveSelfEphSk(SPENDING_KEY, index),
+        ephSkOverride: deriveSelfEphSk(ivsk, index),
     });
 }
 
@@ -52,7 +51,6 @@ describe('resolveSelfEphCeiling', () => {
 
         const ceiling = resolveSelfEphCeiling({
             notes,
-            spendingKey: SPENDING_KEY,
             viewingKey: ivsk,
             scanMaxIndex: 15, // lo único que el scan pudo ver
             windowSize: WINDOW,
@@ -67,7 +65,6 @@ describe('resolveSelfEphCeiling', () => {
 
         const ceiling = resolveSelfEphCeiling({
             notes,
-            spendingKey: SPENDING_KEY,
             viewingKey: ivsk,
             scanMaxIndex: 7, // 7 < 16 − 1 → sin sweep
             windowSize: WINDOW,
@@ -82,7 +79,6 @@ describe('resolveSelfEphCeiling', () => {
 
         const ceiling = resolveSelfEphCeiling({
             notes,
-            spendingKey: SPENDING_KEY,
             viewingKey: ivsk,
             scanMaxIndex: 15,
             windowSize: WINDOW,
@@ -95,7 +91,6 @@ describe('resolveSelfEphCeiling', () => {
         expect(
             resolveSelfEphCeiling({
                 notes: [],
-                spendingKey: SPENDING_KEY,
                 viewingKey: ivsk,
                 scanMaxIndex: null,
                 windowSize: WINDOW,
@@ -105,7 +100,6 @@ describe('resolveSelfEphCeiling', () => {
         const foreign = { memo: [] } as unknown as ZkNote; // sin memo válido
         const ceiling = resolveSelfEphCeiling({
             notes: [foreign, await selfNote(15)],
-            spendingKey: SPENDING_KEY,
             viewingKey: ivsk,
             scanMaxIndex: 15,
             windowSize: WINDOW,

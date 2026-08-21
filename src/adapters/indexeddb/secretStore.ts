@@ -5,17 +5,17 @@
  * No IndexedDB involved — it ships from this entry point because a consumer
  * reaching for browser persistence wants both adapters together, and splitting
  * them across two subpaths would buy nothing.
+ *
+ * Values arrive already encrypted; see `sessionCache`.
  */
 import type { SecretStore } from '../../wallet/identity/secretStore';
 
 /**
- * A `SecretStore` over Web Storage.
+ * Durable by default, with `sessionStorage` as a READ fallback so a value left
+ * by an older build or a session-scoped flow is still found.
  *
- * Reads fall back to `sessionStorage` so a value written by an older build, or
- * by a deliberately session-scoped flow, is still found. Writes always go to the
- * durable store and clear the session copy, so one key never lives in both.
- *
- * Values are encrypted before they arrive here — see `sessionCache`.
+ * Every write goes to the durable area and drops the session copy, so one key
+ * never lives in both and a stale session value cannot shadow a fresh one.
  */
 export function createWebStorageSecretStore(
     storage?: Storage,

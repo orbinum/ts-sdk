@@ -1,23 +1,17 @@
 /**
- * Creating notes and moving them between a user's own devices.
+ * Creating notes, backing them up, and rebuilding them from a payment slip.
  *
- * No chain access: everything here is offline note construction. The one
- * decision that matters is which ephemeral a new note publishes, because that
- * decides how — and how cheaply — it is found again later.
+ * No chain access — everything here is offline note construction. The decision
+ * that matters is which ephemeral a new note publishes, because that decides
+ * how, and how cheaply, it is found again later.
+ *
+ * Nothing here moves a spending key: a backup is JSON carrying only public
+ * locators, and a slip is a string sealed toward one recipient.
  */
-export { buildZkNote } from './buildNote';
+export { buildZkNote, buildZkNoteWithIndex } from './buildNote';
 export type { BuildNoteParams, BuildNoteDeps, NoteBuildKeys } from './buildNote';
 export { recoverSelfStealthNote } from './selfStealthNote';
 export type { SelfStealthKeys } from './selfStealthNote';
-export {
-    encodeNoteTransferPages,
-    decodeNoteTransferPage,
-    assembleNoteTransfer,
-    noteToTransferEntry,
-    NOTE_TRANSFER_URI_SCHEME,
-    QR_PAGE_MAX_CHARS,
-} from './noteTransfer';
-export type { NoteTransferEntry, NoteTransferPayload } from './noteTransfer';
 export {
     encodeNoteBackup,
     decodeNoteBackup,

@@ -21,8 +21,8 @@ describe('extractPalletError', () => {
     });
 
     it('reads the backslash-escaped form the EVM path nests in eth_call', () => {
-        expect(extractPalletError('execution reverted: message: Some(\\"AmountTooSmall\\")')).toBe(
-            'AmountTooSmall'
+        expect(extractPalletError('execution reverted: message: Some(\\"InvalidAmount\\")')).toBe(
+            'InvalidAmount'
         );
     });
 
@@ -92,8 +92,11 @@ describe('palletErrorKind', () => {
         ['NullifierAlreadySpent', 'already-spent'],
         ['CommitmentNotFound', 'ghost-note'],
         ['UnknownMerkleRoot', 'stale-proof'],
-        ['AmountTooSmall', 'amount'],
+        ['InvalidAmount', 'amount'],
         ['FeeTooLow', 'amount'],
+        ['InsufficientPendingFees', 'amount'],
+        ['AssetIdAlreadyExists', 'asset'],
+        ['FeeRecipientUnavailable', 'shape'],
         ['InvalidProof', 'proof'],
         ['AssetNotVerified', 'asset'],
         ['InvalidMemoSize', 'shape'],
@@ -128,9 +131,9 @@ describe('classifyChainError', () => {
     });
 
     it('reads the name out of the EVM path, where quotes are escaped', () => {
-        expect(classifyChainError('evm error: Other("… message: Some(\\"InvalidProof\\") …")')).toBe(
-            'proof'
-        );
+        expect(
+            classifyChainError('evm error: Other("… message: Some(\\"InvalidProof\\") …")')
+        ).toBe('proof');
     });
 
     it('falls back to the merkle-proof RPC for a ghost note', () => {
@@ -153,7 +156,33 @@ describe('KNOWN_PALLET_ERRORS', () => {
         expect(KNOWN_PALLET_ERRORS.length).toBeGreaterThanOrEqual(20);
     });
 
-    it('is frozen — a host must not mutate the SDK\'s vocabulary', () => {
+    it("is frozen — a host must not mutate the SDK's vocabulary", () => {
         expect(Object.isFrozen(KNOWN_PALLET_ERRORS)).toBe(true);
+    });
+});
+
+/**
+ * Sincronía con el pallet.
+ *
+ * `AmountTooSmall` estuvo mapeado aquí meses después de que el runtime lo
+ * eliminara, y tres variantes vivas (`InsufficientPendingFees`,
+ * `AssetIdAlreadyExists`, `FeeRecipientUnavailable`) nunca llegaron a mapearse:
+ * caían en `unknown` y el host perdía la clasificación que decide si un fallo
+ * se reintenta o es terminal.
+ *
+ * Ninguno de los dos desfases rompe nada de golpe — por eso duraron. Este test
+ * los convierte en un fallo visible.
+ */
+describe('el mapa sigue al pallet', () => {
+    it('no clasifica nombres que el pallet ya no declara', () => {
+        // Eliminado del runtime: `shield` acepta cualquier importe no-cero, y
+        // el cero se rechaza con `InvalidAmount`.
+        expect(palletErrorKind('AmountTooSmall')).toBe('unknown');
+    });
+
+    it('clasifica las variantes de comisiones y activos que el pallet SÍ declara', () => {
+        expect(palletErrorKind('InsufficientPendingFees')).toBe('amount');
+        expect(palletErrorKind('AssetIdAlreadyExists')).toBe('asset');
+        expect(palletErrorKind('FeeRecipientUnavailable')).toBe('shape');
     });
 });

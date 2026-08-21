@@ -36,6 +36,16 @@ export interface VaultConfigRecord {
      * own counter, monotonic for the same reason as `selfEphCounter`.
      */
     pairwiseCounterparties?: Record<string, { nextIndex: number; addedAt: number }>;
+    /**
+     * Next index in the OUTGOING sequence — the ephemerals this wallet publishes
+     * on the notes it sends.
+     *
+     * Monotonic for the same reason as the others. Unlike `pairwiseCounterparties`
+     * this one is recoverable from chain data (the sender can predict every
+     * ephPk they published), so a restore rebuilds it instead of degrading to a
+     * random ephemeral — see `reserveOutgoingIndex`.
+     */
+    outgoingEphCounter?: number;
     createdAt: number;
     updatedAt: number;
 }

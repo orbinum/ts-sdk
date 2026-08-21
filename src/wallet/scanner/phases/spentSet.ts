@@ -1,39 +1,34 @@
 /**
- * Spent-status resolution — decides which of the wallet's own nullifiers are
- * spent WITHOUT ever asking the server about a specific nullifier.
+ * Spent-status resolution — which of the wallet's own nullifiers are spent,
+ * WITHOUT ever asking the server about a specific one.
  *
- * This is the most important privacy property in the scanner. The obvious
- * implementation — ask the indexer "is nullifier X spent?" — tells the server
- * exactly which notes the caller owns, and it is what a re-implementation
- * reaches for by default. Instead the whole set is downloaded and intersected
- * locally, so every request the server sees is identical for every caller.
+ * The most important privacy property in the scanner, and the one a
+ * re-implementation gets wrong by default: asking "is nullifier X spent?" tells
+ * the server exactly which notes the caller owns. Instead the whole set is
+ * downloaded and intersected locally, so every request looks identical for
+ * every caller.
  *
- * Sealed chunks make that affordable: the manifest is universal, only missing
- * chunks are fetched, and the set persists in the injected cache. Per scan this
- * transfers roughly one chunk plus the tail rather than the entire set.
+ * Sealed chunks make that affordable — universal manifest, only missing chunks
+ * fetched, the set persisted in the injected cache — so a scan transfers about
+ * one chunk plus the tail rather than the entire set.
  *
  * On any hard failure the caller degrades: notes stay unspent and are
- * re-verified on the next pass.
- *
- * ## Hex casing
- *
- * The intersection is an exact string match, so both sides must agree on
- * casing. The wallet lowercases its own nullifiers before asking; the feed's
- * are lowercased HERE, on the way in. Skipping that makes an uppercase-serving
- * indexer report every spent note as unspent — the wallet then offers notes it
- * cannot spend, and each attempt dies on a duplicate nullifier. Normalising at
- * ingestion means the cache only ever holds one form, so a feed that changes
- * casing between runs cannot split one nullifier into two entries.
+ * re-verified next pass.
  */
 import type { NullifierCache, SpendDetails } from '../../vault/index';
 import type { NullifierManifest, NullifierSource } from '../feed/sources';
 import { scanAbortError } from '../../../foundation/errors/abort';
 
 /**
- * The casing the local cache stores and queries nullifiers in.
+ * The casing the cache stores and queries nullifiers in.
  *
- * Applied to everything arriving from the feed. Callers lowercase their own
- * side already; this closes the other half so the two can never disagree.
+ * The intersection is an exact string match, so both sides must agree. Callers
+ * lowercase their own; this closes the other half, at INGESTION, so the cache
+ * only ever holds one form and a feed that changes casing between runs cannot
+ * split one nullifier into two entries.
+ *
+ * Skipped, an uppercase-serving indexer reports every spent note as unspent:
+ * the wallet offers notes it cannot spend and each attempt dies on a duplicate.
  */
 function normalizeNullifierHex(hex: string): string {
     return hex.toLowerCase();

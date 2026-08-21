@@ -38,7 +38,12 @@ export type DecryptedMemo = {
     blinding: bigint;
     /** Asset ID of the note. */
     assetId: bigint;
-    /** Counterparty BabyJubJub Ax coordinate. Zero for shield/unshield notes. */
+    /**
+     * Who this note came from, or — on a CHANGE note — the recipient book entry
+     * for the payment beside it: the recipient's viewing key sealed under the
+     * sender's ovk, which is ciphertext and not a curve point. Zero for
+     * shield/unshield notes. See `protocol/note/recipientBook`.
+     */
     sourcePk: bigint;
     /** ZK circuit version the note is spent under, recovered from the memo plaintext. */
     circuitVersion: number;
@@ -52,7 +57,7 @@ export type NoteInput = {
     assetId?: bigint;
     /** BabyJubJub Ax coordinate (owner public key x). Default 0n. */
     ownerPk?: bigint;
-    /** Random blinding scalar. Defaults to BigInt(Date.now()). */
+    /** Random blinding scalar. Defaults to a CSPRNG draw — never the clock. */
     blinding?: bigint;
     /** Secret spending key used to derive the nullifier. Default 0n. */
     spendingKey?: bigint;
@@ -69,17 +74,21 @@ export type NoteInput = {
      * transaction unlinkable even when the same privacy address is reused.
      */
     recipientOwnerPk?: bigint;
-    /** Counterparty BabyJubJub Ax coordinate. Zero for shield/unshield notes. Default 0n. */
+    /**
+     * Counterparty BabyJubJub Ax, or a sealed recipient book entry on a change
+     * note. Zero for shield/unshield notes. Default 0n.
+     */
     sourcePk?: bigint;
     /** Circuit version to stamp on the note. Defaults to `CURRENT_CIRCUIT_VERSION`. */
     circuitVersion?: number;
     /**
      * 32-byte ephemeral secret for the memo ECDH. Default: random.
      *
-     * Two callers supply one, and both do it so the RECIPIENT can predict the
-     * published ephPk and match it by table lookup instead of one trial ECDH per
-     * pool hint: self-notes pass `deriveSelfEphSk`, and a payment to a known
-     * counterparty passes `derivePairwiseEphSk`.
+     * Callers supply one so that somebody can predict the published ephPk and
+     * match it by table lookup instead of one trial ECDH per pool hint:
+     * self-notes pass `deriveSelfEphSk`, and a payment passes
+     * `deriveOutgoingEphSk` — the latter predictable by the SENDER, which is
+     * what lets a restored wallet read back its own payment history.
      *
      * Honoured on the stealth path too, where the same ephSk drives both the
      * memo encryption and the stealth-owner derivation. Passing one is a promise
@@ -87,13 +96,6 @@ export type NoteInput = {
      * two notes in public.
      */
     ephSkOverride?: Uint8Array;
-    /**
-     * Sender's 32-byte outgoing viewing key (ovk). When present on the stealth
-     * path, `build()` seals the memo's shared secret into a 56-byte `ovkBlob` so
-     * the sender can recover this transfer after a cold restore. Absent → no blob
-     * (the app applies the ⊥ default at submit time, never the SDK).
-     */
-    outgoingViewingKey?: Uint8Array;
 };
 
 /**
@@ -149,40 +151,6 @@ export type ZkNote = {
     memo: number[];
     /** Counterparty BabyJubJub Ax coordinate. Zero for shield/unshield notes. */
     sourcePk: bigint;
-    /**
-     * 56-byte outgoing-viewing-key blob (per-note in the domain object; becomes a
-     * per-transaction field at submit, see the OVK plan §4.1). Present only on a
-     * stealth recipient note built with an `outgoingViewingKey`. It wraps the
-     * memo's shared secret under the sender's ovk so the sender can recover the
-     * transfer; the recipient never needs it. Not persisted in the vault.
-     */
-    ovkBlob?: number[];
-};
-
-/**
- * A sender's record of a note they SENT, recovered via the OVK blob. Not a
- * spendable note: it deliberately carries no `spendingKey`, no `nullifier`, no
- * `spent` flag — the sender does not own the recipient's note, only the memory of
- * having sent it. Used to rebuild the outgoing history after a cold restore.
- */
-export type OutgoingNoteRecord = {
-    /** 0x-prefixed 32-byte LE commitment hex of the recipient output. */
-    commitmentHex: string;
-    /** Global Merkle leaf index, when the hint carried one. */
-    leafIndex?: number;
-    /** Amount sent, in planck. */
-    value: bigint;
-    /** Asset ID of the sent note. */
-    assetId: bigint;
-    /** The recipient's one-time stealth owner public key (BJJ Ax). */
-    recipientStealthPk: bigint;
-    /** Blinding scalar of the recipient output. With value/assetId/stealthPk it
-     *  recomputes the commitment — needed to rebuild a payment slip for the note. */
-    blinding: bigint;
-    /** Counterparty BabyJubJub Ax coordinate stamped in the memo. */
-    sourcePk: bigint;
-    /** Circuit version the sent note was created under. */
-    circuitVersion: number;
 };
 
 /**

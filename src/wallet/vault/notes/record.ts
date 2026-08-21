@@ -23,7 +23,7 @@ export function applyNoteStatus(note: ZkNote, status?: NoteStatusUpdate): ZkNote
 }
 
 /**
- * Encrypts a ZkNote into a v2 EncryptedNoteRecord.
+ * Encrypts a ZkNote into an `EncryptedNoteRecord`.
  *
  * The full note (values, secrets) is AES-GCM encrypted under `key`; the note
  * identifiers (commitment, nullifier, asset) are stored as BLIND TAGS under

@@ -37,7 +37,7 @@ import {
 } from '../../../../src/protocol/memo/PaymentSlip';
 import { importPaymentSlip } from '../../../../src/wallet/ops/notes/paymentSlipImport';
 import { toHex } from '../../../../src/foundation/encoding/hex';
-import { QR_PAGE_MAX_CHARS } from '../../../../src/wallet/ops/notes/noteTransfer';
+import { QR_SINGLE_CODE_MAX_CHARS } from '../../../../src/protocol/memo/PaymentSlip';
 import type { ZkNote } from '../../../../src/protocol/types';
 
 const RECIPIENT_SK = 31337n;
@@ -358,6 +358,6 @@ describe('un slip cabe donde tiene que caber', () => {
             })
         );
 
-        expect(wire.length).toBeLessThan(QR_PAGE_MAX_CHARS);
+        expect(wire.length).toBeLessThan(QR_SINGLE_CODE_MAX_CHARS);
     });
 });

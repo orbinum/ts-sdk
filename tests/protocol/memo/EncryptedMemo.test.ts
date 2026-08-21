@@ -1,8 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-    EncryptedMemo,
-    ENCRYPTED_MEMO_SIZE,
-} from '../../../src/protocol/memo/EncryptedMemo';
+import { EncryptedMemo, ENCRYPTED_MEMO_SIZE } from '../../../src/protocol/memo/EncryptedMemo';
 import {
     deriveViewingSecretKey,
     deriveViewingPublicKey,

@@ -49,7 +49,10 @@ export class EvmClient {
 
     /**
      * Performs multiple JSON-RPC calls in a single HTTP request (batch).
-     * Results are returned in the same order as `calls`, as a typed tuple.
+     *
+     * Results come back in the order of `calls`, as a typed tuple. A call the
+     * server answered with an error, or did not answer at all, lands as `null`
+     * in its own slot — never shifting the ones after it.
      */
     async batchRequest<T extends unknown[]>(
         calls: Array<{ method: string; params?: unknown[] }>
@@ -63,8 +66,12 @@ export class EvmClient {
         const res = await postJsonWithRetry(this.rpcUrl, JSON.stringify(body));
         if (!res.ok) throw new Error(`EVM HTTP ${res.status}: ${res.statusText}`);
         const arr = (await res.json()) as JsonRpcBatchResponse<unknown>;
-        arr.sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
-        return arr.map((r) => r.result ?? null) as T;
+        // Reindexed by id, not sorted. JSON-RPC allows a server to omit a
+        // response, and a parse error carries `id: null` — sorting then packs
+        // the survivors together and every later result answers the wrong call,
+        // silently. Same rule as `jsonRpcHttp.batchPost`.
+        const byId = new Map(arr.map((r) => [r.id, r]));
+        return calls.map((_, i) => byId.get(i + 1)?.result ?? null) as T;
     }
 
     // ─── Convenience wrappers ─────────────────────────────────────────────────
@@ -119,7 +126,10 @@ export class EvmClient {
         return this.request<string>('eth_call', [txObj, 'latest']);
     }
 
-    /** Estimates the gas required for a transaction. Returns the estimate in wei as a `bigint`. */
+    /**
+     * Estimates a transaction's gas, in GAS UNITS — not wei. Multiply by
+     * `getGasPrice()` for a cost.
+     */
     async estimateGas(params: {
         from?: string;
         to: string;

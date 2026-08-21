@@ -95,10 +95,14 @@ function makeDeps(over: Partial<TransferDeps> = {}) {
             getMerkleProofByCommitment: vi.fn().mockResolvedValue(proof(ROOTS['0xroot']!)),
         },
         resolver: { resolve: vi.fn().mockResolvedValue({ provider: { tag: 'p' }, version: 1 }) },
+        // `ownerPk` omitido significa "una nota del propio wallet": el builder
+        // real rellena la identidad global. El cambio llega así desde que dejó
+        // de heredar las claves de la nota de entrada, que en una nota recibida
+        // son sigilosas y de un solo uso.
         buildNote: vi
             .fn()
-            .mockImplementation((p: { ownerPk: bigint; value: bigint }) =>
-                Promise.resolve(builtNote(p.ownerPk, p.value))
+            .mockImplementation((p: { ownerPk?: bigint; value: bigint }) =>
+                Promise.resolve({ note: builtNote(p.ownerPk ?? OWNER_PK, p.value) })
             ),
         vault: {
             markSpent: vi.fn().mockResolvedValue(undefined),
@@ -343,16 +347,21 @@ describe('transferNotes — output construction', () => {
         });
         expect(recipientCall!['viewingPublicKey']).toBe(ivk);
 
-        // Change: sender's real pair (no stealth), reopenable under the viewing
-        // key derived from the INPUT's spending key, and the counterparty is the
-        // recipient's ONE-TIME key — never their stable global identifier.
+        // Change: NOTHING is inherited from the input note. Owner, spending key
+        // and viewing key are all left to the builder, which fills the wallet's
+        // GLOBAL identity.
+        //
+        // Inheriting them was a real bug: almost every input is a note the
+        // wallet received, and a received note is stealth — its keys are
+        // one-time values. A change note built from those is sealed toward a
+        // viewing key no rescan holds, so the change vanishes on restore.
         expect(changeCall).toMatchObject({
             value: 20n,
-            ownerPk: OWNER_PK,
-            spendingKey: SPENDING_KEY,
             sourcePk: builtNote(99n, 30n).ownerPk,
         });
-        expect(changeCall!['viewingPublicKey']).toEqual(SENDER_IVK);
+        expect(changeCall!['ownerPk']).toBeUndefined();
+        expect(changeCall!['spendingKey']).toBeUndefined();
+        expect(changeCall!['viewingPublicKey']).toBeUndefined();
         expect('recipientOwnerPk' in changeCall!).toBe(false);
     });
 
@@ -400,7 +409,11 @@ describe('transferNotes — output construction', () => {
         expect('viewingPublicKey' in recipientCall).toBe(false);
     });
 
-    it('uses an explicit senderPk for both outputs when provided', async () => {
+    it('an explicit senderPk names the SENDER, and never owns the change', async () => {
+        // `senderPk` answers "who sent this" on the recipient's note. It used to
+        // also decide who owns the change, which conflated two questions: the
+        // change belongs to this wallet whatever it calls itself, and letting a
+        // caller-supplied pk own it produces a note the wallet cannot spend.
         const deps = makeDeps();
 
         await transferNotes(asDeps(deps), {
@@ -414,7 +427,67 @@ describe('transferNotes — output construction', () => {
             (c) => c[0] as Record<string, unknown>
         );
         expect(recipientCall!['sourcePk']).toBe(777n);
-        expect(changeCall!['ownerPk']).toBe(777n);
+        expect(changeCall!['ownerPk']).toBeUndefined();
+    });
+});
+
+describe('transferNotes — a quién nombra el sourcePk del receptor', () => {
+    // El campo existe para nombrar a la contraparte, así que revelar algo es
+    // su propósito. Lo que hay que fijar es QUÉ se revela: por defecto sale del
+    // dueño de la nota GASTADA, y ese valor cambia según qué se gaste — una
+    // nota recibida es stealth y no nombra a nadie, mientras que un shield o un
+    // cambio pertenecen a la identidad GLOBAL del wallet, que el receptor
+    // aprende y puede enlazar entre pagos.
+    //
+    // El riesgo no es el valor, es que lo elija la selección de monedas sin que
+    // quien llama lo vea.
+    it('por defecto hereda el dueño de la nota gastada', async () => {
+        const deps = makeDeps();
+
+        await transferNotes(asDeps(deps), {
+            inputNotes: [makeNote(50n)],
+            transferAmount: 30n,
+            recipientPk: 99n,
+        });
+
+        const [recipientCall] = deps.buildNote.mock.calls.map(
+            (c) => c[0] as Record<string, unknown>
+        );
+        expect(recipientCall).toMatchObject({ sourcePk: OWNER_PK });
+    });
+
+    it('`senderPk` decide explícitamente qué aprende el receptor', async () => {
+        // La salida para quien no quiera que la selección de monedas lo decida.
+        const deps = makeDeps();
+
+        await transferNotes(asDeps(deps), {
+            inputNotes: [makeNote(50n)],
+            transferAmount: 30n,
+            recipientPk: 99n,
+            senderPk: 4242n,
+        });
+
+        const [recipientCall] = deps.buildNote.mock.calls.map(
+            (c) => c[0] as Record<string, unknown>
+        );
+        expect(recipientCall).toMatchObject({ sourcePk: 4242n });
+    });
+
+    it('`senderPk: 0n` no nombra a nadie', async () => {
+        // Un cero es el "sin contraparte" que ya entiende `hasSourcePk`.
+        const deps = makeDeps();
+
+        await transferNotes(asDeps(deps), {
+            inputNotes: [makeNote(50n)],
+            transferAmount: 30n,
+            recipientPk: 99n,
+            senderPk: 0n,
+        });
+
+        const [recipientCall] = deps.buildNote.mock.calls.map(
+            (c) => c[0] as Record<string, unknown>
+        );
+        expect(recipientCall).toMatchObject({ sourcePk: 0n });
     });
 });
 

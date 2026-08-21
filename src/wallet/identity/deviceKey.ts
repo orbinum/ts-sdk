@@ -28,11 +28,10 @@
 /**
  * A fresh AES-GCM-256 device key.
  *
- * `extractable` defaults to false and should stay that way. Passing true is for
- * the platforms described above — the ones that cannot persist a key handle and
- * must export raw bytes into a secure enclave. Anywhere a handle survives a
- * restart, an extractable key is strictly worse: the material becomes readable
- * by any code in the context.
+ * `extractable` defaults to false and should stay that way — true is only for
+ * the platforms above, which cannot persist a handle and must export bytes into
+ * an enclave. Where a handle survives a restart, extractable is strictly worse:
+ * the material becomes readable by any code in the context.
  */
 export async function generateDeviceKey(extractable = false): Promise<CryptoKey> {
     return crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, extractable, [
@@ -66,20 +65,15 @@ export interface DeviceKeyStore {
     save(key: CryptoKey): Promise<void>;
 }
 
-/**
- * The device key, generating and persisting it on first use.
- *
- * Cached in memory per process: generating a second key would silently orphan
- * every secret encrypted under the first.
- */
+/** The device key, generating and persisting it on first use. */
 export function createDeviceKeyProvider(store: DeviceKeyStore): () => Promise<CryptoKey> {
     let cached: CryptoKey | null = null;
     let inFlight: Promise<CryptoKey> | null = null;
 
     return async function getOrCreateDeviceKey(): Promise<CryptoKey> {
         if (cached) return cached;
-        // Two concurrent callers must not each generate a key and each persist
-        // it — the loser's secrets would become unreadable.
+        // Cached per process and shared in flight, because a SECOND key orphans
+        // every secret encrypted under the first — silently, and for good.
         if (inFlight) return inFlight;
 
         inFlight = (async () => {

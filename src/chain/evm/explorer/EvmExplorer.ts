@@ -205,7 +205,7 @@ export class EvmExplorer {
 
     /**
      * Returns aggregated on-chain data for an EVM address: balance, nonce,
-     * bytecode (truncated), and up to 50 recent logs from the last 1 000 blocks.
+     * bytecode (truncated), and up to 50 logs it EMITTED in the last 1 001 blocks.
      */
     async getAddressInfo(address: string): Promise<EvmAddressInfo> {
         const latest = await this.evm.getBlockNumber().catch(() => 0);
@@ -313,7 +313,7 @@ export class EvmExplorer {
     }
 
     /**
-     * Returns ERC-20 `Transfer` events for `address` from the last 1 000 blocks.
+     * Returns ERC-20 `Transfer` events for `address` from the last 1 001 blocks.
      * When `holderAddress` is provided, restricts results to transfers sent or received by that address.
      */
     async getTokenTransfers(address: string, holderAddress?: string): Promise<TokenTransfer[]> {

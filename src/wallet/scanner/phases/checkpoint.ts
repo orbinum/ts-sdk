@@ -2,11 +2,12 @@
  * Scan checkpointing — persists completed work WHILE the scan runs, so an
  * abort or crash resumes after the last completed batch instead of restarting.
  *
- * Two writers, always invoked in this order per batch by the collect phase:
+ * Two writers, driven by the collect phase:
  *   1. `savePageNotes` (collect's `onPage`)      — saves the batch's NEW notes,
- *      spent status resolved from the locally synced nullifier set.
+ *      spent status resolved from the locally synced nullifier set. Skipped for
+ *      a batch that recovered nothing, which is the common case.
  *   2. `advanceCursor` (collect's `onBatchDone`) — moves the scan cursor past
- *      the batch.
+ *      the batch. Fires for EVERY batch, including ones that owned no notes.
  *
  * Notes first, cursor second: a cursor advanced past unsaved notes would make
  * the next incremental scan skip them forever.

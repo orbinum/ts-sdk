@@ -18,7 +18,7 @@ export async function resetVaultToEmpty(
     storage: NoteStorage,
     existing: Pick<
         VaultConfigRecord,
-        'createdAt' | 'selfEphCounter' | 'pairwiseCounterparties'
+        'createdAt' | 'selfEphCounter' | 'outgoingEphCounter' | 'pairwiseCounterparties'
     > | null,
     chainFingerprint?: string
 ): Promise<void> {

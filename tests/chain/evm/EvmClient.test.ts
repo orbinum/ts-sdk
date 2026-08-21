@@ -130,9 +130,63 @@ describe('EvmClient.batchRequest', () => {
             { method: 'eth_blockNumber' },
         ]);
 
-        // Results are sorted by id, so id=1 (chainId) comes first
+        // Reindexed by id, so id=1 (chainId) answers the first call however the
+        // server ordered the array.
         expect(chainId).toBe('0x15');
         expect(blockNumber).toBe('0x64');
+    });
+
+    /**
+     * Una respuesta que falta NO puede desplazar a las demás.
+     *
+     * JSON-RPC permite al servidor omitir una respuesta, y un error de parseo
+     * llega con `id: null`. Ordenando el array, los supervivientes se empaquetan
+     * juntos y cada resultado posterior contesta a OTRA llamada — sin error, con
+     * valores bien formados atribuidos al método equivocado.
+     */
+    it('una respuesta OMITIDA deja null en su hueco, no desplaza', async () => {
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue({
+                ok: true,
+                json: async () => [
+                    { jsonrpc: '2.0', id: 1, result: '0x15' },
+                    // id 2 no viene
+                    { jsonrpc: '2.0', id: 3, result: '0xdead' },
+                ],
+            })
+        );
+
+        const client = new EvmClient('http://localhost');
+        const [a, b, c] = await client.batchRequest<[string, string, string]>([
+            { method: 'eth_chainId' },
+            { method: 'eth_blockNumber' },
+            { method: 'eth_gasPrice' },
+        ]);
+
+        expect(a).toBe('0x15');
+        expect(b).toBeNull();
+        expect(c).toBe('0xdead');
+    });
+
+    it('un `id: null` no se cuela como el primer resultado', async () => {
+        // Un error de parseo del servidor llega sin id. Con `?? 0` ordenaría
+        // ANTES que todo y se leería como la respuesta a la primera llamada.
+        vi.stubGlobal(
+            'fetch',
+            vi.fn().mockResolvedValue({
+                ok: true,
+                json: async () => [
+                    { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } },
+                    { jsonrpc: '2.0', id: 1, result: '0x15' },
+                ],
+            })
+        );
+
+        const client = new EvmClient('http://localhost');
+        const [first] = await client.batchRequest<[string]>([{ method: 'eth_chainId' }]);
+
+        expect(first).toBe('0x15');
     });
 });
 

@@ -1,14 +1,31 @@
+/**
+ * Building a note: its commitment, its nullifier, and the memo that recovers it.
+ *
+ * Everything is local — no chain access — and every note leaves here in one of
+ * two shapes:
+ *
+ *   - STEALTH, when the caller supplies both halves of a privacy address. The
+ *     commitment covers a one-time owner key, so two payments to one address
+ *     cannot be linked, and the memo carries what the recipient needs to
+ *     rederive the matching spending key.
+ *   - PLAIN, for a wallet's own notes (a shield, a change note), where the
+ *     commitment covers the wallet's global owner key because it has to find
+ *     the note again with its own keys.
+ *
+ * The blinding is the note's only real secret once an amount is guessed, so an
+ * absent one is drawn from a CSPRNG and never from anything predictable.
+ */
 import { CURRENT_CIRCUIT_VERSION, type NoteInput, type ZkNote } from '../types';
 import { EncryptedMemo, ENCRYPTED_MEMO_SIZE } from '../memo/EncryptedMemo';
-import { sealOutgoingBlob, OVK_BLOB_SIZE } from '../memo/OutgoingBlob';
 import { deriveStealthOwnerPk } from '../../foundation/crypto/stealth';
-import { recoverOwnerPkPoint } from '../../foundation/crypto/bjj';
+import { recoverOwnerPkPoint, unpackUsableViewingKey } from '../../foundation/crypto/bjj';
 import { toHex } from '../../foundation/encoding/hex';
 import { bigintTo32Le, bytesToBigintLE } from '../../foundation/encoding/bytes';
-import { mulPointEscalar, unpackPoint } from '@zk-kit/baby-jubjub';
+import { mulPointEscalar } from '@zk-kit/baby-jubjub';
 import { randomBytes } from '@noble/ciphers/utils.js';
 import { BABYJUB_SUBORDER } from '../../foundation/crypto/constants';
 import { poseidon2, poseidon4 } from 'poseidon-lite';
+import { randomBlinding } from '../../foundation/crypto/blinding';
 
 // ─── NoteBuilder ─────────────────────────────────────────────────────────────
 
@@ -39,7 +56,7 @@ export class NoteBuilder {
      * @param input.value            Amount in planck (required).
      * @param input.assetId          Asset ID — default 0n (native ORB-Privacy).
      * @param input.ownerPk          Sender's or recipient's global BabyJubJub Ax — default 0n.
-     * @param input.blinding         Random scalar — defaults to BigInt(Date.now()).
+     * @param input.blinding         Random scalar — defaults to a CSPRNG draw.
      * @param input.spendingKey      Secret key for nullifier — default 0n.
      * @param input.viewingPublicKey Recipient's 32-byte LE packed BJJ ivk. Triggers memo encryption.
      * @param input.recipientOwnerPk Recipient's global ownerPk. Required with viewingPublicKey
@@ -47,24 +64,35 @@ export class NoteBuilder {
      *                               commitment uses ownerPk directly (no stealth).
      */
     static async build(input: NoteInput): Promise<ZkNote> {
+        // ── 1. Normalise inputs ───────────────────────────────────────────────
         const value = input.value;
         const assetId = input.assetId ?? 0n;
         const ownerPk = input.ownerPk ?? 0n;
-        const blinding = input.blinding ?? BigInt(Date.now());
+        // A CSPRNG draw, never the clock. The blinding is the ONLY unknown in
+        // `Poseidon4(value, assetId, ownerPk, blinding)` once an observer guesses
+        // the amount, so it is what makes a commitment hide anything at all. A
+        // `Date.now()` default gives it ~41 bits, and the block timestamp is
+        // public: that collapses the search to a few thousand candidates, and
+        // the commitment falls to brute force in seconds.
+        const blinding = input.blinding ?? randomBlinding();
         const spendingKey = input.spendingKey ?? 0n;
         const sourcePk = input.sourcePk ?? 0n;
         const circuitVersion = input.circuitVersion ?? CURRENT_CIRCUIT_VERSION;
 
+        // ── 2. Pick the path ──────────────────────────────────────────────────
+        // Stealth needs BOTH halves of the recipient's address: the viewing key
+        // to seal toward, and the owner key to derive a one-time owner from.
         const useStealth =
             input.viewingPublicKey !== undefined && input.recipientOwnerPk !== undefined;
 
         let memo: number[];
 
         if (useStealth) {
+            // ── 3. Stealth path: a one-time owner nobody can link ─────────────
             const recipientOwnerPk = input.recipientOwnerPk!;
             const recipientIvkPacked = input.viewingPublicKey!;
 
-            // One ephSk shared between memo encryption and stealth derivation.
+            // 3a. One ephSk shared between memo encryption and stealth derivation.
             //
             // A caller-supplied one is what makes the pairwise path work: the
             // recipient predicts that ephPk and finds the note by table lookup
@@ -77,17 +105,21 @@ export class NoteBuilder {
             // publicly linked as coming from the same sender.
             const ephSk = input.ephSkOverride ?? randomBytes(32);
 
-            // Derive sharedSecret from the ephSk and the recipient's ivk.
+            // 3b. ECDH: the secret both sides reach from opposite directions.
             const ivkPackedBigint = bytesToBigintLE(recipientIvkPacked);
-            const ivkPoint = unpackPoint(ivkPackedBigint);
+            // Rejects low-order points as well as malformed ones. A key from the
+            // cofactor-8 subgroup makes `[ephSk]·ivk` take at most 8 values, so
+            // the memo opens by trying them — value, blinding and sourcePk, with
+            // no secret at all.
+            const ivkPoint = unpackUsableViewingKey(ivkPackedBigint);
             if (!ivkPoint)
                 throw new Error('NoteBuilder.build: invalid recipient viewing public key');
             const ephSkScalar = BigInt(toHex(ephSk)) % BABYJUB_SUBORDER || 1n;
             const sharedPoint = mulPointEscalar(ivkPoint, ephSkScalar);
             const sharedSecret = bigintTo32Le(sharedPoint[0]);
 
-            // Recover the recipient's full BJJ point [Ax, Ay] from the Ax coordinate using
-            // the curve equation. Required by deriveStealthOwnerPk.
+            // 3c. Recover the full BJJ point [Ax, Ay] from the Ax coordinate via
+            // the curve equation — deriveStealthOwnerPk needs both coordinates.
             const recipientPkPoint = recoverOwnerPkPoint(recipientOwnerPk);
             if (!recipientPkPoint)
                 throw new Error(
@@ -100,7 +132,8 @@ export class NoteBuilder {
                 recipientPkPoint
             );
 
-            // Commitment uses stealthOwnerPk. Memo uses the same ephSk so recipient can extract sharedSecret.
+            // 3d. Commitment commits to the STEALTH owner; the memo reuses the
+            // same ephSk so the recipient can recompute the shared secret.
             const stealthCommitment = poseidon4([value, assetId, effectiveOwnerPk, blinding]);
             const stealthCommitmentBytes = bigintTo32Le(stealthCommitment);
 
@@ -128,27 +161,6 @@ export class NoteBuilder {
                     `NoteBuilder.build: invariant violated — memo must be ${ENCRYPTED_MEMO_SIZE} bytes, got ${memo.length}`
                 );
 
-            // OVK: wrap the shared secret so the SENDER can recover this transfer.
-            // Only on the stealth path, and only when an ovk is supplied — the ⊥
-            // default (random blob) is the app's job at submit, never invented here.
-            // The ephPk is sliced from the memo we just built (bytes 148..180), so
-            // it is byte-identical to what goes on chain (raw-bytes-in-KDF rule).
-            let ovkBlob: number[] | undefined;
-            if (input.outgoingViewingKey !== undefined) {
-                const ephPkBytes = Uint8Array.from(memo.slice(148, 180));
-                const sealed = sealOutgoingBlob(
-                    input.outgoingViewingKey,
-                    sharedSecret,
-                    stealthCommitmentBytes,
-                    ephPkBytes
-                );
-                if (sealed.length !== OVK_BLOB_SIZE)
-                    throw new Error(
-                        `NoteBuilder.build: invariant violated — ovkBlob must be ${OVK_BLOB_SIZE} bytes, got ${sealed.length}`
-                    );
-                ovkBlob = Array.from(sealed);
-            }
-
             return {
                 value,
                 assetId,
@@ -164,11 +176,12 @@ export class NoteBuilder {
                 nullifierHex: toHex(nullifierBytes),
                 memo,
                 sourcePk,
-                ...(ovkBlob ? { ovkBlob } : {}),
             };
         }
 
-        // Non-stealth path: own notes (shield, change) — commitment uses ownerPk directly.
+        // ── 4. Non-stealth path: own notes (shield, change) ───────────────────
+        // The commitment commits to `ownerPk` directly: there is no counterparty
+        // to hide from, and the wallet has to find this note again by its own key.
         const commitment = poseidon4([value, assetId, ownerPk, blinding]);
         const nullifier = poseidon2([commitment, spendingKey]);
         const commitmentBytes = bigintTo32Le(commitment);
@@ -223,7 +236,7 @@ export class NoteBuilder {
      * @param note                    The ZkNote whose fields populate the plaintext.
      * @param recipientIvkPacked      32-byte LE packed BJJ viewing public key of the recipient.
      *                                Pass `new Uint8Array(32)` (default) for a public/dummy memo.
-     * @param sourcePk          32-byte counterparty BabyJubJub Ax.
+     * @param sourcePk                32-byte counterparty BabyJubJub Ax.
      *                                Pass `new Uint8Array(32)` (default) for no counterparty.
      */
     static buildMemo(

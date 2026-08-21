@@ -16,9 +16,9 @@ import { OrbinumWallet } from '../../src/wallet/OrbinumWallet';
 import { MemoryVaultStorage } from '../../src/index';
 import { deriveVaultKey } from '../../src/index';
 import {
-    deriveSpendingKeyFromMaster,
+    deriveSpendingKeyV3,
+    deriveViewingSecretKeyV3,
     deriveOwnerPk,
-    deriveViewingSecretKey,
     deriveViewingPublicKey,
 } from '../../src/protocol/keys/PrivacyKeys';
 import type { ZkNote } from '../../src/protocol/types';
@@ -26,7 +26,10 @@ import type { DecryptPool } from '../../src/index';
 import type { ScanHint, ScanHintSource, NullifierSource } from '../../src/index';
 
 const MASTER = new Uint8Array(32).fill(7);
-const SPENDING_KEY = deriveSpendingKeyFromMaster(MASTER);
+// Las ramas v3, que son las únicas que existen: `deriveSpendingKeyFromMaster`
+// era la cadena de v2 y ya no la alcanza ningún camino del wallet.
+const SPENDING_KEY = deriveSpendingKeyV3(MASTER);
+const VIEWING_SECRET = deriveViewingSecretKeyV3(MASTER);
 
 const hint = (i: number): ScanHint => ({
     leafIndex: i,
@@ -193,7 +196,7 @@ describe('OrbinumWallet — identity', () => {
 
         expect(wallet.privacyKeys()).toEqual({
             ownerPk: deriveOwnerPk(SPENDING_KEY),
-            viewingPublicKey: deriveViewingPublicKey(deriveViewingSecretKey(SPENDING_KEY)),
+            viewingPublicKey: deriveViewingPublicKey(VIEWING_SECRET),
         });
     });
 });
@@ -214,6 +217,55 @@ describe('OrbinumWallet — scan', () => {
 
         expect(result.found).toBe(3);
         expect(wallet.getNotes()).toHaveLength(3);
+    });
+
+    it('SEGURIDAD: `lock()` tira la ventana de descubrimiento del pool', async () => {
+        // La ventana cachea un secreto ECDH por índice, todos derivados de la
+        // clave de visión. Vive más que un escaneo por diseño, y por eso vivía
+        // también más que un lock: las claves de sesión se soltaban mientras
+        // decenas de KB de material secreto seguían alcanzables en memoria de
+        // módulo — en el pool de hilo principal, el heap de la propia página.
+        const terminate = vi.fn();
+        const pool = { ...fakePool((h) => note(h.commitmentHex)), terminate } as DecryptPool;
+        const { wallet: w } = makeWallet({ pool });
+        await w.unlock(MASTER);
+        await w.scan();
+
+        w.lock();
+
+        expect(terminate).toHaveBeenCalled();
+    });
+
+    it('y se puede volver a abrir y escanear después de bloquear', async () => {
+        // La contrapartida de terminar el pool: bloquear no puede dejar el
+        // wallet inservible. Un pool con worker respawnea, y el de hilo
+        // principal sólo limpia la caché.
+        await wallet.scan();
+        wallet.lock();
+
+        await wallet.unlock(MASTER);
+        // Desde la hoja 0: el segundo escaneo sería incremental y las tres
+        // pistas ya quedan por detrás del cursor que persistió el primero.
+        const again = await wallet.scan({ sinceLeafIndex: 0 });
+
+        expect(again.alreadyPresent + again.found).toBe(3);
+        expect(wallet.getNotes()).toHaveLength(3);
+    });
+
+    it('SEGURIDAD: `lock()` borra las notas en claro de memoria', async () => {
+        // Soltar las claves no basta. Las notas descifradas viven en una caché
+        // en memoria, y `session.lock()` por sí solo NO la toca — es
+        // `OrbinumWallet.lock` quien la limpia. Un wallet bloqueado que
+        // siguiera devolviendo importes y commitments deja el saldo a la vista
+        // de cualquier cosa con acceso al objeto: una extensión, un volcado de
+        // memoria, una captura de estado.
+        await wallet.scan();
+        expect(wallet.getNotes()).toHaveLength(3);
+
+        wallet.lock();
+
+        expect(wallet.getNotes()).toEqual([]);
+        expect(() => wallet.spendKeys()).toThrow(/locked/);
     });
 
     it('notifies subscribers as notes land', async () => {
@@ -318,7 +370,7 @@ describe('OrbinumWallet — spend dependencies', () => {
         // note-local key would derive garbage.
         expect(keys.spendingKey).toBe(SPENDING_KEY);
         expect(keys.ownerPk).toBe(deriveOwnerPk(SPENDING_KEY));
-        expect(keys.viewingSecretKey).toEqual(deriveViewingSecretKey(SPENDING_KEY));
+        expect(keys.viewingSecretKey).toEqual(VIEWING_SECRET);
     });
 
     it('refuses to hand out keys while locked', () => {
@@ -341,10 +393,10 @@ describe('OrbinumWallet — spend dependencies', () => {
         const { wallet } = makeWallet({ zkVerifier: { getCircuitVersionInfo } });
         await wallet.unlock(MASTER);
 
-        const built = await wallet.buildOutputNote({ value: 10n });
+        const { note } = await wallet.buildOutputNote({ value: 10n });
 
         expect(getCircuitVersionInfo).toHaveBeenCalled();
-        expect((built as { circuitVersion?: number }).circuitVersion).toBe(4);
+        expect((note as { circuitVersion?: number }).circuitVersion).toBe(4);
     });
 
     it('honours a pinned circuit version without touching the chain', async () => {

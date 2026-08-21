@@ -10,11 +10,17 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
     reserveSelfEphIndex,
-    reservePairwiseIndex,
+    reserveOutgoingIndex,
+    registerPairwiseCounterparty,
 } from '../../../../src/wallet/vault/storage/ephemeralIndex';
 import { MemoryVaultStorage } from '../../../../src/wallet/vault/storage/MemoryVaultStorage';
-import { buildConfig, writeConfig, mergeCounters } from '../../../../src/wallet/vault/storage/config';
+import {
+    buildConfig,
+    writeConfig,
+    mergeCounters,
+} from '../../../../src/wallet/vault/storage/config';
 import type { EphemeralCounters } from '../../../../src/wallet/vault/storage/config';
+import type { VaultConfigRecord } from '../../../../src/wallet/vault/storage/contract';
 
 const IVK = '0xAABB';
 
@@ -59,7 +65,7 @@ describe('reserveSelfEphIndex', () => {
     });
 });
 
-describe('reservePairwiseIndex', () => {
+describe('reserveOutgoingIndex', () => {
     let storage: MemoryVaultStorage;
 
     beforeEach(async () => {
@@ -67,171 +73,153 @@ describe('reservePairwiseIndex', () => {
         await storage.putConfig(buildConfig(null));
     });
 
-    it('returns null for a counterparty it has no history for', async () => {
-        // Not "index 0". A vault with no entry cannot tell a first payment from
-        // a counter it lost to a restore, and index 0 on a restored wallet
-        // republishes an ephPk. The caller degrades to a random ephemeral.
-        expect(await reservePairwiseIndex(storage, IVK)).toBeNull();
+    it('hands out 0 first, then counts up', async () => {
+        // Index 0 IS usable here, unlike the pairwise counter. This sequence
+        // depends only on the wallet's own spending key, so a restored wallet
+        // rebuilds it from chain data rather than having to guess.
+        expect(await reserveOutgoingIndex(storage)).toBe(0);
+        expect(await reserveOutgoingIndex(storage)).toBe(1);
+        expect(await reserveOutgoingIndex(storage)).toBe(2);
     });
 
-    it('counts up once there IS history', async () => {
-        // The first call registers the entry and returns null, so the sequence
-        // starts at 1 — index 0 is never handed out at all. That is deliberate:
-        // 0 is the value a restored vault would have collided on.
-        await reservePairwiseIndex(storage, IVK);
-        expect(await reservePairwiseIndex(storage, IVK)).toBe(1);
-        expect(await reservePairwiseIndex(storage, IVK)).toBe(2);
+    it('is ONE sequence for the wallet, not one per recipient', async () => {
+        // Two payments must never share an index, whoever they are for:
+        // reusing one republishes its ephPk and links them in public.
+        const indexes = await Promise.all([
+            reserveOutgoingIndex(storage),
+            reserveOutgoingIndex(storage),
+            reserveOutgoingIndex(storage),
+        ]);
+
+        expect(new Set(indexes).size).toBe(3);
     });
 
-    it('keeps each counterparty on its own counter', async () => {
-        await reservePairwiseIndex(storage, IVK);
-        await reservePairwiseIndex(storage, IVK);
+    it('persists the counter, so a reload never re-issues an index', async () => {
+        await reserveOutgoingIndex(storage);
+        await reserveOutgoingIndex(storage);
 
-        expect(await reservePairwiseIndex(storage, '0xCCDD')).toBeNull();
-    });
+        const reopened = new MemoryVaultStorage();
+        await reopened.putConfig((await storage.getConfig())!);
 
-    it('treats the key case-insensitively', async () => {
-        // Same counterparty written either way must not get two counters —
-        // that would issue index 0 twice to the same recipient.
-        await reservePairwiseIndex(storage, '0xAABB');
-
-        expect(await reservePairwiseIndex(storage, '0xaabb')).toBe(1);
-    });
-
-    it('THE LEAK: a wiped counter never resumes at an index it already published', async () => {
-        // The scenario this whole change exists for. A wallet pays a
-        // counterparty several times, then the vault is restored from seed and
-        // the entry is gone. Handing back 0 here would re-derive the ephSk of
-        // the first payment and republish its ephPk on chain, letting anyone
-        // reading the public feed group the two notes as sharing a sender and a
-        // recipient.
-        await reservePairwiseIndex(storage, IVK);
-        for (let i = 0; i < 5; i++) await reservePairwiseIndex(storage, IVK);
-        expect((await storage.getConfig())?.pairwiseCounterparties?.['0xaabb']?.nextIndex).toBe(6);
-
-        // Restore: the config survives, the counterparty entry does not.
-        const config = (await storage.getConfig())!;
-        delete config.pairwiseCounterparties!['0xaabb'];
-        await storage.putConfig(config);
-
-        expect(await reservePairwiseIndex(storage, IVK)).toBeNull();
-    });
-
-    it('a wiped counter for ONE counterparty leaves the others intact', async () => {
-        await reservePairwiseIndex(storage, '0xAABB');
-        await reservePairwiseIndex(storage, '0xAABB');
-        await reservePairwiseIndex(storage, '0xCCDD');
-        await reservePairwiseIndex(storage, '0xCCDD');
-
-        const config = (await storage.getConfig())!;
-        delete config.pairwiseCounterparties!['0xaabb'];
-        await storage.putConfig(config);
-
-        expect(await reservePairwiseIndex(storage, '0xAABB')).toBeNull();
-        expect(await reservePairwiseIndex(storage, '0xCCDD')).toBe(2);
-    });
-
-    it('registers the counterparty, which makes their payments to us cheap', async () => {
-        await reservePairwiseIndex(storage, IVK);
-
-        const entry = (await storage.getConfig())?.pairwiseCounterparties?.['0xaabb'];
-        expect(entry).toMatchObject({ nextIndex: 1 });
-        expect(typeof entry?.addedAt).toBe('number');
-    });
-
-    it('keeps the original addedAt across later reservations', async () => {
-        await reservePairwiseIndex(storage, IVK);
-        const first = (await storage.getConfig())?.pairwiseCounterparties?.['0xaabb']?.addedAt;
-
-        await reservePairwiseIndex(storage, IVK);
-
-        expect((await storage.getConfig())?.pairwiseCounterparties?.['0xaabb']?.addedAt).toBe(
-            first
-        );
+        expect(await reserveOutgoingIndex(reopened)).toBe(2);
     });
 
     it('never issues the same index twice under concurrent reservation', async () => {
-        const indexes = await Promise.all(
-            Array.from({ length: 20 }, () => reservePairwiseIndex(storage, IVK))
+        const results = await Promise.all(
+            Array.from({ length: 20 }, () => reserveOutgoingIndex(storage))
         );
 
-        expect(new Set(indexes).size).toBe(20);
-    });
-
-    it('leaves other counterparties untouched when one is bumped', async () => {
-        await reservePairwiseIndex(storage, '0xaaaa');
-        await reservePairwiseIndex(storage, '0xbbbb');
-        await reservePairwiseIndex(storage, '0xaaaa');
-
-        const parties = (await storage.getConfig())?.pairwiseCounterparties;
-        expect(parties?.['0xaaaa']?.nextIndex).toBe(2);
-        expect(parties?.['0xbbbb']?.nextIndex).toBe(1);
+        expect(new Set(results).size).toBe(20);
     });
 
     it('throws when no vault config exists', async () => {
-        await expect(reservePairwiseIndex(new MemoryVaultStorage(), IVK)).rejects.toThrow(
-            'vault not initialized'
+        // A caller with nowhere to record the reservation must not assume zero.
+        await expect(reserveOutgoingIndex(new MemoryVaultStorage())).rejects.toThrow(
+            /vault not initialized/
         );
     });
 
-    it('survives a backend that calls the mutator more than once', async () => {
-        // The contract requires updateConfig to be ATOMIC, not that it invokes
-        // `mutate` exactly once — an optimistic backend may retry on contention.
-        // A verdict derived from a flag set inside the mutator would then read
-        // an attempt that lost. This asserts the verdict comes off the result.
-        const inner = new MemoryVaultStorage();
-        await inner.putConfig(buildConfig(null));
-        const retrying = Object.create(inner) as MemoryVaultStorage;
-        retrying.updateConfig = async (mutate) => {
-            const committed = await inner.updateConfig(mutate);
-            // A losing attempt replayed AFTER the winner, against the state as
-            // it was BEFORE. This is what a retry-on-contention backend does,
-            // and it leaves any flag written inside `mutate` describing the
-            // attempt that did not commit.
-            mutate({ id: 'main', v: 4, createdAt: 1, updatedAt: 1 });
-            return committed;
-        };
+    describe('a counter rebuilt from the chain', () => {
+        it('resumes PAST the reconstructed index, not at it', async () => {
+            // The feed that supplied it could have hidden the highest published
+            // index. Leaving a gap means hiding one is not enough to force a
+            // collision — a whole run would have to vanish.
+            const reserved = await reserveOutgoingIndex(storage, 5);
 
-        expect(await reservePairwiseIndex(retrying, IVK)).toBeNull();
-        expect(await reservePairwiseIndex(retrying, IVK)).toBe(1);
+            expect(reserved).toBeGreaterThan(5);
+        });
+
+        it('never moves the counter BACKWARDS', async () => {
+            // The defence against a lying feed: a stored counter always wins,
+            // so a reconstruction can only ever advance the sequence.
+            await reserveOutgoingIndex(storage);
+            await reserveOutgoingIndex(storage);
+            await reserveOutgoingIndex(storage);
+
+            expect(await reserveOutgoingIndex(storage, 0)).toBe(3);
+        });
+
+        it('ignores a reconstruction that is not a usable counter', async () => {
+            // These arrive from a sweep over server data. A fraction truncates
+            // onto an index already used, and NaN derives from nothing.
+            for (const bad of [NaN, Infinity, -1, 2.5, '3' as unknown as number]) {
+                const storage2 = new MemoryVaultStorage();
+                await storage2.putConfig(buildConfig(null));
+
+                expect(await reserveOutgoingIndex(storage2, bad)).toBe(0);
+            }
+        });
+
+        it('survives a backend that calls the mutator more than once', async () => {
+            // updateConfig is atomic but is not promised to call mutate exactly
+            // once, so the verdict is read off the committed result.
+            let calls = 0;
+            const retrying = {
+                ...storage,
+                getConfig: () => storage.getConfig(),
+                updateConfig: async (mutate: (c: VaultConfigRecord) => VaultConfigRecord) => {
+                    calls++;
+                    await storage.updateConfig(mutate);
+                    return storage.updateConfig(mutate);
+                },
+            } as unknown as MemoryVaultStorage;
+
+            const first = await reserveOutgoingIndex(retrying);
+            const second = await reserveOutgoingIndex(retrying);
+
+            expect(calls).toBe(2);
+            expect(first).not.toBe(second);
+        });
+    });
+});
+
+describe('registerPairwiseCounterparty', () => {
+    let storage: MemoryVaultStorage;
+
+    beforeEach(async () => {
+        storage = new MemoryVaultStorage();
+        await storage.putConfig(buildConfig(null));
     });
 
-    it('a config with an explicit nextIndex of 0 is treated as no history', async () => {
-        // Defensive: nothing writes 0 today, but a hand-edited or migrated
-        // record could. Zero means "nothing published yet", so the same rule
-        // applies — never hand back an index that was already on chain.
-        const config = (await storage.getConfig())!;
-        config.pairwiseCounterparties = { '0xaabb': { nextIndex: 0, addedAt: 1 } };
-        await storage.putConfig(config);
+    it('records the counterparty, which makes their payments to us cheap', async () => {
+        await registerPairwiseCounterparty(storage, IVK);
 
-        expect(await reservePairwiseIndex(storage, IVK)).toBeNull();
+        const config = await storage.getConfig();
+        expect(config?.pairwiseCounterparties?.[IVK.toLowerCase()]).toBeDefined();
     });
 
-    it('resumes correctly from a counter restored by mergeCounters', async () => {
-        // The recovery path that DOES work: a config write merges counters
-        // forward, so a vault whose entry survived keeps its place in the
-        // sequence instead of dropping back to null.
-        const config = (await storage.getConfig())!;
-        config.pairwiseCounterparties = { '0xaabb': { nextIndex: 9, addedAt: 1 } };
-        await storage.putConfig(config);
+    it('treats the key case-insensitively', async () => {
+        // Two entries for one person would only waste window slots, but the
+        // map is also what the scan iterates, so it must not grow per casing.
+        await registerPairwiseCounterparty(storage, '0xAABB');
+        await registerPairwiseCounterparty(storage, '0xaabb');
 
-        expect(await reservePairwiseIndex(storage, IVK)).toBe(9);
-        expect(await reservePairwiseIndex(storage, IVK)).toBe(10);
+        const config = await storage.getConfig();
+        expect(Object.keys(config?.pairwiseCounterparties ?? {})).toEqual(['0xaabb']);
     });
 
-    it('under concurrency, exactly one caller gets null and the rest get distinct indexes', async () => {
-        // Twenty racing first-payments to the same counterparty. Only the one
-        // that created the entry may return null; every other must get its own
-        // index, because two callers sharing one index is the leak itself.
-        const results = await Promise.all(
-            Array.from({ length: 20 }, () => reservePairwiseIndex(storage, IVK))
+    it('keeps the original addedAt across later registrations', async () => {
+        await registerPairwiseCounterparty(storage, IVK);
+        const first = (await storage.getConfig())?.pairwiseCounterparties?.[IVK.toLowerCase()];
+
+        await registerPairwiseCounterparty(storage, IVK);
+        const second = (await storage.getConfig())?.pairwiseCounterparties?.[IVK.toLowerCase()];
+
+        expect(second?.addedAt).toBe(first?.addedAt);
+    });
+
+    it('leaves other counterparties untouched', async () => {
+        await registerPairwiseCounterparty(storage, IVK);
+        await registerPairwiseCounterparty(storage, '0xccdd');
+
+        const config = await storage.getConfig();
+        expect(Object.keys(config?.pairwiseCounterparties ?? {})).toHaveLength(2);
+    });
+
+    it('throws when no vault config exists', async () => {
+        await expect(registerPairwiseCounterparty(new MemoryVaultStorage(), IVK)).rejects.toThrow(
+            /vault not initialized/
         );
-
-        const nulls = results.filter((r) => r === null);
-        const indexes = results.filter((r): r is number => r !== null);
-        expect(nulls).toHaveLength(1);
-        expect(new Set(indexes).size).toBe(19);
-        expect(indexes).not.toContain(0);
     });
 });
 
@@ -242,14 +230,16 @@ describe('counter survival', () => {
         const storage = new MemoryVaultStorage();
         await storage.putConfig(buildConfig(null));
         await reserveSelfEphIndex(storage);
-        await reservePairwiseIndex(storage, IVK);
+        await reserveOutgoingIndex(storage);
+        await registerPairwiseCounterparty(storage, IVK);
 
         const before = await storage.getConfig();
         await storage.putConfig(buildConfig(before, '0xchain'));
         const after = await storage.getConfig();
 
         expect(after?.selfEphCounter).toBe(1);
-        expect(after?.pairwiseCounterparties?.['0xaabb']?.nextIndex).toBe(1);
+        expect(after?.outgoingEphCounter).toBe(1);
+        expect(after?.pairwiseCounterparties?.['0xaabb']).toBeDefined();
     });
 });
 
@@ -285,18 +275,28 @@ describe('writeConfig — a stale snapshot must not roll a counter back', () => 
         expect(await reserveSelfEphIndex(storage)).not.toBe(reserved);
     });
 
-    it('keeps a pairwise reservation made after the snapshot', async () => {
+    it('keeps an outgoing reservation made after the snapshot', async () => {
         const stale = await storage.getConfig();
-        await reservePairwiseIndex(storage, IVK);
+        await reserveOutgoingIndex(storage);
 
         await writeConfig(storage, stale);
 
-        expect((await storage.getConfig())?.pairwiseCounterparties?.['0xaabb']?.nextIndex).toBe(1);
+        expect((await storage.getConfig())?.outgoingEphCounter).toBe(1);
+    });
+
+    it('never hands out the same outgoing index twice across a write', async () => {
+        for (let i = 0; i < 5; i++) await reserveOutgoingIndex(storage);
+        const stale = await storage.getConfig();
+        const reserved = await reserveOutgoingIndex(storage);
+
+        await writeConfig(storage, stale);
+
+        expect(await reserveOutgoingIndex(storage)).not.toBe(reserved);
     });
 
     it('keeps a counterparty registered entirely inside the window', async () => {
         const stale = await storage.getConfig();
-        await reservePairwiseIndex(storage, '0xnew');
+        await registerPairwiseCounterparty(storage, '0xnew');
 
         await writeConfig(storage, stale);
 

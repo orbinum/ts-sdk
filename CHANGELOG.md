@@ -7,6 +7,168 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-08-21
+
+**Every identity derives differently, and every existing note is orphaned.**
+
+A note lives on chain committed under its `ownerPk`. Re-deriving an identity does
+not move it — it makes it unreachable. **Holders must unshield everything before
+upgrading.** Nothing is swept, converted or migrated, and there is no code path
+that reads an older vault.
+
+The change buys three things that v2 could not express: watch-only wallets, exact
+payment history for the sender, and a note-ownership secret that no longer
+descends from the spending key.
+
+### Breaking
+
+#### Identity derivation is v3
+
+Every secret is now a sibling HKDF branch of the master, instead of a chain:
+
+| Secret | v2 | v3 |
+|---|---|---|
+| spendingKey | `BigInt(master) % BABYJUB_SUBORDER` | `HKDF(master, "orbinum-spend-v3")` |
+| ivsk | `HKDF(LE32(spendingKey), "orbinum-ivk-v1")` — descends from the spending key | `HKDF(master, "orbinum-ivk-v3")` |
+| ovk | `HKDF(master, "orbinum-ovk-v1")` | `HKDF(master, "orbinum-ovk-v3")` |
+
+Deriving `ivsk` from `spendingKey` meant the secret that finds your notes was
+downstream of the secret that spends them; a viewing credential could not be
+handed out without handing out spend authority. Sibling branches separate them,
+which is what makes `exportViewingCredential` possible at all.
+
+**Users do not re-sign.** `SpendingKeyRequest` is untouched — same
+`SPENDING_KEY_VERIFYING_CONTRACT`, same `KEY_VERSION = 'v2'`, same EIP-712
+message. The same signature produces the same master; only the branches below it
+changed. Bumping the digest would have forced a re-sign for an identical master.
+
+Removed: `deriveOutgoingViewingKey` (use `deriveOutgoingViewingKeyV3`).
+`deriveSpendingKeyFromMaster` and `deriveViewingSecretKey` remain for reading
+legacy material only — `PrivacyKeyManager` no longer calls them.
+
+#### Vaults are namespaced by identity version
+
+`vaultStorageName(address, chainFingerprint?, version = 'v3')` embeds the version
+before the fingerprint: `orbinum-vault-v3-{fingerprint}-{account}`. An existing
+vault is never opened under the new name and is not migrated — the wallet starts
+empty and rescans.
+
+That is deliberate rather than an oversight: two schemes over one account produce
+different keys, and `VaultStore.unlock` cannot distinguish a foreign vault from a
+corrupt one. It resets, taking the other version's notes with it. The name is
+what keeps them apart. `VAULT_SCHEMA_VERSION` stays at 5 — there is no schema
+migration because there is no read of the old vault at all.
+
+#### Removed modules
+
+- **`OutgoingBlob`** — `sealOutgoingBlob`, `openOutgoingBlob`,
+  `deriveOutgoingCipherKey`, `randomOutgoingBlob`, `OVK_BLOB_SIZE`, and the
+  `ZkNote.ovkBlob` / `NoteInput.outgoingViewingKey` fields. Senders recognised
+  their own payments through a wrapped key published per note; they now do it
+  through a deterministic outgoing ephemeral, which puts nothing extra on chain.
+- **`noteTransfer`** — the `orbinum://notes/v1/` QR format, with no replacement:
+  `encodeNoteTransferPages`, `decodeNoteTransferPage`, `assembleNoteTransfer`,
+  `noteToTransferEntry`, `NOTE_TRANSFER_URI_SCHEME`, `QR_PAGE_MAX_CHARS`, and the
+  `NoteTransferEntry` / `NoteTransferPayload` types. It moved spendable notes —
+  spending keys included — between devices. `QR_SINGLE_CODE_MAX_CHARS` survives,
+  relocated to `PaymentSlip`.
+- **`tryRecoverOutgoing`** and `OutgoingHint` → `recoverSentNote`,
+  `recoverSentFromSharedSecret`, `SentNoteFacts`.
+- **`OutgoingNoteRecord`** → `SentNoteFacts`.
+- **`isSs58`** from `foundation/address`. It was reachable through the root
+  barrel; no consumer in this workspace used it.
+
+#### Changed signatures
+
+- `OrbinumWallet.buildOutputNote` returns `{ note, outgoingIndex? }`, not a bare
+  `ZkNote`. Same for the new `buildZkNoteWithIndex`; plain `buildZkNote` is
+  unchanged.
+- `ScanResult` gained required `sentNotes` and `discovery`.
+- `DecryptBatchResult` gained five required fields — `maxOutgoingEphIndex`,
+  `sentNotes`, `learnedRecipients`, `unmatchedSent`, `sealedBookEntries` —
+  breaking custom `DecryptPool` implementations. `sealedBookEntries` serialises
+  as decimal strings, not bigints, because hosts JSON-encode the worker reply.
+- `reservePairwiseIndex` → `registerPairwiseCounterparty`.
+- `NoteInput.sourcePk` on a **change** note now carries a sealed recipient-book
+  entry rather than a curve point.
+
+#### Inputs that used to be accepted now throw
+
+- Low-order (cofactor-8) viewing keys are rejected when sealing or opening a memo
+  or a payment slip, via `unpackUsableViewingKey`. A memo sealed toward such a
+  key was readable **without any key at all**.
+- Privacy addresses with an all-zero or low-order `ivk`, or an all-zero
+  `ownerPk`, are rejected.
+- `bytesToBjjScalar` and AccountId32 parsing throw on wrong-length input;
+  `deriveOutgoingEphSk` throws on a degenerate ovk or a non-u32 index.
+- `NoteInput.blinding` now defaults to `randomBlinding()` (CSPRNG) instead of
+  `BigInt(Date.now())`. A timestamp default left the commitment brute-forceable —
+  measured at 2.4 s.
+
+### Added
+
+- **Watch-only wallets.** `deriveIdentity(rootSecret, version)` and
+  `exportViewingCredential(identity, { includeOutgoing })`. `ViewingCredential`
+  omits `spendingKey` *by type*, so a credential cannot carry spend authority by
+  accident. Pass `outgoingViewingKey` to see payment history; omit it to scan
+  received notes only.
+- **Sent-note recovery.** `protocol/eph/outgoingEph.ts` derives a third
+  deterministic-ephemeral family on its own domain
+  (`SHA256("orbinum-outgoing-eph-v3" || ovk || u32le(i))`), and
+  `protocol/note/recoverSent.ts` matches by `ephPk` rather than by commitment —
+  the value is what is being recovered, so it cannot be part of the lookup.
+  History rows now carry exact amounts instead of `Σ inputs − change − fee`.
+- **Recipient book.** `sealRecipientBookEntry` / `openRecipientBookEntry` carry
+  the recipient's ivk in the change note's `sourcePk`, keystream-XOR'd under the
+  ovk and keyed on the payment's commitment. It never enters the Poseidon4
+  commitment or the circuit, and publishes nothing additional on chain.
+- `foundation/crypto/keyGuards.ts` — `assertSecretKeyBytes` (throws, for
+  programming errors) and `isUsableSecretKey` (predicate, for scan paths that
+  must not throw on hostile data).
+- `PrivacyAddressScheme` accepts `orbpriv1` / `orbpriv2` / `orbpriv3`; only
+  `orbpriv3` is emitted, and the checksum now covers the scheme string.
+- `reserveOutgoingIndex`, `OUTGOING_EPH_WINDOW = 64`, `MAX_EPH_WINDOW = 2^20`,
+  types `SentNoteMatch` and `UnmatchedSentHint`.
+- `OrbinumWallet` config accepts `identityVersion`.
+
+### Changed
+
+- Sent-note discovery runs on **full scans only** (`outgoingEph: !isIncremental`),
+  so an incremental scan stays cheap. Cross-batch retry reunites a payment split
+  from its change note by a page boundary, capped at 64 entries per side — the
+  unbounded version measured ~6 s at 200×200 on feed-controlled data.
+- `ReconstructDeps.sentNotes` and `ReconstructedTxRecord.paymentSlip` are
+  optional: omit them and history keeps its previous arithmetic-only behaviour.
+- `VaultConfigRecord.outgoingEphCounter` is recoverable from chain data, unlike
+  `pairwiseCounterparties`.
+- **PaymentSlip wire format is unchanged** — same `orbslip1:` envelope. The
+  changes are hardening: low-order key rejection, and `decodePaymentSlip` now
+  parses through `fromHex` instead of a local loop that accepted a valid prefix
+  and silently dropped the rest. Old slips still decode, but they reference notes
+  that v3 orphans.
+- Chain layer, internal only: `NullifiersSpent` / `CommitmentsInserted` event
+  mapping; the `pallet-evm` vs `pallet-ethereum` `Executed` ambiguity resolved
+  toward the richer shape; the memo size doc corrected from 104 to 180 bytes.
+
+### Migration
+
+1. **Unshield everything before upgrading.** There is no sweep and no converter.
+   The warning has to reach holders on the *current* SDK — shipped with v3 it
+   arrives after their notes are already unreachable.
+2. A full rescan happens implicitly: the v3 vault name opens an empty vault.
+   Sent-note history and the recipient book only populate on a full scan.
+3. Pass `outgoingViewingKey` in `WalletScanKeys` for payment history; omit it for
+   watch-only.
+4. Custom `DecryptPool` implementations must return the five new
+   `DecryptBatchResult` fields; hosts building a `ScanResult` must supply
+   `sentNotes` and `discovery`.
+5. Rename `reservePairwiseIndex` → `registerPairwiseCounterparty`, replace
+   `tryRecoverOutgoing` → `recoverSentNote`, drop `ovkBlob` and
+   `NoteInput.outgoingViewingKey`, and adapt to `buildOutputNote` returning
+   `{ note, outgoingIndex? }`.
+6. Hosts using the QR note-transfer format must remove it; there is no
+   replacement. Hosts calling `isSs58` must reimplement it.
+
 ## [2.1.0] - 2026-08-21
 
 **The `relayer` parameter is gone from the chain.**

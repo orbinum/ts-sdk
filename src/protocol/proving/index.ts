@@ -1,3 +1,14 @@
+/**
+ * Proof generation for the three spending circuits.
+ *
+ * Each module turns a caller's bigints into the decimal-string witness the
+ * prover wants, then hands it to `@orbinum/proof-generator`. The artifacts
+ * (wasm + zkey) come from an injected `ArtifactProvider`, so a browser fetches
+ * them and a Node host reads them off disk.
+ *
+ * None of these validate the witness. The circuit owns every constraint, and an
+ * inconsistent witness fails at proof time rather than producing a bad proof.
+ */
 export { CircuitType, WebArtifactProvider, generateUnshieldProof } from './unshield';
 export type {
     ArtifactProvider,

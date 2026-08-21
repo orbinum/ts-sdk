@@ -22,7 +22,7 @@ export type ShieldedEvent = {
     amount: bigint;
     /** 0x-prefixed 32-byte Poseidon commitment (LE). */
     commitment: string;
-    /** 0x-prefixed encrypted memo bytes (104 bytes). */
+    /** 0x-prefixed encrypted memo (180 bytes — see `ENCRYPTED_MEMO_SIZE`). */
     encryptedMemo: string;
     /** Leaf index assigned in the Merkle tree. */
     leafIndex: number;
@@ -54,7 +54,11 @@ export type CommitmentsInsertedEvent = {
 
 /**
  * Emitted by `unshield()` when a note is withdrawn to the public chain.
- * Rust variant: `Unshielded { nullifier, amount, recipient, change_commitment }`
+ *
+ * Rust variant: `Unshielded { nullifier, amount, recipient, change_commitment,
+ * change_encrypted_memo, change_leaf_index }`. The last two are NOT modelled
+ * here — a consumer that needs the change note's memo or its leaf position
+ * reads the raw event, or finds the note by scanning.
  */
 export type UnshieldedEvent = {
     /** 0x-prefixed 32-byte Poseidon nullifier (LE). */
@@ -78,7 +82,11 @@ export type MerkleRootUpdatedEvent = {
     oldRoot: string;
     /** 0x-prefixed new Merkle root (32 bytes, LE). */
     newRoot: string;
-    /** Total number of leaves after the update. */
+    /**
+     * Total leaves ever inserted, GLOBAL across the whole forest — never the
+     * current tree's size. Dense and monotonic, which is what indexer chunking
+     * and scan cursors rely on; per-tree size is `treeSize % LEAVES_PER_TREE`.
+     */
     treeSize: number;
 };
 
@@ -110,7 +118,13 @@ export type AssetUnverifiedEvent = {
 
 // ─── Discriminated union ──────────────────────────────────────────────────────
 
-/** All events emitted by pallet-shielded-pool as a discriminated union. */
+/**
+ * The pallet events this SDK models, as a discriminated union.
+ *
+ * NOT every variant: `TreeSealed` (forest rotation) and `ValidatorFeesClaimed`
+ * are emitted by the pallet and absent here. A consumer that acts on a tree
+ * rotation has to read the raw event.
+ */
 export type ShieldedPoolEvent =
     | { type: 'Shielded'; data: ShieldedEvent }
     | { type: 'NullifiersSpent'; data: NullifiersSpentEvent }

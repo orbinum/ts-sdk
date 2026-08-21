@@ -24,6 +24,16 @@ import type { NoteStorage } from './contract';
 const MAX_EPH_INDEX = 0xffff_fffe;
 
 /**
+ * Indexes skipped when an outgoing counter is rebuilt from chain data.
+ *
+ * A feed that hides the highest published index makes the reconstruction return
+ * one already in use. Resuming past a gap means hiding one index is not enough
+ * — a feed would have to hide this many consecutive top indexes, each of which
+ * is a note the wallet can see is missing when it scans.
+ */
+const RESTORE_SAFETY_GAP = 8;
+
+/**
  * A stored counter, or `null` when it cannot be used to derive from.
  *
  * The config survives restores, migrations, backups and hand-editing, so it
@@ -60,68 +70,141 @@ export async function reserveSelfEphIndex(storage: NoteStorage): Promise<number>
     }));
     if (!updated) throw new Error('vault not initialized');
 
-    // The mutator above already replaced an unusable counter with a fresh
-    // sequence, so this reads back a valid one. Restarting is the right repair
-    // here: a corrupt counter means the published history is unknown, and index
-    // 0 of a fresh sequence is no more likely to collide than any other guess.
-    // Unlike the pairwise path there is no "no history" answer to return, since
-    // the caller needs an index or an exception.
+    // The mutator already replaced an unusable counter with a fresh sequence,
+    // so this reads back a valid one. Restarting is the right repair: a corrupt
+    // counter means the published history is unknown, and 0 of a fresh sequence
+    // is no likelier to collide than any other guess.
     return (usableCounter(updated.selfEphCounter) ?? 1) - 1;
 }
 
 /**
- * Reserves the next pairwise index for a counterparty, keyed by their packed
- * viewing public key. Registering the counterparty is a side effect worth
- * having: it makes the REVERSE direction cheap too, since their future payments
- * to this wallet become hash lookups instead of one trial ECDH per note.
+ * Reserves the next OUTGOING index — the ephemeral published on a note this
+ * wallet sends.
  *
- * Returns `null` when this vault holds no history for that counterparty, and
- * the caller must then use a random ephemeral. The reason is that "no history"
- * has two causes this function cannot tell apart:
+ * "No history" is unambiguous here, unlike the pairwise counter: a sender can
+ * predict every ephPk they published, so a restored wallet recovers the counter
+ * by sweeping the chain. That is why this may start at 0 instead of degrading
+ * to a random ephemeral.
  *
- *   - a genuine first payment, where index 0 is correct;
- *   - a counter that was LOST — a restored seed, a cleared IndexedDB, a wipe
- *     and rescan — where index 0 was already published and re-deriving it
- *     republishes that ephPk, linking the two notes in public.
+ * THE COUNTER ONLY MOVES FORWARD. `fromChain` comes from a feed, and a feed
+ * that HID the highest published index would report a counter already used —
+ * handing it out again republishes that ephPk and links the two notes in
+ * public. So it is a floor, never the truth: a stored counter always wins.
  *
- * Unlike `selfEphCounter`, this one cannot be recovered: the index was
- * published on a note encrypted toward someone else, so it never appears in
- * this wallet's own scan, and asking a server whether a given ephPk exists
- * would reveal which notes are ours. So the ambiguity is resolved the safe way
- * — the caller degrades to random, costing the recipient one trial scan, and
- * every later payment to the same counterparty takes the fast path again.
+ * The restore itself is the one exposure, having no stored counter to defend
+ * with. `RESTORE_SAFETY_GAP` covers it by resuming past a run of unused
+ * indexes, so hiding one top index is not enough — a feed would have to hide
+ * the whole run. Skipped indexes are free and only widen a window.
  *
- * The entry is still created: the NEXT payment has a counter, and registering
- * the counterparty is what makes the reverse direction cheap.
+ * @param fromChain Next index per `reconstructOutgoingIndex`, or undefined on
+ *                  the normal path where the stored counter stands alone.
  */
-export async function reservePairwiseIndex(
+export async function reserveOutgoingIndex(
+    storage: NoteStorage,
+    fromChain?: number
+): Promise<number> {
+    const recovered = usableCounter(fromChain);
+
+    // Detected INSIDE the mutator, where the read is atomic. Checking first
+    // would be advisory: a concurrent reservation could exhaust the counter
+    // between read and write, and a transient read failure would skip it.
+    //
+    // It matters because the repair below cannot tell CORRUPT from EXHAUSTED —
+    // `usableCounter` rejects a fraction, a NaN and a past-the-ceiling value
+    // alike, and `?? 0` reads them all as "start at 0". For a corrupt counter
+    // that is right. For an exhausted one it is the leak: 0 is an index this
+    // wallet certainly published, and so is every index after it.
+    //
+    // Shape separates them: a whole number above the ceiling is a sequence that
+    // ran out, not a scrambled value. The flag goes in the RECORD, not a local,
+    // since `updateConfig` may call `mutate` more than once and a local would
+    // keep whichever attempt lost.
+    let exhausted = false;
+    const updated = await storage.updateConfig((config) => {
+        const raw = config.outgoingEphCounter;
+        if (typeof raw === 'number' && Number.isSafeInteger(raw) && raw > MAX_EPH_INDEX) {
+            exhausted = true;
+            return config; // untouched: a spent counter must not be repaired away
+        }
+        exhausted = false;
+
+        const stored = usableCounter(raw) ?? 0;
+        // A reconstruction only counts when it exceeds what is already known,
+        // and lands past a gap: it is the branch that has no local counter to
+        // fall back on, so it is also the one a hostile feed can aim at.
+        const floor =
+            recovered !== null && recovered > stored
+                ? Math.min(recovered + RESTORE_SAFETY_GAP, MAX_EPH_INDEX)
+                : stored;
+        return {
+            ...config,
+            outgoingEphCounter: floor + 1,
+            updatedAt: Date.now(),
+        };
+    });
+    if (!updated) throw new Error('vault not initialized');
+    // Re-derived from the committed record, not from the flag alone: the flag
+    // only reports the last mutator call, while this is what actually landed.
+    if (
+        exhausted ||
+        (typeof updated.outgoingEphCounter === 'number' &&
+            Number.isSafeInteger(updated.outgoingEphCounter) &&
+            updated.outgoingEphCounter > MAX_EPH_INDEX)
+    ) {
+        throw new Error('outgoing ephemeral sequence exhausted');
+    }
+
+    // Read the reservation off the committed result, never off a value computed
+    // inside the mutator: `updateConfig` is atomic but is not promised to call
+    // `mutate` exactly once, so a backend retrying on contention could leave a
+    // local variable holding the attempt that lost.
+    //
+    // Refused rather than defaulted, and that is the whole point. Reading an
+    // unusable counter as "start over" is what the SELF path does, because a
+    // fresh sequence there is no likelier to collide than any other guess. Here
+    // it is the opposite: index 0 is the first index this wallet ever published,
+    // so restarting hands back a value guaranteed to be on chain already and
+    // republishes its ephPk. The caller treats a throw as "no index" and falls
+    // back to a random ephemeral — a slow scan, against a permanent public link.
+    const committed = usableCounter(updated.outgoingEphCounter);
+    if (committed === null || committed - 1 >= MAX_EPH_INDEX) {
+        throw new Error('outgoing ephemeral sequence exhausted');
+    }
+    return committed - 1;
+}
+
+/**
+ * Records a counterparty this wallet has paid, keyed by their packed viewing
+ * public key.
+ *
+ * Purely an optimisation for the REVERSE direction: once they are known, their
+ * future payments to this wallet are found by hash lookup against a precomputed
+ * window instead of one trial ECDH per note in the pool. Nothing this wallet
+ * publishes depends on it, so a failure here costs scan speed and nothing else.
+ *
+ * The stored `nextIndex` is legacy — outgoing ephemerals now come from the
+ * wallet-wide sequence in `outgoingEphCounter`, which is recoverable where a
+ * per-counterparty one was not. It is preserved rather than dropped so that a
+ * vault written by an older version still reads back cleanly.
+ */
+export async function registerPairwiseCounterparty(
     storage: NoteStorage,
     ivkHex: string
-): Promise<number | null> {
+): Promise<void> {
     const key = ivkHex.toLowerCase();
     const updated = await storage.updateConfig((config) => {
-        const stored = usableCounter(config.pairwiseCounterparties?.[key]?.nextIndex);
-        const addedAt = config.pairwiseCounterparties?.[key]?.addedAt;
+        const existing = config.pairwiseCounterparties?.[key];
         return {
             ...config,
             pairwiseCounterparties: {
                 ...config.pairwiseCounterparties,
                 [key]: {
-                    nextIndex: (stored ?? 0) + 1,
-                    addedAt: typeof addedAt === 'number' ? addedAt : Date.now(),
+                    nextIndex: usableCounter(existing?.nextIndex) ?? 0,
+                    addedAt: typeof existing?.addedAt === 'number' ? existing.addedAt : Date.now(),
                 },
             },
             updatedAt: Date.now(),
         };
     });
     if (!updated) throw new Error('vault not initialized');
-
-    // Read the verdict off the RESULT, never off a flag set inside the mutator.
-    // The contract requires `updateConfig` to be atomic but does not promise it
-    // calls `mutate` exactly once — a backend retrying on contention would leave
-    // such a flag holding the value of an attempt that lost. A committed
-    // `nextIndex` of 1 means this call created the entry, whichever attempt won.
-    const nextIndex = usableCounter(updated.pairwiseCounterparties?.[key]?.nextIndex);
-    if (nextIndex === null || nextIndex <= 1) return null;
-    return nextIndex - 1;
 }

@@ -4,13 +4,18 @@ How the pieces of the note model fit together. Each piece has its own document;
 this one is the map. The SDK's _code_ architecture — layers, subpaths,
 packaging — is a separate concern: [sdk-architecture.md](../sdk-architecture.md).
 
-| Document                                       | Covers                                                       |
-| ---------------------------------------------- | ------------------------------------------------------------ |
-| [note-cryptography.md](./note-cryptography.md) | Keys, commitments, nullifiers, encodings, disclosure         |
-| [identity.md](./identity.md)                   | Deriving who you are, and keeping it across launches         |
-| [vault.md](./vault.md)                         | Storing notes encrypted, and what the storage must guarantee |
-| [note-discovery.md](./note-discovery.md)       | Finding your notes without telling anyone which they are     |
-| [spending.md](./spending.md)                   | Turning notes into transactions, and surviving rejection     |
+| Document                                       | Covers                                                                                      |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| [note-cryptography.md](./note-cryptography.md) | Keys, commitments, nullifiers, encodings, stealth, slips, disclosure                        |
+| [identity.md](./identity.md)                   | Deriving who you are, and keeping it across launches                                        |
+| [vault.md](./vault.md)                         | Storing notes encrypted, and what the storage must guarantee                                |
+| [note-discovery.md](./note-discovery.md)       | Finding your notes without telling anyone which they are                                    |
+| [spending.md](./spending.md)                   | Turning notes into transactions, and surviving rejection                                    |
+| [build-on-orbinum.md](./build-on-orbinum.md)   | How a third party builds on Orbinum — and why "one identity per dapp" is the wrong question |
+
+Security posture of the identity — what a hostile clone can and cannot capture,
+and which layer closes it — lives one level up, in
+[`IDENTITY_SECURITY.md`](../../IDENTITY_SECURITY.md).
 
 ---
 
@@ -32,8 +37,8 @@ Everything in the SDK exists to serve one of those four verbs: **own** (keys),
 
 ## 2. Where the model lives in the code
 
-The SDK is four layers — `foundation`, `protocol`, `chain`, `wallet` — and the
-note model maps onto them cleanly: what a note _is_ lives in `protocol/` (pure,
+The SDK is five layers — `foundation`, `protocol`, `chain`, `wallet`,
+`adapters` — and the note model maps onto the first four cleanly: what a note _is_ lives in `protocol/` (pure,
 offline), while finding, keeping and spending live in `wallet/` and reach the
 chain through injected contracts. The full layout, the published subpaths and
 the packaging rules are in [sdk-architecture.md](../sdk-architecture.md).
@@ -46,9 +51,10 @@ above.
 ```
                  IDENTITY (2)
         wallet signature ──HKDF──► master bytes
-                 │
+                 │   (identity v3: every branch a SIBLING, none a parent)
                  ├── spending key (BJJ scalar)  ── owns notes
-                 ├── viewing key pair           ── opens memos
+                 ├── ivsk / ivk                 ── opens incoming memos
+                 ├── ovk                        ── reads what was SENT
                  └── vault keys (AES + HMAC)    ── encrypts storage
                  │
                  ▼
@@ -59,14 +65,17 @@ above.
    │                                                              │
    │  commitment = Poseidon4(value, assetId, ownerPk, blinding)   │
    │  memo       = 180 bytes: nonce ‖ ciphertext ‖ ephPk          │
+   │  paid to a privacy address → ownerPk is a ONE-TIME stealth   │
+   │  key, so two payments to one address never link on chain     │
    └──────────────────────────┬───────────────────────────────────┘
                               │ on chain: commitment in the Merkle
                               │ forest, memo beside it
                               ▼
    ┌──────────  FIND (4)  ────────────────────────────────────────┐
-   │  scan every hint; three shortcuts beat the O(pool) ECDH:     │
+   │  scan every hint; four shortcuts beat the O(pool) ECDH:      │
    │    self-eph window   — hash lookup for your own notes        │
    │    pairwise window   — hash lookup per known counterparty    │
+   │    outgoing window   — the sender re-reads what it SENT      │
    │    view tag          — 1 byte rejects ~255/256 of the rest   │
    │  spent status by PIR-A: download the set, intersect locally  │
    └──────────────────────────┬───────────────────────────────────┘
@@ -120,14 +129,14 @@ nullifier spent?" method. See [note-discovery.md](./note-discovery.md) §4.
 
 The properties everything else must not break, and where each is enforced:
 
-| Invariant                                    | Broken by                                                                         | Enforced in                                                                               |
-| -------------------------------------------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| An ephemeral index is used **once**          | a lost counter increment → same ephPk published twice → two notes publicly linked | `updateConfig` atomicity (vault), reserve-before-use (`buildZkNote`)                      |
-| The server never learns which notes you hold | a per-nullifier query                                                             | `NullifierSource` shape (no such method), identical requests regardless of vault contents |
-| Storage cannot be linked to chain activity   | keying records by on-chain hex                                                    | blind HMAC tags (vault)                                                                   |
-| The vault never stores who you paid          | persisting the recipient's stable key                                             | change note records the **one-time** stealth key                                          |
-| A disclosure key grants no spending power    | including the spending key                                                        | `orbdisc` format (cryptography doc §4)                                                    |
-| Old notes stay spendable across VK rotations | proving with the active version                                                   | `CircuitVersionResolver`, fail-closed (spending doc §5)                                   |
+| Invariant                                            | Broken by                                                                         | Enforced in                                                                               |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| An ephemeral index is used **once**                  | a lost counter increment → same ephPk published twice → two notes publicly linked | `updateConfig` atomicity (vault), reserve-before-use (`buildZkNote`)                      |
+| The server never learns which notes you hold         | a per-nullifier query                                                             | `NullifierSource` shape (no such method), identical requests regardless of vault contents |
+| Storage cannot be linked to chain activity           | keying records by on-chain hex                                                    | blind HMAC tags (vault)                                                                   |
+| The vault never stores who you paid **in the clear** | persisting the recipient's stable key as a readable field                         | change note's `sourcePk` carries the recipient book, XOR-sealed under the `ovk`           |
+| A disclosure key grants no spending power            | including the spending key                                                        | `orbdisc` format (cryptography doc §4)                                                    |
+| Old notes stay spendable across VK rotations         | proving with the active version                                                   | `CircuitVersionResolver`, fail-closed (spending doc §5)                                   |
 
 ---
 

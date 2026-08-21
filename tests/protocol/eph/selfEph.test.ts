@@ -12,10 +12,7 @@ import { sha256 } from '@noble/hashes/sha2.js';
 import { deriveSelfEphSk, selfEphWindow } from '../../../src/protocol/eph/selfEph';
 import { EncryptedMemo } from '../../../src/protocol/memo/EncryptedMemo';
 import { NoteBuilder } from '../../../src/protocol/note/NoteBuilder';
-import {
-    tryDecryptNote,
-    tryDecryptNoteVerbose,
-} from '../../../src/protocol/note/NoteDecryptor';
+import { tryDecryptNote, tryDecryptNoteVerbose } from '../../../src/protocol/note/NoteDecryptor';
 import {
     deriveViewingSecretKey,
     deriveViewingPublicKey,
@@ -31,6 +28,10 @@ const ivk = deriveViewingPublicKey(ivsk);
 const ownerPk = deriveOwnerPk(SPENDING_KEY);
 
 const FOREIGN_SK = 98765432109876543210n;
+// La secuencia self cuelga de la clave de visión: el memo de una nota propia va
+// sellado hacia la ivk del wallet, así que predecir el punto y abrir la nota son
+// la misma capacidad.
+const foreignIvsk = deriveViewingSecretKey(FOREIGN_SK);
 
 /** Own note built the deterministic way, as buildZkNote will do it. */
 async function buildSelfNote(index: number, value = 5000n) {
@@ -42,7 +43,7 @@ async function buildSelfNote(index: number, value = 5000n) {
         spendingKey: SPENDING_KEY,
         viewingPublicKey: ivk,
         circuitVersion: 1,
-        ephSkOverride: deriveSelfEphSk(SPENDING_KEY, index),
+        ephSkOverride: deriveSelfEphSk(ivsk, index),
     });
 }
 
@@ -59,23 +60,28 @@ const memoEphPkHex = (memo: number[]) => toHex(new Uint8Array(memo.slice(-32)));
 
 describe('deriveSelfEphSk', () => {
     it('is deterministic and index-sensitive', () => {
-        expect(deriveSelfEphSk(SPENDING_KEY, 7)).toEqual(deriveSelfEphSk(SPENDING_KEY, 7));
-        expect(deriveSelfEphSk(SPENDING_KEY, 7)).not.toEqual(deriveSelfEphSk(SPENDING_KEY, 8));
-        expect(deriveSelfEphSk(SPENDING_KEY, 7)).not.toEqual(deriveSelfEphSk(FOREIGN_SK, 7));
+        expect(deriveSelfEphSk(ivsk, 7)).toEqual(deriveSelfEphSk(ivsk, 7));
+        expect(deriveSelfEphSk(ivsk, 7)).not.toEqual(deriveSelfEphSk(ivsk, 8));
+        expect(deriveSelfEphSk(ivsk, 7)).not.toEqual(deriveSelfEphSk(foreignIvsk, 7));
     });
 
-    it('fixed vector: SHA256("orbinum-self-eph-v1" || sk_LE32 || u32le(i)) (cross-repo pin)', () => {
+    it('fixed vector: SHA256("orbinum-self-eph-v3" || ivsk || u32le(i)) (cross-repo pin)', () => {
+        // El contrato entre repos. Un drift aquí no lanza: produce claves que no
+        // descifran nada, así que este test es la única red.
+        //
+        // La semilla es la clave de visión, no la de gasto — ver el encabezado
+        // de `selfEph.ts` para por qué tiene que ser ésa.
         const h = sha256.create();
-        h.update(new TextEncoder().encode('orbinum-self-eph-v1'));
-        h.update(bigintTo32Le(SPENDING_KEY));
+        h.update(new TextEncoder().encode('orbinum-self-eph-v3'));
+        h.update(ivsk);
         h.update(new Uint8Array([3, 0, 0, 0])); // i = 3, u32 LE
-        expect(deriveSelfEphSk(SPENDING_KEY, 3)).toEqual(h.digest());
+        expect(deriveSelfEphSk(ivsk, 3)).toEqual(h.digest());
     });
 });
 
 describe('selfEphWindow ↔ EncryptedMemo.encrypt', () => {
     it('window ephPkHex equals the memo tail byte-for-byte, for every index', async () => {
-        const window = selfEphWindow(SPENDING_KEY, ivk, 0, 5);
+        const window = selfEphWindow(ivsk, ivk, 0, 5);
         for (const entry of window) {
             const note = await buildSelfNote(entry.index);
             expect(memoEphPkHex(note.memo)).toBe(entry.ephPkHex);
@@ -83,7 +89,7 @@ describe('selfEphWindow ↔ EncryptedMemo.encrypt', () => {
     });
 
     it("window sharedSecret decrypts the memo (matches the receiver's ECDH)", async () => {
-        const [entry] = selfEphWindow(SPENDING_KEY, ivk, 2, 1);
+        const [entry] = selfEphWindow(ivsk, ivk, 2, 1);
         const note = await buildSelfNote(2, 777n);
         const memoBytes = new Uint8Array(note.memo);
 
@@ -100,8 +106,8 @@ describe('selfEphWindow ↔ EncryptedMemo.encrypt', () => {
 
     it('a foreign wallet window never matches our notes', async () => {
         const foreignWindow = selfEphWindow(
-            FOREIGN_SK,
-            deriveViewingPublicKey(deriveViewingSecretKey(FOREIGN_SK)),
+            foreignIvsk,
+            deriveViewingPublicKey(foreignIvsk),
             0,
             32
         );
@@ -113,7 +119,7 @@ describe('selfEphWindow ↔ EncryptedMemo.encrypt', () => {
 
 describe('tryDecryptNote with a precomputed sharedSecret', () => {
     it('returns the exact same note as the full ECDH path', async () => {
-        const [entry] = selfEphWindow(SPENDING_KEY, ivk, 4, 1);
+        const [entry] = selfEphWindow(ivsk, ivk, 4, 1);
         const note = await buildSelfNote(4, 9999n);
         const hint = asHint(note);
 
@@ -139,7 +145,7 @@ describe('tryDecryptNote with a precomputed sharedSecret', () => {
     });
 
     it('sharedSecret wins over viewTag: decrypts even when both options are passed', async () => {
-        const [entry] = selfEphWindow(SPENDING_KEY, ivk, 6, 1);
+        const [entry] = selfEphWindow(ivsk, ivk, 6, 1);
         const note = await buildSelfNote(6, 4242n);
         // The window match already proved ownership — the tag gate must not
         // re-filter (a precomputed secret skips it entirely).
@@ -151,7 +157,7 @@ describe('tryDecryptNote with a precomputed sharedSecret', () => {
     });
 
     it('triple agreement: window path == view-tag path == full path on one note', async () => {
-        const [entry] = selfEphWindow(SPENDING_KEY, ivk, 7, 1);
+        const [entry] = selfEphWindow(ivsk, ivk, 7, 1);
         const note = await buildSelfNote(7, 1234n);
         const hint = asHint(note);
 
@@ -175,7 +181,7 @@ describe('tryDecryptNote with a precomputed sharedSecret', () => {
         // away. Honouring it must not cost the recipient anything — the same
         // ephSk drives both the memo encryption and the stealth derivation.
         const recipientOwnerPk = deriveOwnerPk(SPENDING_KEY);
-        const override = deriveSelfEphSk(SPENDING_KEY, 99);
+        const override = deriveSelfEphSk(ivsk, 99);
         const note = await NoteBuilder.build({
             value: 10n,
             assetId: 0n,
@@ -189,7 +195,7 @@ describe('tryDecryptNote with a precomputed sharedSecret', () => {
         });
 
         // The published ephPk is the override's…
-        const [overrideEntry] = selfEphWindow(SPENDING_KEY, ivk, 99, 1);
+        const [overrideEntry] = selfEphWindow(ivsk, ivk, 99, 1);
         expect(memoEphPkHex(note.memo)).toBe(overrideEntry!.ephPkHex);
         // …and the recipient still recovers the note via the normal stealth scan.
         const found = tryDecryptNote(asHint(note), ivsk, SPENDING_KEY, recipientOwnerPk);

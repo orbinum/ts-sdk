@@ -1,22 +1,19 @@
 /**
- * NoteProvenance — the single vocabulary for "where did this note come from,
- * and where did it go".
+ * NoteProvenance — one vocabulary for "where did this note come from, and where
+ * did it go".
  *
- * Several mechanisms answer that question, and before this module they had
- * separate vocabularies and no contract between them:
+ * Two mechanisms answer that, and they are PROVIDERS of the same fact rather
+ * than competing designs; `ProvenanceSource` records which one spoke:
  *
- *   - the memo's `sourcePk` field, readable by whoever can decrypt the note
- *     (the recipient always; the sender only for the change note they kept);
- *   - a lookup by commitment, which returns only what is already public — no
- *     amount, no recipient, but enough to re-issue a payment slip.
+ *   - the memo's `sourcePk`, readable by whoever can decrypt the note — the
+ *     recipient always, the sender only for the change note they kept;
+ *   - a lookup by commitment, returning only what is already public: no amount,
+ *     no recipient, but enough to re-issue a payment slip.
  *
- * They are not competing designs. They are providers of the same fact, and
- * `ProvenanceSource` records which one spoke. Nothing here derives a key: this
- * layer only holds data already recovered.
- *
- * A sender cannot reopen a memo sealed toward someone else, so the amount and
- * recipient of an outgoing transfer are NOT recoverable from a seed alone. What
- * survives is the ability to hand the recipient a working slip again.
+ * Nothing here derives a key — this layer only holds what was already
+ * recovered. And a sender cannot reopen a memo sealed toward someone else, so
+ * the amount and recipient of an outgoing transfer are NOT recoverable from a
+ * seed. What survives is the ability to hand over a working slip again.
  */
 import type { NoteFacts } from '../../protocol/types';
 

@@ -1,24 +1,19 @@
 /**
- * Recovery of a stealth note a wallet just created for itself.
+ * Makes a stealth note the wallet just built for ITSELF spendable right away.
  *
- * ── Why a freshly built stealth note cannot be stored as-is ──────────────────
- * `NoteBuilder.build` returns a note whose `ownerPk` is the one-time
- * stealthOwnerPk (that is what the commitment covers), but whose `spendingKey`
- * is the GLOBAL key it was handed — the stealth secret is never derived on the
- * build side, because the builder's job is to produce something the RECIPIENT
- * can open. Its nullifier is therefore computed from the wrong key and will
- * never appear on chain.
+ * `NoteBuilder.build` produces a note whose `ownerPk` is the one-time stealth
+ * key (what the commitment covers) but whose `spendingKey` is the GLOBAL one it
+ * was handed: the builder's job is to make something the RECIPIENT can open, so
+ * it never derives the stealth secret. Its nullifier is computed from the wrong
+ * key and never appears on chain.
  *
- * Storing that object makes an UNSPENDABLE note: every spend path recomputes the
- * commitment as Poseidon(value, assetId, BabyPbk(spendingKey).Ax, blinding) and
- * gets something other than the on-chain commitment, so the note is rejected.
- * Only a full rescan repaired it, since an incremental pass merges without
- * touching cryptographic fields.
+ * Stored as-is that note is UNSPENDABLE — every spend path recomputes the
+ * commitment from `BabyPbk(spendingKey).Ax` and gets a different value, so the
+ * note is rejected. Only a full rescan repaired it, since an incremental pass
+ * merges without touching cryptographic fields.
  *
- * The recovery is the same work the scan does: decrypt the memo the wallet
- * authored with its GLOBAL keys, which re-derives the stealth spending key and
- * the real nullifier. Doing it at build time makes the note spendable
- * immediately instead of after a rescan.
+ * The fix is the work a scan already does: open the memo with the wallet's
+ * global keys, which re-derives the stealth spending key and the real nullifier.
  */
 import { tryDecryptNote } from '../../../protocol/note/index';
 import { toHex } from '../../../foundation/encoding/hex';

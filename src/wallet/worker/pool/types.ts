@@ -32,7 +32,7 @@ export const DECRYPT_YIELD_EVERY = 25;
  * import it never asked for. `data` is the only member the pool reads, and a
  * real `MessageEvent` satisfies this shape.
  *
- * Same reasoning as `CryptoKey` in `utils/crypto/webcrypto-types.d.ts`.
+ * Same reasoning as `CryptoKey` in `foundation/crypto/webcrypto-types.d.ts`.
  */
 export interface WorkerMessage {
     data: unknown;

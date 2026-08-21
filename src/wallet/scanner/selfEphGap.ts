@@ -15,9 +15,6 @@
  */
 import { selfEphWindow } from '../../protocol/eph/index';
 import { deriveViewingPublicKey } from '../../protocol/keys/PrivacyKeys';
-// Straight from the module that declares it, never the `../worker` barrel: that
-// barrel re-exports the pool, so importing one number through it would pull the
-// whole worker implementation into the root entry's graph.
 import { SELF_EPH_WINDOW } from '../worker/kernel/types';
 import { toHex } from '../../foundation/encoding/hex';
 import type { ZkNote } from '../../protocol/types';
@@ -42,13 +39,12 @@ export function gapMargin(windowSize: number): number {
 export function resolveSelfEphCeiling(params: {
     /** The wallet's notes AFTER persist — self notes carry their ephPk in the memo. */
     notes: ZkNote[];
-    spendingKey: bigint;
     viewingKey: Uint8Array;
     /** Highest window-matched index reported by the scan. */
     scanMaxIndex: number | null;
     windowSize?: number;
 }): number | null {
-    const { notes, spendingKey, viewingKey, scanMaxIndex } = params;
+    const { notes, viewingKey, scanMaxIndex } = params;
     const windowSize =
         params.windowSize !== undefined && params.windowSize > 0
             ? params.windowSize
@@ -66,7 +62,7 @@ export function resolveSelfEphCeiling(params: {
     let max = scanMaxIndex;
     let from = windowSize;
     for (;;) {
-        const slice = selfEphWindow(spendingKey, ivkPacked, from, windowSize);
+        const slice = selfEphWindow(viewingKey, ivkPacked, from, windowSize);
         let matched = false;
         for (const entry of slice) {
             if (ownEphPks.has(entry.ephPkHex.toLowerCase())) {
@@ -99,10 +95,11 @@ export const MAX_EPH_WINDOW = SELF_EPH_WINDOW * 64;
  * the gap margin) falls inside the fast path, and never past `MAX_EPH_WINDOW`.
  *
  * The counter is read from a config that survives restores and hand-editing, so
- * a non-finite value is treated as "no history" rather than propagated: `NaN`
- * would make the builder's `i < from + count` false immediately and return an
- * EMPTY window, silently disabling the fast path, while `Infinity` would make
- * that same loop never terminate.
+ * a non-finite value is treated as "no history" rather than propagated. The
+ * window builders reject a non-integer `count` outright, so passing one through
+ * would abort the scan with a throw — turning a corrupt stored counter into a
+ * wallet that cannot scan at all, where falling back to the default size costs
+ * only the fast path for indexes past it.
  */
 export function windowSizeForCounter(counter: number): number {
     const used = Number.isFinite(counter) ? counter : 0;

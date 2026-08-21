@@ -1,9 +1,17 @@
 /**
- * Utilities for decoding on-chain extrinsic arguments and event data.
+ * Naming the positional fields of a decoded extrinsic or event.
  *
- * Substrate/PAPI nodes return positional arg keys (`arg0`, `arg1`, …) when
- * metadata-based decoding is unavailable. These helpers map those positions
- * to human-readable semantic names for all Orbinum pallets.
+ * A Substrate/PAPI node returns `arg0`, `arg1`, … when metadata-based decoding
+ * is unavailable. These two tables map those positions onto the field names the
+ * pallets declare, so a caller reads `nullifier` instead of `arg2`.
+ *
+ * BEST EFFORT, BY METHOD NAME ONLY. Neither helper is given the pallet section,
+ * so two pallets that declare the same method name are indistinguishable here —
+ * see the `Executed` note below. A consumer that needs certainty decodes
+ * against metadata instead.
+ *
+ * `events.ts` is the canonical model of the shielded-pool events; this file is
+ * a display convenience and does not replace it.
  */
 
 import { formatBalance } from '../../../foundation/text/format';
@@ -364,6 +372,22 @@ export function mapZkEventData(
         };
     }
 
+    // A private transfer emits TWO events, never one: the pallet splits
+    // `NullifiersSpent` from `CommitmentsInserted` on purpose, so an observer
+    // cannot pair inputs with outputs. `privatetransfer` is kept only because a
+    // node that batches them under the call name would otherwise go unnamed.
+    if (m === 'nullifiersspent') {
+        return { nullifiers: get(0, 'nullifiers') };
+    }
+
+    if (m === 'commitmentsinserted') {
+        return {
+            commitments: get(0, 'commitments'),
+            memos: get(1, 'encrypted_memos') || get(1, 'memos'),
+            indices: get(2, 'leaf_indices') || get(2, 'indices'),
+        };
+    }
+
     if (m === 'privatetransfer') {
         return {
             nullifiers: get(0, 'nullifiers'),
@@ -426,20 +450,21 @@ export function mapZkEventData(
         return { log: get(0, 'log') };
     }
 
-    if (
-        m_norm === 'created' ||
-        m_norm === 'createdfailed' ||
-        m_norm === 'executed' ||
-        m_norm === 'executedfailed'
-    ) {
+    if (m_norm === 'created' || m_norm === 'createdfailed' || m_norm === 'executedfailed') {
         return { address: get(0, 'address') };
     }
 
     // ── ethereum events ───────────────────────────────────────────────────────
 
+    // `Executed` is declared by BOTH pallets, with different shapes:
+    // `pallet-evm` as `{ address }`, `pallet-ethereum` as
+    // `{ from, to, transaction_hash, exit_reason }`. Without the section there
+    // is no way to tell them apart, so the richer shape wins — its fields are
+    // read by name first, and an evm-only event simply resolves `from` from
+    // `address` and leaves the rest undefined.
     if (m_norm === 'executed') {
         return {
-            from: get(0, 'from'),
+            from: get(0, 'from') ?? get(0, 'address'),
             to: get(1, 'to'),
             transaction_hash: get(2, 'transaction_hash'),
             exit_reason: get(3, 'exit_reason'),

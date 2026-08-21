@@ -361,3 +361,55 @@ describe('mapZkEventData — zk-verifier', () => {
         expect(result).toEqual({ circuit_id: 'transfer', version: 1 });
     });
 });
+
+/**
+ * Los tres desajustes con la cadena que este mapper arrastraba.
+ *
+ * Ninguno lanzaba: devolvían campos `undefined` o no se alcanzaban nunca, así
+ * que un consumidor leía un evento a medias sin señal de que faltara algo.
+ */
+describe('mapZkEventData — sincronía con los eventos del pallet', () => {
+    it('nombra NullifiersSpent, que es lo que la cadena emite de verdad', () => {
+        // Una transferencia privada emite DOS eventos, nunca uno: el pallet
+        // los separa a propósito para que nadie empareje entradas con salidas.
+        const result = mapZkEventData('NullifiersSpent', positional(['0xn1', '0xn2']));
+
+        expect(result).toEqual({ nullifiers: ['0xn1', '0xn2'] });
+    });
+
+    it('y nombra CommitmentsInserted, su mitad complementaria', () => {
+        const result = mapZkEventData('CommitmentsInserted', positional(['0xc1'], ['0xm1'], [7]));
+
+        expect(result).toEqual({ commitments: ['0xc1'], memos: ['0xm1'], indices: [7] });
+    });
+
+    it('`Executed` de ethereum conserva sus cuatro campos', () => {
+        // Los dos pallets declaran `Executed`. La rama de EVM interceptaba el
+        // nombre antes, así que un evento de ethereum se degradaba a
+        // `{ address }` y perdía `to`, `transaction_hash` y `exit_reason`.
+        const result = mapZkEventData(
+            'Executed',
+            named({
+                from: '0xfrom',
+                to: '0xto',
+                transaction_hash: '0xtx',
+                exit_reason: 'Succeed',
+            })
+        );
+
+        expect(result).toEqual({
+            from: '0xfrom',
+            to: '0xto',
+            transaction_hash: '0xtx',
+            exit_reason: 'Succeed',
+        });
+    });
+
+    it('y el `Executed` de EVM, que solo trae `address`, sigue resolviendo', () => {
+        // El contraste: sin sección no hay forma de distinguirlos, así que la
+        // forma rica gana y `address` se lee como `from`.
+        const result = mapZkEventData('Executed', named({ address: '0xevm' }));
+
+        expect(result['from']).toBe('0xevm');
+    });
+});

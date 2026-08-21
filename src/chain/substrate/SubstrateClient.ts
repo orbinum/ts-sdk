@@ -15,6 +15,44 @@ import { jsonRpcBatch, wsUrlToHttp, type JsonRpcCall } from '../../foundation/js
 import type { ChainInfo, SystemHealth, EventRecord, RawBlockHeader, BlockInfo } from './types';
 import type { RawRuntimeVersion } from './types/raw';
 
+/**
+ * `pallet_timestamp`'s index in the runtime's `construct_runtime!`.
+ *
+ * Only used by the block-time fallback, which is a heuristic on raw extrinsic
+ * bytes rather than a decode. A runtime that reorders its pallets makes the
+ * fallback stop matching — it degrades to no timestamp, never a wrong one.
+ */
+const TIMESTAMP_PALLET = 0x01;
+
+/**
+ * SCALE compact integer at `offset`, or null when the bytes run out.
+ *
+ * Two low bits give the mode: 0 → one byte, 1 → two, 2 → four, 3 → a
+ * length-prefixed big integer. Reading a compact as a raw little-endian word
+ * yields a plausible wrong number rather than an error, which is why this is
+ * spelled out rather than approximated.
+ */
+function decodeCompact(bytes: Uint8Array, offset: number): number | null {
+    const first = bytes[offset];
+    if (first === undefined) return null;
+    const mode = first & 0b11;
+    if (mode === 0) return first >>> 2;
+    if (mode === 1) {
+        const b1 = bytes[offset + 1];
+        return b1 === undefined ? null : ((first >>> 2) | (b1 << 6)) >>> 0;
+    }
+    const width = mode === 2 ? 4 : (first >>> 2) + 5;
+    if (offset + width > bytes.length) return null;
+    let value = 0n;
+    const start = mode === 2 ? offset : offset + 1;
+    const end = mode === 2 ? offset + 4 : offset + width;
+    for (let i = end - 1; i >= start; i--) value = (value << 8n) | BigInt(bytes[i] as number);
+    if (mode === 2) value >>= 2n;
+    // Milliseconds since the epoch stay far inside a double; anything larger is
+    // not a block time.
+    return value > BigInt(Number.MAX_SAFE_INTEGER) ? null : Number(value);
+}
+
 export type DynamicBuilder = ReturnType<typeof getDynamicBuilder>;
 export type ExtrinsicDecoder = ReturnType<typeof getExtrinsicDecoder>;
 
@@ -262,31 +300,29 @@ export class SubstrateClient {
                 }
             }
 
-            // Fallback: extract from timestamp.set extrinsic argument
+            // Fallback: read the block time out of the `timestamp.set` call.
+            //
+            // An unsigned extrinsic is `Compact(len) || version || pallet ||
+            // call || args`, so for this one — under 64 bytes, hence a 1-byte
+            // compact prefix — the pallet index sits at b[2] and the call at
+            // b[3]. The argument is a COMPACT u64, not a raw one.
+            //
+            // The previous version looked for 0x03 at b[4]: wrong index (3 is
+            // Grandpa, Timestamp is 1), wrong offset, and it then read the
+            // argument as raw little-endian. It never matched, so this fallback
+            // silently did nothing.
             if (!timestampMs) {
-                const tsHex = extrinsics.find((hex) => {
+                const ts = extrinsics.reduce<number | null>((found, hex) => {
+                    if (found !== null) return found;
                     try {
-                        // timestamp.set is always the first extrinsic and starts with a known callIndex
                         const b = fromHex(hex as `0x${string}`);
-                        // Look for the pallet byte 0x03 (timestamp) — a best-effort heuristic
-                        return b.length > 6 && b[4] === 0x03 && b[5] === 0x00;
+                        if (b.length < 5 || b[2] !== TIMESTAMP_PALLET || b[3] !== 0x00) return null;
+                        return decodeCompact(b, 4);
                     } catch {
-                        return false;
+                        return null;
                     }
-                });
-                if (tsHex) {
-                    try {
-                        const b = fromHex(tsHex as `0x${string}`);
-                        // compact-encoded u64 starts at byte 6
-                        const view = new DataView(b.buffer, b.byteOffset + 6, 8);
-                        const lo = view.getUint32(0, true);
-                        const hi = view.getUint32(4, true);
-                        const ms = lo + hi * 0x1_0000_0000;
-                        if (ms > 0) timestampMs = ms;
-                    } catch {
-                        /* best-effort */
-                    }
-                }
+                }, null);
+                if (ts !== null && ts > 0) timestampMs = ts;
             }
 
             const author = SubstrateClient.extractAuthorFromLogs(header.digest.logs, ss58Prefix);

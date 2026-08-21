@@ -48,7 +48,18 @@ export interface UnshieldSubmitRequest {
 export interface UnshieldDeps {
     privacy: SpendPrivacyReads;
     resolver: Pick<CircuitVersionResolver, 'resolve'>;
-    /** Builds the stealth change note. Owns keys and the ephemeral reservation. */
+    /**
+     * Builds the stealth change note. Owns the keys it is built under.
+     *
+     * No ephemeral is reserved: passing `recipientOwnerPk` without a
+     * `viewingPublicKey` takes neither the self nor the outgoing branch in
+     * `buildZkNoteWithIndex`, so the note publishes a RANDOM ephemeral and a rescan
+     * finds it by trial decryption rather than by index lookup.
+     *
+     * Shares its shape with the transfer's builder so one bound function serves
+     * both; the outgoing index it may return is unused here, since an unshield
+     * has no recipient to record.
+     */
     buildNote: (params: {
         value: bigint;
         assetId: bigint;
@@ -56,7 +67,7 @@ export interface UnshieldDeps {
         blinding: bigint;
         spendingKey: bigint;
         recipientOwnerPk: bigint;
-    }) => Promise<ZkNote>;
+    }) => Promise<{ note: ZkNote }>;
     vault: SpendVault;
     /**
      * The spendable form of a stealth note this wallet authored, or null. Null
@@ -124,15 +135,17 @@ export async function unshieldNote(
         const { ownerPk, spendingKey } = deps.stealthKeys;
         changeBlinding = randomBlinding();
 
-        changeNote = await deps.buildNote({
-            value: changeValue,
-            assetId: note.assetId,
-            ownerPk,
-            blinding: changeBlinding,
-            spendingKey,
-            // Activates stealth: the commitment covers a one-time ownerPk.
-            recipientOwnerPk: ownerPk,
-        });
+        changeNote = (
+            await deps.buildNote({
+                value: changeValue,
+                assetId: note.assetId,
+                ownerPk,
+                blinding: changeBlinding,
+                spendingKey,
+                // Activates stealth: the commitment covers a one-time ownerPk.
+                recipientOwnerPk: ownerPk,
+            })
+        ).note;
     }
 
     // Fail-closed: pins the prover to the note's version and cross-checks the VK

@@ -5,14 +5,9 @@ import {
     deriveViewingSecretKey,
     deriveViewingPublicKey,
     deriveOwnerPk,
-    deriveOutgoingViewingKey,
 } from '../../../src/protocol/keys/PrivacyKeys';
-import { openOutgoingBlob } from '../../../src/protocol/memo/OutgoingBlob';
 import { bytesToBjjScalar } from '../../../src/protocol/memo/EncryptedMemo';
-import {
-    derivePairwiseSharedSecret,
-    derivePairwiseEphSk,
-} from '../../../src/protocol/eph/index';
+import { derivePairwiseSharedSecret, derivePairwiseEphSk } from '../../../src/protocol/eph/index';
 import { tryDecryptNote } from '../../../src/protocol/note/NoteDecryptor';
 import { toHex } from '../../../src/foundation/encoding/hex';
 import { bigintTo32Le } from '../../../src/foundation/encoding/bytes';
@@ -162,10 +157,25 @@ describe('NoteBuilder.buildMemo', () => {
     });
 
     it('accepts a custom 32-byte recipient viewing key', async () => {
+        // A key derived the way a real one is. The old fixture, `0x05…05`,
+        // does land on the curve and has full order — so it was never the
+        // security hole it looked like — but the assertion only measured the
+        // memo's length, so it would have passed for a key the sealing path
+        // refuses too. Deriving it makes the test describe a real recipient.
         const note = await NoteBuilder.build({ value: 100n, blinding: 1n });
-        const vk = new Uint8Array(32).fill(0x05);
+        const vk = deriveViewingPublicKey(deriveViewingSecretKey(777n));
         const memo = NoteBuilder.buildMemo(note, vk);
         expect(memo).toHaveLength(ENCRYPTED_MEMO_SIZE);
+    });
+
+    it('refuses a viewing key from the small subgroup', async () => {
+        // The keys that actually are a hole: a cofactor-8 point collapses the
+        // ECDH to at most 8 secrets, so the memo opens by trying them all.
+        const note = await NoteBuilder.build({ value: 100n, blinding: 1n });
+        const lowOrder = new Uint8Array(32);
+        lowOrder[0] = 2;
+
+        expect(() => NoteBuilder.buildMemo(note, lowOrder)).toThrow(/viewing public key/);
     });
 
     it('is synchronous (returns Uint8Array directly, not a Promise)', async () => {
@@ -261,90 +271,6 @@ describe('NoteBuilder.build — stealth path', () => {
         });
         expect(ownNote.ownerPk).toBe(ownPk);
     });
-
-    // ─── OVK blob emission (Fase 3) ──────────────────────────────────────────
-
-    const senderMaster = new Uint8Array(32).fill(0x5a);
-    const senderOvk = deriveOutgoingViewingKey(senderMaster);
-
-    it('stealth build with outgoingViewingKey → 56-byte ovkBlob', async () => {
-        const note = await NoteBuilder.build({
-            value: 500n,
-            blinding: 1n,
-            ownerPk: recipientOwnerPk,
-            viewingPublicKey: recipientViewingPublicKey,
-            recipientOwnerPk,
-            outgoingViewingKey: senderOvk,
-        });
-        expect(note.ovkBlob).toBeDefined();
-        expect(note.ovkBlob).toHaveLength(56);
-    });
-
-    it('stealth build without outgoingViewingKey → ovkBlob undefined', async () => {
-        const note = await NoteBuilder.build({
-            value: 500n,
-            blinding: 1n,
-            ownerPk: recipientOwnerPk,
-            viewingPublicKey: recipientViewingPublicKey,
-            recipientOwnerPk,
-        });
-        expect(note.ovkBlob).toBeUndefined();
-    });
-
-    it('non-stealth build never produces an ovkBlob, even with an ovk', async () => {
-        const note = await NoteBuilder.build({
-            value: 500n,
-            blinding: 1n,
-            ownerPk: recipientOwnerPk,
-            outgoingViewingKey: senderOvk,
-            // no viewingPublicKey/recipientOwnerPk → non-stealth
-        });
-        expect(note.ovkBlob).toBeUndefined();
-    });
-
-    it('the ovkBlob is sealed against the memo ephPk (bytes 148..180) and commitment', async () => {
-        const note = await NoteBuilder.build({
-            value: 777n,
-            blinding: 5n,
-            ownerPk: recipientOwnerPk,
-            viewingPublicKey: recipientViewingPublicKey,
-            recipientOwnerPk,
-            outgoingViewingKey: senderOvk,
-        });
-        const ephPkBytes = Uint8Array.from(note.memo.slice(148, 180));
-        const commitmentBytes = Uint8Array.from(
-            (note.commitmentHex.slice(2).match(/.{2}/g) ?? []).map((b) => parseInt(b, 16))
-        );
-        // Opening with the sender ovk against the on-chain ephPk + commitment must
-        // succeed and yield a 32-byte shared secret.
-        const ss = openOutgoingBlob(
-            senderOvk,
-            Uint8Array.from(note.ovkBlob!),
-            commitmentBytes,
-            ephPkBytes
-        );
-        expect(ss).not.toBeNull();
-        expect(ss).toHaveLength(32);
-    });
-
-    it('the ovk does not perturb the note shape: same 180-byte memo, only ovkBlob added', async () => {
-        // The stealth path generates its own random ephSk (ephSkOverride is
-        // ignored here), so the two memos differ by ephemeral key — but both must
-        // still be exactly 180 bytes, and only the ovk build carries a blob.
-        const base = {
-            value: 500n,
-            blinding: 1n,
-            ownerPk: recipientOwnerPk,
-            viewingPublicKey: recipientViewingPublicKey,
-            recipientOwnerPk,
-        };
-        const withOvk = await NoteBuilder.build({ ...base, outgoingViewingKey: senderOvk });
-        const withoutOvk = await NoteBuilder.build(base);
-        expect(withOvk.memo).toHaveLength(ENCRYPTED_MEMO_SIZE);
-        expect(withoutOvk.memo).toHaveLength(ENCRYPTED_MEMO_SIZE);
-        expect(withOvk.ovkBlob).toBeDefined();
-        expect(withoutOvk.ovkBlob).toBeUndefined();
-    });
 });
 
 // ─── El ephemeral override en la rama stealth ────────────────────────────────
@@ -371,10 +297,7 @@ describe('NoteBuilder.build — ephSkOverride en stealth', () => {
         // receptor encuentre la nota por búsqueda en tabla en vez de un ECDH
         // por hint. Si `build` la descarta, esa optimización no existe: el
         // llamador la calcula y nadie la usa.
-        const ephSk = derivePairwiseEphSk(
-            derivePairwiseSharedSecret(senderIvsk, recipientIvk),
-            0
-        );
+        const ephSk = derivePairwiseEphSk(derivePairwiseSharedSecret(senderIvsk, recipientIvk), 0);
 
         const note = await NoteBuilder.build({
             value: 4200n,
@@ -408,10 +331,7 @@ describe('NoteBuilder.build — ephSkOverride en stealth', () => {
     it('el receptor sigue abriendo la nota con la efímera derivada', async () => {
         // El override no puede romper el camino del receptor: la derivación
         // stealth y el cifrado del memo comparten ese mismo ephSk.
-        const ephSk = derivePairwiseEphSk(
-            derivePairwiseSharedSecret(senderIvsk, recipientIvk),
-            5
-        );
+        const ephSk = derivePairwiseEphSk(derivePairwiseSharedSecret(senderIvsk, recipientIvk), 5);
 
         const note = await NoteBuilder.build({
             value: 4200n,

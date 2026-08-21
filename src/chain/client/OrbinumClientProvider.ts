@@ -376,9 +376,13 @@ export class OrbinumClientProvider {
 
     /**
      * Schedules the next connection attempt using exponential backoff
-     * (capped at `reconnectMaxMs`) with full jitter, then transitions to
-     * `'reconnecting'`. Jitter (a random fraction of the delay) spreads out
-     * reconnects so many clients don't retry in lockstep after a shared outage.
+     * (capped at `reconnectMaxMs`) with EQUAL jitter, then transitions to
+     * `'reconnecting'`.
+     *
+     * The delay lands in `[capped/2, capped]` — half fixed, half random. That
+     * spreads a shared outage's reconnects over a `capped/2` window instead of
+     * having every client retry in lockstep, while keeping a floor so the first
+     * attempts do not all pile up near zero the way full jitter allows.
      */
     private scheduleReconnect(): void {
         if (this._reconnectTimer) clearTimeout(this._reconnectTimer);

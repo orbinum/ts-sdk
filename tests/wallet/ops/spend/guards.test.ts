@@ -6,7 +6,11 @@
  * as "assert failed" on a Merkle constraint, seconds into proving.
  */
 import { describe, it, expect } from 'vitest';
-import { noteMatchesCommitment, treeOf, checkSpendableInputs } from '../../../../src/wallet/ops/spend/guards';
+import {
+    noteMatchesCommitment,
+    treeOf,
+    checkSpendableInputs,
+} from '../../../../src/wallet/ops/spend/guards';
 import { treeIdOf, LEAVES_PER_TREE } from '../../../../src/index';
 import { computeNoteCommitment } from '../../../../src/protocol/note/NoteDecryptor';
 import { deriveOwnerPk } from '../../../../src/protocol/keys/PrivacyKeys';

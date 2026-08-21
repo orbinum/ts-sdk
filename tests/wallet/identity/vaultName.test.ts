@@ -50,3 +50,39 @@ describe('vaultStorageName', () => {
         expect(vaultStorageName(EVM, GENESIS)).toBe(vaultStorageName(EVM, GENESIS));
     });
 });
+
+describe('el marcador de versión no se puede falsificar', () => {
+    // Que dos identidades compartan nombre de vault no es un choque cosmético:
+    // `unlock` no distingue un vault ajeno de uno corrupto, así que RESETEA y se
+    // lleva por delante las notas de la otra versión, en silencio.
+    //
+    // Mover el marcador al prefijo cerró la falsificación por sufijo, pero no
+    // ésta: la versión ocupa un segmento fijo del nombre, así que un
+    // componente que empiece por ese token cae en su sitio y se lee como la
+    // versión. Con una sola versión viva no hay con qué colisionar HOY — la
+    // guarda existe para que añadir la siguiente no reabra el agujero.
+    it('rechaza una cuenta que empieza por el marcador', () => {
+        // `canonicalAccountId` deja pasar una dirección no-SS58 en minúsculas,
+        // así que este nombre de cuenta llega literal.
+        expect(() => vaultStorageName('v3-0xabc', undefined)).toThrow(/must not start with/);
+    });
+
+    it('rechaza un fingerprint de cadena que empieza por el marcador', () => {
+        expect(() => vaultStorageName('0xabc', 'v3-chain1')).toThrow(/must not start with/);
+    });
+
+    it('lo comprueba en minúsculas, que es la forma que llega al nombre', () => {
+        expect(() => vaultStorageName('0xabc', 'V3-chain1')).toThrow(/must not start with/);
+    });
+
+    it('LA COLISIÓN QUE IMPIDE: dos versiones bajo un solo nombre', () => {
+        // Antes de la guarda ambos daban `orbinum-vault-v3-0xabc`.
+        expect(() => vaultStorageName('v3-0xabc', undefined)).toThrow();
+        expect(vaultStorageName('0xabc', undefined, 'v3')).toBe('orbinum-vault-v3-0xabc');
+    });
+
+    it('no molesta a las entradas normales', () => {
+        expect(() => vaultStorageName('0xabc', 'chain1')).not.toThrow();
+        expect(() => vaultStorageName('0xv3abc', undefined, 'v3')).not.toThrow();
+    });
+});

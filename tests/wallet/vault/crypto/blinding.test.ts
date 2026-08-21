@@ -11,7 +11,11 @@
  * just the identifier by another name).
  */
 import { describe, it, expect } from 'vitest';
-import { deriveVaultKey, deriveVaultBlindKey, blindTag } from '../../../../src/wallet/vault/crypto/keys';
+import {
+    deriveVaultKey,
+    deriveVaultBlindKey,
+    blindTag,
+} from '../../../../src/wallet/vault/crypto/keys';
 
 const MASTER = new Uint8Array(32).fill(0x11);
 const OTHER_MASTER = new Uint8Array(32).fill(0x22);

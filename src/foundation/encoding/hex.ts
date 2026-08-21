@@ -53,9 +53,28 @@ export function ensureHexPrefix(hex: string): string {
 
 /**
  * Converts a 0x-prefixed hex string (as returned by JSON-RPC) to a number.
+ *
+ * Throws rather than returning `NaN`. A bare `parseInt` accepts a valid prefix
+ * and drops the rest, so `"0x12zz"` used to yield `18` — a plausible block
+ * number that is simply wrong. It also has no upper bound: a quantity past
+ * 2^53 loses precision silently, and these values come from a server.
  */
 export function hexToNumber(hex: string): number {
-    return parseInt(hex, 16);
+    // The `0x` prefix stays OPTIONAL — callers pass both, and tightening that
+    // is a contract change, not a validation fix. What is refused is the part
+    // `parseInt` got wrong.
+    // The prefix is matched case-INSENSITIVELY. JSON-RPC emits `0x`, but
+    // hand-written and copied values arrive as `0X`, and `parseInt` accepted
+    // both — tightening that would reject input this has always taken.
+    const clean = /^0x/i.test(hex) ? hex.slice(2) : hex;
+    if (!/^[0-9a-fA-F]+$/.test(clean)) {
+        throw new Error(`Invalid hex quantity: "${hex}"`);
+    }
+    const value = Number(BigInt('0x' + clean));
+    if (!Number.isSafeInteger(value)) {
+        throw new Error(`Hex quantity exceeds safe integer range: "${hex}"`);
+    }
+    return value;
 }
 
 /**
@@ -68,15 +87,22 @@ export function hexToBigint(hex: string): bigint {
 /**
  * A field scalar as canonical 32-byte hex: `0x` + 64 zero-padded chars.
  *
- * Big-endian and fixed-width on purpose. These strings are compared as strings
- * — a wallet finds its own note by matching an `ownerPk`, and the note-transfer
- * format is a cross-client contract — so one scalar must produce exactly one
- * spelling. Letting `toString(16)` emit its natural width would make `0x1` and
- * `0x0…01` two different keys for one value.
+ * Big-endian and fixed-width on purpose. These are compared AS STRINGS — a
+ * wallet finds its own note by matching an `ownerPk` that way — so one scalar
+ * must have exactly one spelling. `toString(16)` at its natural width would
+ * make `0x1` and `0x0…01` two different keys for the same value.
  *
  * Not for commitments or nullifiers: those travel LITTLE-endian and go through
  * `toHex(bigintTo32Le(...))`.
  */
 export function scalarToHex(value: bigint): string {
+    // Out of range is refused, not padded. A negative emits a literal `0x-…`
+    // and a value past 2^256 overflows the 64 chars — both break the one
+    // property this function exists for, that a scalar has exactly one
+    // spelling, and both would be compared as strings against a correct one
+    // and silently fail to match.
+    if (value < 0n || value >> 256n !== 0n) {
+        throw new Error(`scalarToHex: value must fit in 32 unsigned bytes, got ${value}`);
+    }
     return '0x' + value.toString(16).padStart(64, '0');
 }

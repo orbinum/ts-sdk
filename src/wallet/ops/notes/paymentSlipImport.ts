@@ -1,16 +1,14 @@
 /**
- * Reconstruct a note from a payment slip.
+ * Reconstruct a note from a payment slip, without scanning the pool.
  *
- * The recipient of a private transfer receives an `orbslip1:` string (or the raw
- * envelope) that the sender produced. Opening it yields the note's public
- * locators — commitment, encrypted memo, leaf index — which are fed to the SAME
- * decryption path a scan uses (`tryDecryptNote`): it decrypts the memo with the
- * recipient's viewing key, derives the stealth spending key, and verifies the
- * commitment. The result is a fully spendable `ZkNote`, obtained without scanning
- * the pool.
+ * An `orbslip1:` string carries the note's public locators — commitment,
+ * encrypted memo, leaf index. Those feed the SAME path a scan uses
+ * (`tryDecryptNote`), which opens the memo, derives the stealth spending key
+ * and verifies the commitment. Out comes a fully spendable `ZkNote`.
  */
 import type { ZkNote, ScanCommitment } from '../../../protocol/types';
 import { tryDecryptNote } from '../../../protocol/note/NoteDecryptor';
+import { assertSecretKeyBytes } from '../../../foundation/crypto/keyGuards';
 import { stampCreatedTxHash } from '../../vault/notes/meta';
 import {
     openPaymentSlip,
@@ -38,6 +36,11 @@ export interface SlipImportKeys {
  * phantom note. Never throws.
  */
 export function importPaymentSlip(slip: string | Uint8Array, keys: SlipImportKeys): ZkNote | null {
+    // The KEY throws; the SLIP returns null. A bad slip is untrusted input and
+    // "not mine" answers it — but a bad viewing key is a wiring bug, and the
+    // same null would report "no slip is yours" for every slip ever opened.
+    assertSecretKeyBytes(keys.viewingSecretKey, 'importPaymentSlip: viewingSecretKey');
+
     const envelope = typeof slip === 'string' ? decodePaymentSlip(slip) : slip;
     if (!envelope) return null;
 
@@ -54,7 +57,6 @@ export function importPaymentSlip(slip: string | Uint8Array, keys: SlipImportKey
     const note = tryDecryptNote(commitment, keys.viewingSecretKey, keys.spendingKey, keys.ownerPk);
     if (!note) return null;
 
-    // Stamp the creating tx hash from the slip so the note shows its origin
-    // instead of a blank "created tx". Informational — default txKind substrate.
+    // Origin tx, so the note does not show a blank "created tx". Informational.
     return fields.txHash ? stampCreatedTxHash(note, fields.txHash) : note;
 }

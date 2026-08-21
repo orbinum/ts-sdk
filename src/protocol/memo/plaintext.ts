@@ -1,3 +1,16 @@
+/**
+ * The memo's plaintext: its byte layout, and the two keys derived alongside it.
+ *
+ * A FROZEN WIRE CONTRACT. These 120 bytes are what every memo already on chain
+ * holds, so the offsets cannot move — any change needs a new version scheme,
+ * not an edit here. A golden vector pins them.
+ *
+ * Two derivations live beside the layout because both bind to the note:
+ *   - the encryption key mixes in the COMMITMENT, so a memo lifted onto a
+ *     different note fails to open rather than decrypting to the wrong values;
+ *   - the view tag is one byte of `nonce[0]`, letting a scan reject ~255/256 of
+ *     foreign notes without any AEAD work.
+ */
 import { sha256 } from '@noble/hashes/sha2.js';
 
 const KEY_DOMAIN = new TextEncoder().encode('orbinum-note-encryption-v1');
@@ -32,6 +45,25 @@ export function serializeMemo(
     sourcePk: Uint8Array,
     circuitVersion: number
 ): Uint8Array {
+    // Out-of-range values are REFUSED, never masked. The commitment is computed
+    // from the full bigint while these fields are fixed-width, so a value that
+    // does not fit produces a memo describing a different note than the one
+    // committed. The recipient's `tryDecryptNote` recomputes the commitment,
+    // sees the mismatch, and treats the note as not theirs — it is not a
+    // corrupted amount, it is a note nobody can ever open or spend.
+    //
+    // So the range is enforced HERE rather than left to wrap: `value = 2^128`,
+    // a negative value or `assetId = 2^32 + 5` used to serialise cleanly and
+    // only surface as `commitment_mismatch` on the recipient's device.
+    if (value < 0n || value >> 128n !== 0n) {
+        throw new Error(`serializeMemo: value must fit in 128 unsigned bits, got ${value}`);
+    }
+    if (!Number.isInteger(assetId) || assetId < 0 || assetId > 0xffff_ffff) {
+        throw new Error(`serializeMemo: assetId must be a u32, got ${assetId}`);
+    }
+    if (!Number.isInteger(circuitVersion) || circuitVersion < 0 || circuitVersion > 0xffff_ffff) {
+        throw new Error(`serializeMemo: circuitVersion must be a u32, got ${circuitVersion}`);
+    }
     const buf = new Uint8Array(MEMO_PLAINTEXT_SIZE);
     const view = new DataView(buf.buffer);
     // Store value as 128-bit LE (two uint64 words: lo + hi)

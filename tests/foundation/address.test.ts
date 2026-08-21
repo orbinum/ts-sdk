@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
     normalizeEvmAddress,
     parseEvmAddress,
-    isSs58,
     isEvmAddress,
     evmAddressToAccountId,
     evmToImplicitSubstrate,
@@ -34,25 +33,6 @@ describe('normalizeEvmAddress', () => {
     it('handles already-normalized address', () => {
         const addr = '0xabcdef1234567890abcdef1234567890abcdef12';
         expect(normalizeEvmAddress(addr)).toBe(addr);
-    });
-});
-
-describe('isSs58', () => {
-    it('returns true for a typical Substrate SS58 address (47 chars)', () => {
-        // Alice's SS58 on Substrate (default prefix 42)
-        expect(isSs58('5GrwvaEF5zXb26Fz9rcQpDWS57CtERHpNehXCPcNoHGKutQY')).toBe(true);
-    });
-
-    it('returns false for a 0x-prefixed EVM address', () => {
-        expect(isSs58('0xabcdef1234567890abcdef1234567890abcdef12')).toBe(false);
-    });
-
-    it('returns false for a short string', () => {
-        expect(isSs58('short')).toBe(false);
-    });
-
-    it('returns false for a string with 0x prefix regardless of length', () => {
-        expect(isSs58('0x' + 'a'.repeat(48))).toBe(false);
     });
 });
 
@@ -427,5 +407,40 @@ describe('parseEvmAddress', () => {
         ['no hex', '0x' + 'z'.repeat(40)],
     ])('rechaza una dirección %s', (_label, value) => {
         expect(parseEvmAddress(value)).toBeNull();
+    });
+});
+
+/**
+ * Las dos formas de rellenar, y por qué no son intercambiables.
+ *
+ * `evmAddressToAccountId` antepone 12 ceros — la convención de Ethereum.
+ * `evmToImplicitSubstrate` los añade al FINAL, que es `EeSuffixAddressMapping`,
+ * la única regla que el runtime aplica. Confundirlas produce una cuenta bien
+ * formada que esta cadena no reconoce: los fondos van a un AccountId que nadie
+ * controla, sin error en ningún punto.
+ */
+describe('las dos formas de rellenar un H160 no son la misma', () => {
+    const EVM = '0x' + 'ab'.repeat(20);
+
+    it('evmAddressToAccountId antepone (Ethereum)', () => {
+        const bytes = evmAddressToAccountId(EVM);
+
+        expect(bytes.slice(0, 12).every((b) => b === 0)).toBe(true);
+        expect(bytes.slice(12).every((b) => b === 0xab)).toBe(true);
+    });
+
+    it('evmToImplicitSubstrate añade al final (el runtime)', () => {
+        const hex = evmToImplicitSubstrate(EVM).slice(2);
+
+        expect(hex.slice(0, 40)).toBe('ab'.repeat(20));
+        expect(hex.slice(40)).toBe('00'.repeat(12));
+    });
+
+    it('y por tanto dan cuentas DISTINTAS para la misma address', () => {
+        const prefixed =
+            '0x' +
+            [...evmAddressToAccountId(EVM)].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+        expect(prefixed).not.toBe(evmToImplicitSubstrate(EVM));
     });
 });

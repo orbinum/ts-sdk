@@ -7,7 +7,11 @@
  * assemble a cross-tree pair whose proof can never be built.
  */
 import { describe, it, expect } from 'vitest';
-import { planTransfer, planUnshield, spendableBalance } from '../../../../src/wallet/ops/spend/plan';
+import {
+    planTransfer,
+    planUnshield,
+    spendableBalance,
+} from '../../../../src/wallet/ops/spend/plan';
 import { LEAVES_PER_TREE } from '../../../../src/protocol/spend/coinSelection';
 import { deriveOwnerPk } from '../../../../src/protocol/keys/PrivacyKeys';
 import type { ZkNote } from '../../../../src/protocol/types';

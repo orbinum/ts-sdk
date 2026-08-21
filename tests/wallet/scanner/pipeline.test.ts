@@ -17,7 +17,11 @@ import { deriveVaultKey, deriveVaultBlindKey } from '../../../src/index';
 import { deriveOwnerPk } from '../../../src/protocol/keys/PrivacyKeys';
 import type { ZkNote } from '../../../src/protocol/types';
 import type { DecryptPool } from '../../../src/index';
-import type { ScanHint, ScanHintSource, NullifierSource } from '../../../src/wallet/scanner/feed/sources';
+import type {
+    ScanHint,
+    ScanHintSource,
+    NullifierSource,
+} from '../../../src/wallet/scanner/feed/sources';
 
 const SPENDING_KEY = 12345678901234567890n;
 
@@ -344,10 +348,7 @@ describe('runScan', () => {
 
     /** Two sealed chunks of 5 leaves each; the tail after them is empty. */
     function chunkedSource(): ScanHintSource {
-        const chunks = [
-            [0, 1, 2, 3, 4].map(hint),
-            [5, 6, 7, 8, 9].map(hint),
-        ];
+        const chunks = [[0, 1, 2, 3, 4].map(hint), [5, 6, 7, 8, 9].map(hint)];
         const flat = chunks.flat();
         return {
             async listHints({ limit, sinceLeafIndex }) {
@@ -359,7 +360,11 @@ describe('runScan', () => {
                 async manifest() {
                     return {
                         chunkSize: 5,
-                        chunks: chunks.map((c, i) => ({ idx: i, count: c.length, digest: `d${i}` })),
+                        chunks: chunks.map((c, i) => ({
+                            idx: i,
+                            count: c.length,
+                            digest: `d${i}`,
+                        })),
                         lastSealedLeaf: flat.length - 1,
                         total: flat.length,
                     };
@@ -441,7 +446,11 @@ describe('runScan', () => {
                 async manifest() {
                     return {
                         chunkSize: 5,
-                        chunks: chunks.map((c, i) => ({ idx: i, count: c.length, digest: `d${i}` })),
+                        chunks: chunks.map((c, i) => ({
+                            idx: i,
+                            count: c.length,
+                            digest: `d${i}`,
+                        })),
                         lastSealedLeaf: flat.length - 1,
                         total: flat.length,
                     };
@@ -500,5 +509,51 @@ describe('collectNullifiersToQuery', () => {
         expect(collectNullifiersToQuery(entries, new Set(['0xa']), [note('0xa')])).toEqual(
             new Set(['0xna'])
         );
+    });
+});
+
+describe('runScan — diagnóstico de descubrimiento', () => {
+    let storage: MemoryVaultStorage;
+    let vault: VaultStore;
+
+    beforeEach(async () => {
+        storage = new MemoryVaultStorage();
+        const session = createWalletSession();
+        vault = new VaultStore({ storage, session, notes: createNotesCache() });
+        const master = new Uint8Array(32).fill(9);
+        session.open(await deriveVaultKey(master), await deriveVaultBlindKey(master));
+        await storage.putConfig({ id: 'main', v: 4, createdAt: 1, updatedAt: 1 });
+    });
+
+    // Las rutas rápidas fallan EN SILENCIO: una ventana que no casa nunca sólo
+    // cuesta velocidad, así que las notas toman el camino caro y nada lo dice.
+    // Estos contadores existían pero se acumulaban donde nadie podía leerlos.
+    it('reporta cómo encontró lo que encontró', async () => {
+        const result = await runScan({
+            vault,
+            storage,
+            hints: hintSource(3),
+            nullifiers: nullifierSource(),
+            pool: fakePool((h) => note(h.commitmentHex), { selfMatched: 2 }),
+            keys: KEYS,
+        });
+
+        expect(result.discovery.self).toBe(2);
+        expect(result.discovery.pairwise).toBe(0);
+        expect(result.discovery.tagFiltered).toBe(0);
+    });
+
+    it('un cero en la ruta rápida distingue "apagada" de "no había notas"', async () => {
+        const result = await runScan({
+            vault,
+            storage,
+            hints: hintSource(3),
+            nullifiers: nullifierSource(),
+            pool: fakePool((h) => note(h.commitmentHex)),
+            keys: KEYS,
+        });
+
+        expect(result.found).toBe(3);
+        expect(result.discovery.self).toBe(0);
     });
 });

@@ -15,10 +15,7 @@ import {
     pairwiseEphWindow,
 } from '../../../src/protocol/eph/pairwiseEph';
 import { EncryptedMemo } from '../../../src/protocol/memo/EncryptedMemo';
-import {
-    tryDecryptNote,
-    computeNoteCommitment,
-} from '../../../src/protocol/note/NoteDecryptor';
+import { tryDecryptNote, computeNoteCommitment } from '../../../src/protocol/note/NoteDecryptor';
 import { selfEphWindow } from '../../../src/protocol/eph/selfEph';
 import {
     deriveViewingSecretKey,
@@ -96,7 +93,7 @@ describe('derivePairwiseEphSk', () => {
         // Both hash (secret ‖ u32le(i)); only the domain string separates them.
         // A collision would let a self-note and a pairwise note share an ephPk.
         const asPairwise = derivePairwiseEphSk(bigintTo32Le(alice.spendingKey), 0);
-        const selfEntry = selfEphWindow(alice.spendingKey, alice.viewingPublicKey, 0, 1)[0]!;
+        const selfEntry = selfEphWindow(alice.viewingSecretKey, alice.viewingPublicKey, 0, 1)[0]!;
 
         expect(toHex(asPairwise)).not.toBe(selfEntry.ephPkHex);
     });

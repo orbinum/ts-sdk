@@ -35,9 +35,10 @@ viewing secret key and the published `ephPk`, and decrypts (ChaCha20-Poly1305).
 The plaintext carries the note's fields **and its circuit version** — which is
 why a note found by scan is immediately spendable under the right verifying key.
 
-## 3. Three shortcuts past the ECDH
+## 3. Four shortcuts past the ECDH
 
-The scan tries the cheap paths first; the full ECDH is the last resort.
+The scan tries the cheap paths first; the full ECDH is the last resort. Three
+of them recover notes the wallet owns; the fourth recovers what it sent.
 
 ### Self-ephemeral windows — your own notes
 
@@ -45,13 +46,21 @@ When a wallet builds a note _to itself_ (change, self-transfer, shield), it does
 not pick a random ephemeral. It derives one deterministically:
 
 ```
-ephSk_i = SHA256("orbinum-self-eph-v1" ‖ spendingKey_LE32 ‖ u32le(i))
+ephSk_i = SHA256("orbinum-self-eph-v3" ‖ ivsk ‖ u32le(i))
 ```
 
 The wallet can therefore precompute the window of ephemeral public keys it would
 have published — indices `0..N` — and recognise its own notes by a **hash
 lookup** on the memo's `ephPk` field: ~0.10 µs against the 895 µs ECDH it
 replaces.
+
+It hangs off the **incoming viewing key**, and it has to: a self note's memo is
+sealed toward the wallet's own `ivk`, so the secret that opens it is
+`ECDH(ephSk, own ivk)`. Finding your own notes is part of "read what arrives",
+so it lives on that branch — which is also what lets a **watch-only** wallet
+locate the change notes carrying the recipient book. The cost, stated rather
+than discovered: a delegated `ivsk` can now _enumerate_ every self note. That is
+inherent to seeing everything; under the v2 derivation it took the spending key.
 
 The index `i` comes from the vault's `selfEphCounter`, reserved atomically
 before use ([vault.md](./vault.md) §4) — a reused index republishes the same
@@ -79,6 +88,37 @@ wallet that knows nothing about this still recovers the note the slow way.
 Scope, stated plainly: this converts the steady-state case (repeat
 counterparties), not the worst case. A wallet restoring with no address book
 still pays the full scan, and a stranger's first payment is unaffected.
+
+### Outgoing windows — what you SENT
+
+The three cases above all recover notes the wallet **owns**. A payment is the
+opposite: the memo is sealed toward someone else, and the ephemeral that opened
+it was random and thrown away. A restored sender has no way back into it.
+
+The same PRF, on a third branch:
+
+```
+ephSk_i = SHA256("orbinum-outgoing-eph-v3" ‖ ovk ‖ u32le(i))
+```
+
+The published `ephPk` depends on **neither the amount nor the blinding**, which
+is exactly what makes recovery possible: the sender recognises their own
+payments without knowing what they are looking for. Recomputing the commitment
+could not work — that needs the value, the very thing being recovered.
+
+Two design points that look like details and are not:
+
+- **A separate domain, not an index range inside `selfEph`.** Sharing a domain
+  and reserving a high offset looks equivalent, until a wallet publishes more
+  self notes than the offset, walks into the outgoing range, and republishes an
+  `ephPk`. Distinct domains are disjoint at every index.
+- **It hangs off the `ovk`.** Predicting these points _is_ the capability "see
+  what I sent", so it lives on the branch that names it. An `ivsk` holder
+  cannot enumerate the wallet's payments; under a spending-key derivation the
+  payment graph would have travelled with the authority to move funds.
+
+Unlike the pairwise counter this index is **recoverable**
+(`reconstructOutgoingIndex`), so a restore need not fall back to random.
 
 ### View tags — everything else
 
@@ -170,15 +210,34 @@ host provides workers:
 ## 7. Outgoing history
 
 The chain never records what a private transfer sent or to whom. The submitting
-client saves that locally at spend time; after a restore,
-`reconstructOutgoingTxRecords` rebuilds it from each transfer's shape:
+client saves that locally at spend time; after a restore, the outgoing window
+(§3) lets the sender re-derive the ephemerals it published and read back its own
+memos, and `reconstructOutgoingTxRecords` rebuilds the rest from each transfer's
+shape:
 
 ```
 amount = Σ(inputs) − change − fee
 ```
 
 Its `TransferFactsSource` is separate from the scan feeds **on purpose**: its
-queries do send the wallet's own identifiers to the server. That is the
-documented linkage trade-off of history reconstruction — a host that prefers
-not to make it simply does not implement the source. Discovery itself never
-requires it.
+queries do send the wallet's own identifiers to the server — every spent
+nullifier and **every commitment in the vault**. That is the exact linkage §4
+exists to avoid, made deliberately and in one place.
+
+What the indexer learns from one call, correlatable with the IP: how many notes
+the wallet holds and which they are, which are spent, and — by repetition
+across rescans — when a new note arrives. Not amounts or counterparties: those
+stay in the memo. It learns the ownership graph.
+
+Two mitigations, one existing and one structural:
+
+- a wallet with **nothing spent** returns before asking anything, so a
+  receive-only wallet never leaks;
+- a host that prefers not to make the trade **simply does not implement the
+  source** — discovery itself never requires it. The cost is that outgoing
+  history rows lose their recipient and their re-issuable slip.
+
+Measured sizes and the four mitigation options are in
+[`HISTORY_RECONSTRUCTION_PRIVACY.md`](../../HISTORY_RECONSTRUCTION_PRIVACY.md);
+the scope is pinned by test, so a future change that sends one more identifier
+fails rather than passes.

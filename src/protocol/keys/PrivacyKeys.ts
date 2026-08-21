@@ -7,35 +7,32 @@
  * session concerns. What the user *signs* to produce that signature lives in
  * `SpendingKeyRequest`.
  *
- * Full derivation chain:
+ * Full derivation chain — every secret hangs off the root, none off another:
  *
  *   signature ──HKDF(info="orbinum-sk-{version}:{chainId}:{address}")──► masterBytes (32B)
- *                                                                            │
- *          ┌─────────────────────────────────────────────────────────────────┤
- *          ▼                                                                 ▼
- *   spendingKey = BigInt(masterBytes) % BABYJUB_SUBORDER            vaultKey (see vault/)
- *          │                                     = HKDF(masterBytes, "orbinum-vault-key-v1")
- *          ├──► ownerPk = BJJ_mul(Base8, spendingKey).Ax                    (public)
  *          │
- *          └──► ivsk = HKDF(LE32(spendingKey), info="orbinum-ivk-v1")       (secret)
- *                 └──► ivk = packPoint(BJJ_mul(Base8, ivsk_scalar))         (public)
+ *          ├──► spendingKey = HKDF(masterBytes, "orbinum-spend-v3")         (secret)
+ *          │       └──► ownerPk = BJJ_mul(Base8, spendingKey).Ax            (public)
+ *          │
+ *          ├──► ivsk = HKDF(masterBytes, "orbinum-ivk-v3")                  (secret)
+ *          │       └──► ivk = packPoint(BJJ_mul(Base8, ivsk_scalar))        (public)
+ *          │
+ *          ├──► ovk  = HKDF(masterBytes, "orbinum-ovk-v3")                  (secret)
+ *          │
+ *          └──► vaultKey = HKDF(masterBytes, "orbinum-vault-key-v1")   (see vault/)
  *
- *   ovk = HKDF(masterBytes, info="orbinum-ovk-v1")                          (secret)
+ * DISJOINT BRANCHES: the viewing key no longer descends from the spending key,
+ * so handing one out delegates only the ability to SEE. Under the earlier chain
+ * (`spendingKey → ivsk`) that was impossible — anything that revealed the
+ * viewing secret revealed the key that spends.
  *
- * The `ovk` (outgoing viewing key) hangs off masterBytes, NOT the reduced
- * spendingKey scalar — same root as the vault key. It is a long-term outgoing
- * auditing key: deriving it from masterBytes keeps it stable across any future
- * change of the circuit modulus, and — unlike the ivsk — it is a SIBLING of the
- * ivsk, not a descendant. Neither derives from the other, so incoming-audit
- * (ivsk) and outgoing-audit (ovk) capabilities can be delegated independently.
- * Tradeoff: an ovk is not bound to the spending identity, so rotating the
- * spending key (were that ever possible) would not invalidate it. Deliberate for
- * an auditing key; documented, not mitigated.
+ * VERSIONING: the HKDF `info` carries the version, the chain id and the
+ * account, so two SCHEMES, two chains or two accounts stay disjoint even given
+ * identical signature bytes.
  *
- * VERSIONING: the HKDF `info` carries the identity version, so v1 and v2 are
- * cryptographically disjoint even given identical signature bytes. This is the
- * layer that still separates the identities when the message-level defense fails
- * — see the security model in `SpendingKeyRequest`.
+ * It does NOT defend against a hostile origin asking for the same signature —
+ * that origin requests the current message and gets the same master. Only the
+ * sr25519 VRF path binds an origin; see `SpendingKeyRequest`.
  *
  * MODULUS: reduce mod BABYJUB_SUBORDER, never BN254_R. circomlib's BabyPbk uses
  * Num2Bits(253), asserting spending_key < 2^253. BABYJUB_SUBORDER < 2^252
@@ -51,15 +48,36 @@ import { toHex } from '../../foundation/encoding/hex';
 import { BABYJUB_SUBORDER } from '../../foundation/crypto/constants';
 
 const IVK_DOMAIN = new TextEncoder().encode('orbinum-ivk-v1');
-const OVK_DOMAIN = new TextEncoder().encode('orbinum-ovk-v1');
 
 /**
- * Identity version, folded into the HKDF `info` so a future scheme is disjoint
- * from this one by construction. Only v2 exists: v1 derived from a harvestable
- * `personal_sign` and was removed, not deprecated, so no caller can reach it.
+ * Version token inside the HKDF info the SIGNATURE is bound to.
+ *
+ * Stays `v2` on purpose while the identity scheme is v3. The two version very
+ * different things:
+ *
+ *   - this one names the message the user signs, `orbinum-sk-v2:{chainId}:{addr}`,
+ *     and therefore the master bytes that come out of it;
+ *   - `IdentityVersion` names the BRANCHES derived from those master bytes.
+ *
+ * v3 changed only the branches. Bumping this too would change the master for
+ * the same signature, forcing every user to re-sign to reach an identity that
+ * is otherwise identical — a prompt with nothing behind it. It moves when the
+ * signed message itself has to change.
  */
-/** Derivation-scheme version, part of the HKDF info. Shared with spendingKeyDerivation. */
 export const KEY_VERSION = 'v2';
+
+/**
+ * The derivation scheme an identity was built under.
+ *
+ * Only `v3` exists. It lives here, beside the derivations themselves, rather
+ * than in the wallet: the vault name and the address scheme both hang off it,
+ * and having `protocol` reach up into `wallet` for the type would invert the
+ * layering for a single string union.
+ *
+ * Kept as a named union rather than dropped: the next scheme gets added here,
+ * and a bare string would let a typo pick a vault nobody ever wrote to.
+ */
+export type IdentityVersion = 'v3';
 
 // ─── Key derivation from wallet signature ─────────────────────────────────────
 
@@ -81,19 +99,85 @@ export function deriveSpendingKeyFromMaster(masterBytes: Uint8Array): bigint {
 // ─── Key derivation from master bytes / spending key ─────────────────────────
 
 /**
- * Derive a 32-byte viewing secret key (ivsk) from the spending key.
+ * The v2 viewing secret key, chained off the SPENDING key.
  *   ivsk = HKDF-SHA256(ikm=bigintTo32Le(spendingKey), info="orbinum-ivk-v1")
  *
- * The ivsk is intentionally derived from the already-reduced spending key scalar
- * (not from masterBytes) so that it stays bound to the specific key identity
- * loaded in this session. The spendingKey must already be in [1, BABYJUB_SUBORDER).
+ * NOT what a v3 wallet uses. `deriveViewingSecretKeyV3(masterBytes)` is the
+ * live branch, and the two produce DIFFERENT keys from one signature: deriving
+ * this one beside a v3 identity yields a second wallet whose notes the first
+ * cannot see. `PrivacyKeyManager` only ever calls the v3 branch.
  *
- * SECURITY: This is a symmetric secret — never embed it in a shareable address.
- * Use deriveViewingPublicKey() to obtain the public component for sharing.
+ * Chaining off the spending key is exactly what v3 removed — it made a viewing
+ * key impossible to delegate, since anything that revealed it revealed the key
+ * that spends. Kept for reading material derived under the older scheme.
+ *
+ * SECURITY: a symmetric secret — never embed it in a shareable address. Use
+ * `deriveViewingPublicKey()` for the public half.
  */
 export function deriveViewingSecretKey(spendingKey: bigint): Uint8Array {
     const ikm = bigintTo32Le(spendingKey);
     return hkdf(sha256, ikm, undefined, IVK_DOMAIN, 32);
+}
+
+// ─── v3: disjoint branches ───────────────────────────────────────────────────
+//
+// Every v3 key is HKDF(rootSecret, info=<purpose>). No branch derives from
+// another, which is the whole point: in v2 the viewing key DESCENDS from the
+// spending key, so there is no viewing key that can be handed out — delegating
+// read access means delegating everything.
+//
+// Three consequences worth knowing before using these:
+//
+//   1. Spending needs TWO branches. The scalar that spends a received note is
+//      `deriveStealthSk(sharedSecret, ownerPk, spendingKey)`, and the shared
+//      secret comes from the VIEWING key. A v3 spending key alone decrypts
+//      nothing and spends nothing — disjoint does not mean independently usable.
+//   2. Recovery needs the ROOT. Recovering only the spending key leaves the
+//      payment history unrecoverable, because the outgoing branch is gone with
+//      it. "Back up your key" becomes "back up your root".
+//   3. `ovk` is MORE sensitive than `ivsk`: it hands over the payment graph, not
+//      just incoming amounts. It must be opt-in and separately revocable.
+
+const SPEND_V3_DOMAIN = new TextEncoder().encode('orbinum-spend-v3');
+const IVK_V3_DOMAIN = new TextEncoder().encode('orbinum-ivk-v3');
+const OVK_V3_DOMAIN = new TextEncoder().encode('orbinum-ovk-v3');
+
+/** One 32-byte v3 branch. Every branch is a sibling; none is a parent. */
+const deriveBranch = (rootSecret: Uint8Array, domain: Uint8Array): Uint8Array =>
+    hkdf(sha256, rootSecret, undefined, domain, 32);
+
+/**
+ * The v3 spending scalar — the authority to move funds, and nothing else.
+ *
+ * Reduced into the curve's scalar field like its v2 counterpart, so the circuit
+ * accepts it unchanged. Unlike v2 it is a LEAF: no other key hangs off it.
+ */
+export function deriveSpendingKeyV3(rootSecret: Uint8Array): bigint {
+    const scalar = BigInt(toHex(deriveBranch(rootSecret, SPEND_V3_DOMAIN))) % BABYJUB_SUBORDER;
+    return scalar === 0n ? 1n : scalar;
+}
+
+/**
+ * The v3 incoming viewing key — read what arrives, spend nothing.
+ *
+ * This is the branch that makes a watch-only wallet possible: it is a sibling of
+ * the spending key, so holding it proves nothing about the spending key and
+ * gives no path to it.
+ */
+export function deriveViewingSecretKeyV3(rootSecret: Uint8Array): Uint8Array {
+    return deriveBranch(rootSecret, IVK_V3_DOMAIN);
+}
+
+/**
+ * The v3 outgoing viewing key — read what this wallet SENT.
+ *
+ * Seeds the outgoing ephemerals and the recipient book, so a holder can
+ * enumerate every payment the wallet made and name who received it. That is the
+ * capability, not a leak — but it makes this strictly more sensitive than the
+ * incoming viewing key, which only reveals what arrived.
+ */
+export function deriveOutgoingViewingKeyV3(rootSecret: Uint8Array): Uint8Array {
+    return deriveBranch(rootSecret, OVK_V3_DOMAIN);
 }
 
 /**
@@ -106,7 +190,7 @@ export function deriveViewingSecretKey(spendingKey: bigint): Uint8Array {
  * The packed bigint is stored in little-endian so it is consistent with the
  * rest of the SDK's 32-byte scalar encoding (bigintTo32Le / bytesToBigintLE).
  *
- * @param ivsk 32-byte HKDF output from deriveViewingSecretKey().
+ * @param ivsk 32-byte viewing secret key — `deriveViewingSecretKeyV3` on v3.
  * @returns 32-byte LE-encoded packed BJJ point (goes in the privacy address).
  */
 export function deriveViewingPublicKey(ivsk: Uint8Array): Uint8Array {
@@ -129,21 +213,4 @@ export function deriveOwnerPk(spendingKey: bigint): bigint {
     } catch {
         return 0n;
     }
-}
-
-/**
- * Derive the 32-byte outgoing viewing key (ovk) from master bytes.
- *   ovk = HKDF-SHA256(ikm=masterBytes, info="orbinum-ovk-v1")
- *
- * Mirror of the vault-key derivation: rooted at masterBytes, not the spendingKey
- * scalar (see the derivation chain above for why). The ovk lets the SENDER of a
- * private transfer recover what they sent — it wraps the memo's shared secret so
- * a cold restore rebuilds the outgoing history. Sibling of the ivsk, delegable
- * independently.
- *
- * SECRET. Never embed it in a shareable address — it stays out of
- * encodePrivacyAddress by construction (there is no public component to derive).
- */
-export function deriveOutgoingViewingKey(masterBytes: Uint8Array): Uint8Array {
-    return hkdf(sha256, masterBytes, undefined, OVK_DOMAIN, 32);
 }

@@ -70,7 +70,7 @@ function makeDeps(over: Partial<UnshieldDeps> = {}) {
                 .mockResolvedValue({ root: '0x' + 'aa'.repeat(32), path: ['0xbb'], leafIndex: 3 }),
         },
         resolver: { resolve: vi.fn().mockResolvedValue({ provider: { tag: 'p' }, version: 1 }) },
-        buildNote: vi.fn().mockResolvedValue(CHANGE_NOTE),
+        buildNote: vi.fn().mockResolvedValue({ note: CHANGE_NOTE }),
         vault: {
             markSpent: vi.fn().mockResolvedValue(undefined),
             save: vi.fn().mockResolvedValue(undefined),

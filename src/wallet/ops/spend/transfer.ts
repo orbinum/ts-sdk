@@ -1,32 +1,32 @@
 /**
  * Private transfer — one or two input notes to a recipient plus change.
  *
- * Two parts of this are the reason it lives in the SDK rather than in every
- * wallet separately:
+ * Two things here are why this lives in the SDK and not in every wallet:
  *
- * **The root reconciliation loop.** The circuit proves membership of both
- * inputs under ONE public merkle root, but each RPC fetch resolves under its
- * own best block. A commitment landing between the two fetches leaves the
- * proofs anchored to different roots, and witness generation dies on the
- * merkle constraint. The loop refetches until the roots agree — and it must
- * first rule out inputs from different forest trees, whose roots can NEVER
- * agree, or it would spend every retry on an impossible convergence.
+ * **The root reconciliation loop.** The circuit proves both inputs under ONE
+ * merkle root, but each RPC fetch resolves against its own best block. A
+ * commitment landing between two fetches anchors the proofs to different roots
+ * and witness generation dies on the merkle constraint. The loop refetches
+ * until they agree — after first ruling out inputs from different forest trees,
+ * whose roots can NEVER agree, or every retry is spent on the impossible.
  *
- * **Which key encrypts what.** The recipient note is encrypted to the
- * recipient's viewing key (stealth when they shared a privacy address); the
- * change note goes back to the sender under a viewing key derived from the
- * INPUT's spending key, so a rescan under the same identity can always reopen
- * it. The change note's sourcePk records the recipient's ONE-TIME
- * stealth key rather than their global one, so the vault never stores a stable
- * identifier of who was paid.
+ * **Which key encrypts what.** The recipient note goes to the recipient's
+ * viewing key (stealth when they shared a privacy address). The change note
+ * goes to the sender's GLOBAL identity — never to anything derived from the
+ * input — so a rescan under that identity can always reopen it.
+ *
+ * The change note's `sourcePk` carries the recipient book: their viewing key,
+ * sealed under the sender's OUTGOING viewing key. Sealed, not plain, because a
+ * viewing key is meant to be shareable and disclosing one must not hand over
+ * the payment graph with it.
  */
 import { generateTransferProof } from '../../../protocol/proving/transfer';
 import { buildDummyTransferInput } from '../../../protocol/spend/index';
 import { CircuitType } from '@orbinum/proof-generator';
-import { deriveViewingPublicKey, deriveViewingSecretKey } from '../../../protocol/keys/PrivacyKeys';
 import { sealPaymentSlip, encodePaymentSlip } from '../../../protocol/memo/PaymentSlip';
 import { fromHex, toHex } from '../../../foundation/encoding/hex';
-import { bigintTo32LeArr } from '../../../foundation/encoding/bytes';
+import { bigintTo32LeArr, bytesToBigintLE } from '../../../foundation/encoding/bytes';
+import { sealRecipientBookEntry } from '../../../protocol/note/recipientBook';
 import { checkSpendableInputs, treeOf } from './guards';
 import { failed, refuseIfAlreadySpent, markInputsSpent } from './lifecycle';
 import type { SpendPrivacyReads, SpendVault } from './lifecycle';
@@ -62,16 +62,25 @@ export interface TransferSubmitRequest {
 export interface TransferDeps {
     privacy: SpendPrivacyReads;
     resolver: Pick<CircuitVersionResolver, 'resolve'>;
-    /** Builds the two output notes. Owns keys and the ephemeral reservations. */
+    /**
+     * Builds the two output notes. Owns keys and the ephemeral reservations.
+     *
+     * Returns the outgoing index alongside the note, used only as a signal that
+     * this payment published a DERIVED ephemeral and is therefore recoverable —
+     * which is what decides whether the change note carries a book entry at all.
+     * The entry itself is keyed on the payment's commitment, never on this
+     * index; see `recipientBook`.
+     */
     buildNote: (params: {
         value: bigint;
         assetId: bigint;
-        ownerPk: bigint;
+        /** Omit for a note owned by the wallet itself — the builder fills its own. */
+        ownerPk?: bigint;
         spendingKey?: bigint;
         sourcePk: bigint;
         viewingPublicKey?: Uint8Array;
         recipientOwnerPk?: bigint;
-    }) => Promise<ZkNote>;
+    }) => Promise<{ note: ZkNote; outgoingIndex?: number }>;
     vault: SpendVault;
     /** Spendable form of a self-addressed stealth note, or null (see selfStealthNote). */
     recoverStealth: (note: ZkNote) => ZkNote | null;
@@ -83,6 +92,14 @@ export interface TransferDeps {
      * immediately instead of waiting for a rescan.
      */
     selfOwnerPk: bigint | null;
+    /**
+     * The wallet's outgoing viewing key (ovk), when it has one.
+     *
+     * Seals the recipient book into the change note. Absent — a watch-only or
+     * legacy identity — the change keeps the older meaning and the transfer is
+     * simply not recoverable from the seed later.
+     */
+    outgoingViewingKey?: Uint8Array;
     /** Route stamped on persisted notes (explorer link kind). */
     txKind?: TxKind;
 }
@@ -93,17 +110,29 @@ export interface TransferParams {
     recipientPk: bigint;
     /** Packed viewing key from the recipient's privacy address. Omitted → dummy memo, they must scan. */
     recipientViewingPublicKey?: Uint8Array | undefined;
+    /**
+     * What the recipient sees as `sourcePk` — who paid them.
+     *
+     * PASS IT EXPLICITLY. The default is the spent note's owner, so what gets
+     * disclosed depends on coin selection: spending a received note discloses a
+     * one-time key that names nobody, spending a shield or change note
+     * discloses the wallet's GLOBAL identity, linkable across every payment
+     * made from one. Naming the counterparty is the field's purpose, so neither
+     * is a leak — but the choice should not be made by the coin selector.
+     *
+     * A stable pseudonym for a merchant tracking repeat payments, a
+     * per-recipient value to stay unlinkable, or `0n` to say nothing.
+     */
     senderPk?: bigint | undefined;
     fee?: bigint | undefined;
 }
 
 /**
- * Rounds of refetching before giving up on root agreement.
+ * Rounds of refetching before giving up on root agreement. Each round refetches
+ * A, then B only if that was not enough — a ceiling of six RPC calls, not three.
  *
- * Each round refetches A, and B only if that was not enough — so the ceiling is
- * six RPC calls, not three. Kept low deliberately: a tree advancing faster than
- * two fetches can converge is a chain under load, and retrying harder makes
- * that worse. The user retries a failed transfer; the node does not get a say.
+ * Low on purpose: a tree advancing faster than two fetches can converge means a
+ * chain under load, and retrying harder makes that worse.
  */
 const MAX_ROOT_SYNC_ATTEMPTS = 3;
 
@@ -184,13 +213,7 @@ export async function transferNotes(
     onProgress?.('building-output-notes');
     const effectiveSenderPk = senderPk ?? noteA.ownerPk;
 
-    // The change must be reopenable by a rescan under the sender's identity, so
-    // its viewing key derives from the INPUT's spending key.
-    const senderViewingPublicKey = deriveViewingPublicKey(
-        deriveViewingSecretKey(noteA.spendingKey)
-    );
-
-    const recipientNote = await deps.buildNote({
+    const { note: recipientNote, outgoingIndex } = await deps.buildNote({
         value: transferAmount,
         assetId: noteA.assetId,
         ownerPk: recipientPk,
@@ -203,17 +226,51 @@ export async function transferNotes(
         recipientOwnerPk: recipientPk,
     });
 
-    // No stealth for the change: the circuit validates the eventual spend by
-    // BabyPbk(spendingKey).Ax === ownerPk, so the pair must be the sender's
-    // real one. sourcePk records the recipient's ONE-TIME stealth key —
-    // never their stable global identifier.
-    const changeNote = await deps.buildNote({
+    // The recipient book: the RECIPIENT'S VIEWING KEY sealed under the sender's
+    // OUTGOING viewing key, riding in the change note's `sourcePk`. The change
+    // is self-addressed and reopens from the seed alone, so this is what lets a
+    // restored wallet name who it paid and re-issue the payment slip.
+    //
+    // Keyed on the PAYMENT's commitment — the one value both sides hold, and
+    // the one a restored wallet has at the exact moment it needs the entry. An
+    // index would drift: the entry is sealed against the outgoing sequence and
+    // read while scanning the SELF sequence, and one shield separates them.
+    //
+    // Without a derived ephemeral it falls back to the recipient note's
+    // `ownerPk`. That is a one-time stealth key when stealth engaged — but with
+    // no `recipientViewingPublicKey` there is no stealth, and the fallback then
+    // carries the recipient's GLOBAL key, linkable across every payment to
+    // them. Same disclosure `senderPk` documents, on the other side.
+    const changeSourcePk =
+        outgoingIndex !== undefined &&
+        recipientViewingPublicKey !== undefined &&
+        deps.outgoingViewingKey !== undefined
+            ? bytesToBigintLE(
+                  sealRecipientBookEntry(
+                      recipientViewingPublicKey,
+                      deps.outgoingViewingKey,
+                      recipientNote.commitmentHex
+                  )
+              )
+            : recipientNote.ownerPk;
+
+    // The change goes back to the wallet's GLOBAL identity, so its keys are
+    // left to `buildNote`'s defaults and NEVER taken from the input note.
+    //
+    // Almost everything a wallet spends is a note it RECEIVED, and those are
+    // stealth: one-time `spendingKey` and `ownerPk`. Change built from them is
+    // sealed toward a viewing key derived from that one-time scalar, which a
+    // rescan — holding the global key — cannot open, and commits to an owner
+    // the wallet never derives again. Invisible at send time, since the change
+    // is saved straight from memory; it surfaces on the next restore, as change
+    // that simply is not there.
+    //
+    // No stealth for the change either: the circuit checks the eventual spend
+    // by `BabyPbk(spendingKey).Ax === ownerPk`, so the pair must be the real one.
+    const { note: changeNote } = await deps.buildNote({
         value: changeValue,
         assetId: noteA.assetId,
-        ownerPk: effectiveSenderPk,
-        spendingKey: noteA.spendingKey,
-        sourcePk: recipientNote.ownerPk,
-        viewingPublicKey: senderViewingPublicKey,
+        sourcePk: changeSourcePk,
     });
 
     // ── 4. Prove ──────────────────────────────────────────────────────────────

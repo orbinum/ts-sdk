@@ -1,20 +1,14 @@
 /**
  * Browser wallet extensions, for hosts that actually have a page to inject into.
  *
- * `polkadot-api/pjs-signer` reads a bare `window.injectedWeb3`. That is correct
- * for a dApp in a tab and wrong everywhere else this SDK runs: a React Native
- * app, a Node process, a Cloudflare Worker, and — the surprising one — an
- * extension's own service worker all lack `window`, so the call dies with
- * `ReferenceError: window is not defined` rather than reporting that no
- * extension is reachable.
+ * `polkadot-api/pjs-signer` reads a bare `window.injectedWeb3` — correct for a
+ * dApp in a tab, and a `ReferenceError` everywhere else this SDK runs: React
+ * Native, Node, a Cloudflare Worker, and the surprising one, an extension's own
+ * service worker. A crash instead of "no extension is reachable".
  *
- * These wrappers keep the capability on the root entry while making the absence
- * of a page an ordinary, checkable condition. `hasInjectedExtensions()` lets a
- * mobile or extension host branch to its own signing path instead of discovering
- * the limitation through a crash.
- *
- * The wrapping is deliberately thin: this file translates an environment
- * assumption, and nothing else. Signing itself stays in the upstream library.
+ * These wrappers turn that into an ordinary checkable condition, so a host can
+ * branch to its own signing path. Deliberately thin — this file translates an
+ * environment assumption and nothing else; signing stays upstream.
  */
 import {
     connectInjectedExtension as pjsConnect,
@@ -23,16 +17,12 @@ import {
 import type { InjectedExtension } from 'polkadot-api/pjs-signer';
 
 /**
- * Whether browser wallet extensions can be discovered at all.
- *
- * False in React Native, Node, a Cloudflare Worker and an extension service
- * worker. A host that gets false must sign some other way — there is no
- * fallback to arrange here, only a fact to report.
+ * Whether browser wallet extensions can be discovered at all. A host that gets
+ * false must sign some other way — there is no fallback to arrange here.
  */
 export function hasInjectedExtensions(): boolean {
-    // Reached through `globalThis` rather than naming `window`: that name is
-    // `lib.dom`, and this module compiles for hosts that have neither the lib
-    // nor the object.
+    // Through `globalThis`, never naming `window`: that name is `lib.dom`, and
+    // this module compiles for hosts that have neither the lib nor the object.
     const host = (globalThis as { window?: { injectedWeb3?: unknown } }).window;
     return host !== undefined && host.injectedWeb3 !== undefined;
 }
@@ -44,9 +34,8 @@ const NO_PAGE =
 /**
  * Installed extension ids, or an empty list where none can exist.
  *
- * Returns empty rather than throwing: "which extensions are present" has an
- * honest answer off-page, and it is "none". A caller enumerating wallets to
- * render a picker wants a list, not an exception.
+ * Empty rather than a throw: off-page, "which extensions are present" has an
+ * honest answer, and it is "none". A caller rendering a picker wants a list.
  */
 export function getInjectedExtensions(): string[] {
     if (!hasInjectedExtensions()) return [];
@@ -54,11 +43,9 @@ export function getInjectedExtensions(): string[] {
 }
 
 /**
- * Connects to one extension by id.
- *
- * Throws off-page, unlike the enumerator above: the caller asked for a specific
- * extension, so an empty result would misreport "not installed" for what is
- * really "this host cannot reach extensions at all".
+ * Connects to one extension by id. Throws off-page, unlike the enumerator: the
+ * caller named an extension, so silence would misreport "not installed" for
+ * "this host cannot reach extensions at all".
  */
 export function connectInjectedExtension(
     name: string,

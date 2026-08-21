@@ -6,6 +6,11 @@
  */
 export { decryptHintBatch } from './decryptBatch';
 export { clearKnownEphWindow, getKnownEphWindow } from './ephWindow';
-export type { KnownEphWindow, KnownEphEntry, MatchSource } from './ephWindow';
-export { SELF_EPH_WINDOW, PAIRWISE_EPH_WINDOW, EMPTY_BATCH_RESULT } from './types';
-export type { ScanKeys, DecryptBatchResult } from './types';
+export type { KnownEphWindow, KnownEphEntry } from './ephWindow';
+export {
+    SELF_EPH_WINDOW,
+    PAIRWISE_EPH_WINDOW,
+    OUTGOING_EPH_WINDOW,
+    EMPTY_BATCH_RESULT,
+} from './types';
+export type { ScanKeys, DecryptBatchResult, SentNoteMatch, UnmatchedSentHint } from './types';

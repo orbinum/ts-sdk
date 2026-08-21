@@ -19,14 +19,12 @@ import { VaultStore } from './vault/index';
 import { createNotesCache } from './vault/index';
 import { createWalletSession } from './vault/index';
 import { deriveVaultKey, deriveVaultBlindKey } from './vault/index';
-import {
-    deriveViewingSecretKey,
-    deriveViewingPublicKey,
-    deriveOwnerPk,
-    deriveSpendingKeyFromMaster,
-} from '../protocol/keys/PrivacyKeys';
+import { assertSecretKeyBytes } from '../foundation/crypto/keyGuards';
+import { deriveIdentity } from './identity/walletIdentity';
+import type { WalletIdentity } from './identity/walletIdentity';
+import type { IdentityVersion } from './identity/vaultName';
 import { runScan } from './scanner/index';
-import { buildZkNote, recoverSelfStealthNote } from './ops/index';
+import { buildZkNote, buildZkNoteWithIndex, recoverSelfStealthNote } from './ops/index';
 import { chainActiveCircuitVersion } from './ops/index';
 import type { BuildNoteParams } from './ops/index';
 import type { VaultStorage, MutableWalletSession } from './vault/index';
@@ -67,6 +65,16 @@ export interface OrbinumWalletConfig {
      * that already resolved it — a wrong value yields unspendable notes.
      */
     circuitVersion?: number | undefined;
+    /**
+     * Which derivation scheme this wallet's keys come from.
+     *
+     * Only `v3` exists, so this is here for the NEXT scheme rather than for a
+     * choice available today — passing it changes nothing. v2 was removed, not
+     * deprecated: it chained the viewing key off the spending key, which made a
+     * watch-only wallet impossible and left no branch to hang the outgoing
+     * viewing key on.
+     */
+    identityVersion?: IdentityVersion | undefined;
 }
 
 export interface ScanOptions {
@@ -84,8 +92,16 @@ export class OrbinumWallet {
     private readonly session: MutableWalletSession;
     private readonly notes: ObservableNotesCache;
     private readonly vaultStore: VaultStore;
-    /** Set at unlock; every key below is derived from it. */
-    private spendingKey: bigint | null = null;
+    /**
+     * The identity this wallet is unlocked as, or null.
+     *
+     * Held as a bundle rather than a single scalar because v3 keys are SIBLINGS:
+     * the spending key no longer produces the viewing key, so there is nothing
+     * left to derive the others from once unlock returns. Keeping the root out
+     * of this object is deliberate — the branches are what the wallet needs, and
+     * the root is the thing worth not retaining.
+     */
+    private identity: WalletIdentity | null = null;
 
     constructor(private readonly config: OrbinumWalletConfig) {
         this.session = createWalletSession();
@@ -103,7 +119,7 @@ export class OrbinumWallet {
     }
 
     get unlocked(): boolean {
-        return this.session.unlocked && this.spendingKey !== null;
+        return this.session.unlocked && this.identity !== null;
     }
 
     /**
@@ -111,11 +127,14 @@ export class OrbinumWallet {
      * signature produces — the same value `PrivacyKeyManager.getMasterBytes()`
      * returns.
      *
-     * Master bytes rather than the spending-key scalar, deliberately: the scalar
-     * is the master reduced modulo the curve order, so deriving the vault key
-     * from it would tie the encrypted vault to the CURRENT modulus. The master
-     * is pre-reduction, which keeps a stored vault readable across a modulus
-     * change. Everything else — viewing keys, ownerPk — comes from the scalar.
+     * Master bytes rather than the spending-key scalar, deliberately: the master
+     * is the root EVERY branch hangs off — spending key, viewing key, outgoing
+     * viewing key and vault key are each their own HKDF of it, none derived
+     * from another. Only `ownerPk` comes from the spending scalar, because the
+     * circuit defines it that way.
+     *
+     * It is also what keeps a stored vault readable across a modulus change:
+     * the vault key is derived pre-reduction.
      *
      * Reports whether the stored vault was RESET: a different chain, a different
      * key, or notes the chain no longer recognises. When it was, the wallet
@@ -132,15 +151,17 @@ export class OrbinumWallet {
         masterBytes: Uint8Array,
         options: VaultUnlockOptions = {}
     ): Promise<{ wasReset: boolean; notes: ZkNote[] }> {
-        if (masterBytes.length !== 32) {
-            throw new Error(`Master key must be 32 bytes, got ${masterBytes.length}.`);
-        }
+        // Length AND usability: an all-zero master is 32 bytes, so a
+        // length-only check let it through to derive an identity every other
+        // wallet also derives. `deriveIdentity` rejects it, but a level deeper —
+        // after the session is already open.
+        assertSecretKeyBytes(masterBytes, 'Master key');
 
         this.session.open(
             await deriveVaultKey(masterBytes),
             await deriveVaultBlindKey(masterBytes)
         );
-        this.spendingKey = deriveSpendingKeyFromMaster(masterBytes);
+        this.identity = deriveIdentity(masterBytes, this.config.identityVersion ?? 'v3');
 
         try {
             return await this.vaultStore.unlock(this.session.cryptoKey!, options);
@@ -153,8 +174,23 @@ export class OrbinumWallet {
     /** Drops the in-memory keys. The stored vault is untouched. */
     lock(): void {
         this.session.lock();
-        this.spendingKey = null;
+        this.identity = null;
         this.notes.set([]);
+        // The pool caches a discovery window holding one ECDH shared secret per
+        // index, all derived from the viewing key. It outlives a scan by design
+        // and so outlived a lock too: the session keys were dropped while tens
+        // of KB of secret material stayed reachable in module memory — on a
+        // main-thread pool, the page's own heap.
+        //
+        // `terminate` is what drops it, and it is safe to call here: a
+        // worker-backed pool respawns on the next scan, and the main-thread
+        // pool only clears the cache. Failures are swallowed because locking
+        // must always succeed — a lock that throws leaves the wallet unlocked.
+        try {
+            this.config.pool.terminate();
+        } catch {
+            // Nothing actionable: the keys and notes above are already gone.
+        }
     }
 
     /** The notes currently held. Empty while locked. */
@@ -169,11 +205,8 @@ export class OrbinumWallet {
 
     /** This wallet's privacy identity: the keys a payer needs to address it. */
     privacyKeys(): { ownerPk: bigint; viewingPublicKey: Uint8Array } {
-        const spendingKey = this.requireKey();
-        return {
-            ownerPk: deriveOwnerPk(spendingKey),
-            viewingPublicKey: deriveViewingPublicKey(deriveViewingSecretKey(spendingKey)),
-        };
+        const { ownerPk, viewingPublicKey } = this.requireIdentity();
+        return { ownerPk, viewingPublicKey };
     }
 
     /**
@@ -184,8 +217,7 @@ export class OrbinumWallet {
      * `sinceLeafIndex` for a full scan, which is what a restore needs.
      */
     async scan(options: ScanOptions = {}): Promise<ScanResult> {
-        const spendingKey = this.requireKey();
-        const viewingKey = deriveViewingSecretKey(spendingKey);
+        const identity = this.requireIdentity();
 
         return runScan({
             vault: this.vaultStore,
@@ -193,7 +225,16 @@ export class OrbinumWallet {
             hints: this.config.hints,
             nullifiers: this.config.nullifiers,
             pool: this.config.pool,
-            keys: { viewingKey, spendingKey, ownerPk: deriveOwnerPk(spendingKey) },
+            keys: {
+                viewingKey: identity.viewingSecretKey,
+                spendingKey: identity.spendingKey,
+                ownerPk: identity.ownerPk,
+                // Absent on a watch-only identity: the scan then finds every
+                // note the wallet owns and reconstructs no payment history.
+                ...(identity.outgoingViewingKey
+                    ? { outgoingViewingKey: identity.outgoingViewingKey }
+                    : {}),
+            },
             sinceLeafIndex: options.sinceLeafIndex,
             viewTagActivationLeaf: this.config.viewTagActivationLeaf,
             onProgress: options.onProgress,
@@ -217,13 +258,16 @@ export class OrbinumWallet {
      * reusing an index would republish an ephPk and link the two notes.
      */
     async buildNote(params: Omit<BuildNoteParams, 'circuitVersion'> & { circuitVersion: number }) {
-        const spendingKey = this.requireKey();
+        const identity = this.requireIdentity();
         return buildZkNote(params, {
             keys: {
-                ownerPk: deriveOwnerPk(spendingKey),
-                spendingKey,
-                viewingPublicKey: deriveViewingPublicKey(deriveViewingSecretKey(spendingKey)),
-                viewingSecretKey: deriveViewingSecretKey(spendingKey),
+                ownerPk: identity.ownerPk,
+                spendingKey: identity.spendingKey,
+                viewingPublicKey: identity.viewingPublicKey,
+                viewingSecretKey: identity.viewingSecretKey,
+                ...(identity.outgoingViewingKey
+                    ? { outgoingViewingKey: identity.outgoingViewingKey }
+                    : {}),
             },
             storage: this.config.storage,
         });
@@ -240,12 +284,20 @@ export class OrbinumWallet {
      *
      * Treat the result as secret: it can spend every note this wallet holds.
      */
-    spendKeys(): { spendingKey: bigint; viewingSecretKey: Uint8Array; ownerPk: bigint } {
-        const spendingKey = this.requireKey();
+    spendKeys(): {
+        spendingKey: bigint;
+        viewingSecretKey: Uint8Array;
+        ownerPk: bigint;
+        outgoingViewingKey?: Uint8Array;
+    } {
+        const identity = this.requireIdentity();
         return {
-            spendingKey,
-            viewingSecretKey: deriveViewingSecretKey(spendingKey),
-            ownerPk: deriveOwnerPk(spendingKey),
+            spendingKey: identity.spendingKey,
+            viewingSecretKey: identity.viewingSecretKey,
+            ownerPk: identity.ownerPk,
+            ...(identity.outgoingViewingKey
+                ? { outgoingViewingKey: identity.outgoingViewingKey }
+                : {}),
         };
     }
 
@@ -268,8 +320,28 @@ export class OrbinumWallet {
      * guessed version produces a note the chain refuses to spend after a
      * verifying-key rotation, and the failure surfaces much later.
      */
-    buildOutputNote = async (params: Omit<BuildNoteParams, 'circuitVersion'>): Promise<ZkNote> => {
-        return this.buildNote({ ...params, circuitVersion: await this.circuitVersion() });
+    buildOutputNote = async (
+        params: Omit<BuildNoteParams, 'circuitVersion'>
+    ): Promise<{ note: ZkNote; outgoingIndex?: number }> => {
+        const identity = this.requireIdentity();
+        // `buildZkNoteWithIndex` rather than `buildNote`: a transfer needs to
+        // know which outgoing index the payment published, so the change note
+        // can be given a recipient book entry.
+        return buildZkNoteWithIndex(
+            { ...params, circuitVersion: await this.circuitVersion() },
+            {
+                keys: {
+                    ownerPk: identity.ownerPk,
+                    spendingKey: identity.spendingKey,
+                    viewingPublicKey: identity.viewingPublicKey,
+                    viewingSecretKey: identity.viewingSecretKey,
+                    ...(identity.outgoingViewingKey
+                        ? { outgoingViewingKey: identity.outgoingViewingKey }
+                        : {}),
+                },
+                storage: this.config.storage,
+            }
+        );
     };
 
     /** The circuit version a new note should carry. */
@@ -284,10 +356,10 @@ export class OrbinumWallet {
         return chainActiveCircuitVersion(this.config.zkVerifier);
     }
 
-    private requireKey(): bigint {
-        if (this.spendingKey === null) {
+    private requireIdentity(): WalletIdentity {
+        if (this.identity === null) {
             throw new Error('Wallet is locked. Call unlock() before using it.');
         }
-        return this.spendingKey;
+        return this.identity;
     }
 }

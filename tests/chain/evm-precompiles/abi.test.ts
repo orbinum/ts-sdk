@@ -334,9 +334,7 @@ describe('bytes32 is not silently reshaped', () => {
         // Zero-padding a short value produces a well-formed slot for a value
         // nobody asked to encode.
         expect(() => encode(SEL, { type: 'bytes32', value: new Uint8Array(31) })).toThrow();
-        expect(() =>
-            encode(SEL, { type: 'bytes32', value: new Uint8Array([1, 2, 3]) })
-        ).toThrow();
+        expect(() => encode(SEL, { type: 'bytes32', value: new Uint8Array([1, 2, 3]) })).toThrow();
         expect(() => encode(SEL, { type: 'bytes32', value: new Uint8Array(0) })).toThrow();
     });
 
@@ -359,9 +357,7 @@ describe('bytes32[] holds the same rule as bytes32', () => {
                 value: [new Uint8Array(32), new Uint8Array(33).fill(0xaa)],
             })
         ).toThrow();
-        expect(() =>
-            encode(SEL, { type: 'bytes32[]', value: [new Uint8Array(31)] })
-        ).toThrow();
+        expect(() => encode(SEL, { type: 'bytes32[]', value: [new Uint8Array(31)] })).toThrow();
     });
 
     it('still encodes an array of exact 32-byte elements', () => {

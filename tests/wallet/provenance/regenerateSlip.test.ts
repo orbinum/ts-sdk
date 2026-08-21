@@ -12,7 +12,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { NoteBuilder } from '../../../src/protocol/note/NoteBuilder';
 import { collectOutgoingFacts } from '../../../src/protocol/note/NoteDecryptor';
-import type { OutgoingHint } from '../../../src/protocol/note/NoteDecryptor';
+import type { ScanCommitment } from '../../../src/protocol/types';
 import {
     deriveOwnerPk,
     deriveViewingSecretKey,
@@ -47,7 +47,7 @@ describe('regeneratePaymentSlip', () => {
         });
 
         // What a wiped sender gets back from the chain: public fields only.
-        const hint: OutgoingHint = {
+        const hint: ScanCommitment = {
             commitmentHex: sentNote.commitmentHex,
             leafIndex: 3,
             encryptedMemo: toHex(new Uint8Array(sentNote.memo)),

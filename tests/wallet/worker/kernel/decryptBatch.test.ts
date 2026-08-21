@@ -100,6 +100,11 @@ describe('decryptHintBatch', () => {
             selfMatched: 0,
             pairwiseMatched: 0,
             maxSelfEphIndex: null,
+            maxOutgoingEphIndex: null,
+            sentNotes: [],
+            learnedRecipients: [],
+            unmatchedSent: [],
+            sealedBookEntries: [],
         });
         expect(mocks.tryDecryptNoteVerbose).not.toHaveBeenCalled();
     });

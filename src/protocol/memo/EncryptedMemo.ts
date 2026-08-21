@@ -7,10 +7,10 @@
  * Layout (180 bytes, ECDH):
  *   nonce(12) || ciphertext+MAC(136) || ephPk_packed(32) = 180
  *
- * View tag (memos built by SDK ≥ 0.15): nonce[0] = deriveViewTag(sharedSecret)
- * — see memo.ts. Layout and size are unchanged; legacy memos carry a random
- * byte there instead, so the filter is only sound at/after the wallet's
- * tagActivationLeaf.
+ * View tag: nonce[0] = deriveViewTag(sharedSecret). Layout and size unchanged.
+ * Memos written before tags carry a RANDOM byte there, so the filter is only
+ * sound at or after the leaf where they were switched on — the scanner passes
+ * that boundary as `ScanKeys.viewTagActivationLeaf`.
  *
  * Plaintext layout (120 bytes):
  *   value_lo(8 LE) || value_hi(8 LE) || owner_pk(32) || blinding(32) || asset_id(4 LE) || source_pk(32) || circuit_version(4 LE)
@@ -18,7 +18,9 @@
  * value is stored as a 128-bit LE unsigned integer (two uint64 words), supporting
  * amounts up to ~3.4 × 10^38 planck — well above any realistic token supply.
  *
- * v2 key derivation (ECDH):
+ * Key derivation (ECDH). The "v2" in the memo's own wire format names THIS
+ * layout, and is unrelated to the identity version — the v3 identity work
+ * changed which branches derive a wallet's keys, not how a memo is sealed:
  *   ephSk        = random scalar in [1, BABYJUB_SUBORDER)
  *   ephPk        = mulPointEscalar(Base8, ephSk)
  *   sharedPoint  = mulPointEscalar(recipientIvk, ephSk)  ← or mulPointEscalar(ephPk, ivsk)
@@ -30,8 +32,9 @@
 
 import { chacha20poly1305 } from '@noble/ciphers/chacha.js';
 import { randomBytes } from '@noble/ciphers/utils.js';
-import { packPoint, unpackPoint } from '@zk-kit/baby-jubjub';
+import { packPoint } from '@zk-kit/baby-jubjub';
 import { fastMulBase, fastMulPoint } from '../../foundation/crypto/bjj-fast';
+import { unpackUsableViewingKey } from '../../foundation/crypto/bjj';
 import { bigintTo32Le, bytesToBigintLE } from '../../foundation/encoding/bytes';
 import { BABYJUB_SUBORDER } from '../../foundation/crypto/constants';
 import { deriveEncryptionKey, deriveViewTag, serializeMemo } from './plaintext';
@@ -51,6 +54,14 @@ export const ENCRYPTED_MEMO_SIZE = NONCE_SIZE + CIPHERTEXT_SIZE + EPH_PK_SIZE; /
 /** Convert 32-byte big-endian buffer to a BABYJUB_SUBORDER-clamped scalar.
  * Exported: selfEph.ts must clamp identically to reproduce published ephPks. */
 export function bytesToBjjScalar(bytes: Uint8Array): bigint {
+    // Length is checked, not tolerated. The reduction below turns ANY input
+    // into a usable scalar — a 16-byte key, or all zeros, silently becomes
+    // `1n` — so a truncated or uninitialised buffer would produce a valid
+    // scalar some other wallet could also reach. An empty array is worse:
+    // `BigInt('0x')` throws from whichever primitive touched it first.
+    if (bytes.length !== 32) {
+        throw new Error(`bytesToBjjScalar: expected 32 bytes, got ${bytes.length}`);
+    }
     const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
     return BigInt('0x' + hex) % BABYJUB_SUBORDER || 1n;
 }
@@ -87,7 +98,7 @@ function parsePlaintext(
 
 export const EncryptedMemo = {
     /**
-     * Build and encrypt a memo for a note using ECDH (v2, 180 bytes).
+     * Build and encrypt a memo for a note using ECDH (180 bytes).
      *
      * @param value              Note value in planck.
      * @param ownerPk            32-byte owner public key (LE).
@@ -143,8 +154,17 @@ export const EncryptedMemo = {
             const ephPkPoint = fastMulBase(ephSkScalar);
             ephPkPackedBytes = bigintTo32Le(packPoint(ephPkPoint) as bigint);
 
+            // Low-order keys refused here, not just malformed ones. BabyJubJub
+            // has cofactor 8, so a key from the small subgroup makes
+            // `[ephSk]·ivk` take at most 8 values, so the memo opens by trying
+            // them: value, blinding and sourcePk, with no secret at all.
+            //
+            // `NoteBuilder` already refuses it, but this primitive is exported,
+            // so a direct caller reached the same hole around it. The zero-key
+            // branch above is untouched: a public memo is a deliberate feature
+            // and never claimed confidentiality.
             const ivkPackedBigint = bytesToBigintLE(recipientIvkPacked);
-            const ivkPoint = unpackPoint(ivkPackedBigint);
+            const ivkPoint = unpackUsableViewingKey(ivkPackedBigint);
             if (!ivkPoint)
                 throw new Error('EncryptedMemo.encrypt: invalid recipient viewing public key');
 
@@ -152,8 +172,9 @@ export const EncryptedMemo = {
             sharedSecret = bigintTo32Le(sharedPoint[0]);
         }
 
-        // View tag as nonce[0], set BEFORE sealing so the AEAD MAC binds it —
-        // a flipped tag cannot silently hide a note from a filtered scan.
+        // View tag as nonce[0]. Flipping it does not silently hide a note: the
+        // nonce keys Poly1305's one-time key, so a changed tag makes the MAC
+        // check fail outright rather than the memo decrypt to something else.
         nonce[0] = deriveViewTag(sharedSecret);
 
         const encKey = deriveEncryptionKey(sharedSecret, commitment);
@@ -258,7 +279,12 @@ export const EncryptedMemo = {
             // Public / dummy memo — shared secret is zero by convention.
             return new Uint8Array(32);
         }
-        const ephPkPoint = unpackPoint(ephPkPackedBigint);
+        // `unpackUsableViewingKey`, not a bare `unpackPoint`: the sender chose
+        // this ephPk and it reaches us through an untrusted feed. A cofactor-8
+        // point makes `[ivsk]·ephPk` take at most 8 values, so the "shared"
+        // secret is one anyone can enumerate. The sealing side already refuses
+        // such keys; this is the same gate on the way back in.
+        const ephPkPoint = unpackUsableViewingKey(ephPkPackedBigint);
         if (!ephPkPoint) return null;
         const ivskScalar = bytesToBjjScalar(viewingSecretKey);
         const sharedPoint = fastMulPoint(ephPkPoint, ivskScalar);
@@ -269,9 +295,9 @@ export const EncryptedMemo = {
      * Cheap view-tag check: does memo nonce[0] match the tag derived from
      * `sharedSecret`? One SHA256 + one byte compare — no AEAD work.
      *
-     * Only meaningful for memos built with view tags (commitments at/after
-     * the wallet's tagActivationLeaf): a legacy memo carries a random byte
-     * there and would false-negative 255/256 of the time.
+     * Only meaningful for memos that carry a tag — at or after
+     * `ScanKeys.viewTagActivationLeaf`. An older memo has a random byte there
+     * and would false-negative 255/256 of the time.
      */
     checkViewTag(memoBytes: Uint8Array, sharedSecret: Uint8Array): boolean {
         if (memoBytes.length !== ENCRYPTED_MEMO_SIZE) return false;
