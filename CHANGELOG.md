@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-08-21
+
+### Fixed
+
+- **`examples/node-wallet` did not compile or run against 3.0.0.** Two failures,
+  and the second is the one worth reading: the example built its note feed with
+  the v2 helpers while the wallet unlocked with v3, so the scan found none of its
+  own notes and reported `recovered 0` — with nothing raised, because a note that
+  does not decrypt is indistinguishable from someone else's. Fixtures now derive
+  through `deriveIdentity(master, 'v3')`, the same call the wallet makes.
+
+  The first was mechanical: `buildOutputNote` returns `{ note, outgoingIndex? }`
+  as of 3.0.0, and the example still used the result as a bare `ZkNote`.
+
+  No library code changed. `pnpm verify:example` runs the examples against a
+  packed tarball rather than the source tree, which is why it caught a break that
+  the test suite could not.
+
 ## [3.0.0] - 2026-08-21
 
 **Every identity derives differently, and every existing note is orphaned.**
@@ -168,6 +186,11 @@ migration because there is no read of the old vault at all.
    `{ note, outgoingIndex? }`.
 6. Hosts using the QR note-transfer format must remove it; there is no
    replacement. Hosts calling `isSs58` must reimplement it.
+7. **Test fixtures and mock feeds must derive with `deriveIdentity(master, 'v3')`.**
+   A feed built with the v2 helpers and scanned by a v3 wallet yields notes
+   nobody owns: the scan reports zero found and raises nothing, because finding
+   no match is what a scan does for someone else's note. `examples/node-wallet`
+   hit exactly this.
 
 ## [2.1.0] - 2026-08-21
 

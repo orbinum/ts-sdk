@@ -14,7 +14,7 @@
 import {
     OrbinumWallet,
     MemoryVaultStorage,
-    deriveSpendingKeyFromMaster,
+    deriveIdentity,
     deriveOwnerPk,
     deriveViewingSecretKey,
     deriveViewingPublicKey,
@@ -32,9 +32,10 @@ const MASTER = new Uint8Array(32).fill(7);
 
 /** Builds the on-chain feed a wallet with `noteCount` own notes would see. */
 async function buildFixture(noteCount: number, poolSize: number) {
-    const spendingKey = deriveSpendingKeyFromMaster(MASTER);
-    const ownerPk = deriveOwnerPk(spendingKey);
-    const viewingPublicKey = deriveViewingPublicKey(deriveViewingSecretKey(spendingKey));
+    // Derive exactly as the wallet does. Building the feed with a different
+    // scheme than the one that scans it produces notes nobody owns — and the
+    // scan reports zero found, with nothing to explain why.
+    const { spendingKey, ownerPk, viewingPublicKey } = deriveIdentity(MASTER, 'v3');
 
     const hints: ScanHint[] = [];
     for (let i = 0; i < poolSize; i++) {

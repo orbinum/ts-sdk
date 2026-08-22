@@ -23,7 +23,7 @@ import {
     canPairWith,
     buildShieldParams,
     NoteBuilder,
-    deriveSpendingKeyFromMaster,
+    deriveIdentity,
     deriveOwnerPk,
     deriveViewingSecretKey,
     deriveViewingPublicKey,
@@ -37,19 +37,21 @@ const CIRCUIT_VERSION = 1;
 
 /** A recipient who shared their privacy address with us. */
 const RECIPIENT_MASTER = new Uint8Array(32).fill(9);
-const RECIPIENT_SK = deriveSpendingKeyFromMaster(RECIPIENT_MASTER);
+const RECIPIENT = deriveIdentity(RECIPIENT_MASTER, 'v3');
+const RECIPIENT_SK = RECIPIENT.spendingKey;
 
 /** Builds a feed of notes this wallet owns, so the scan has something to find. */
 async function buildOwnNotes(count: number): Promise<ScanHint[]> {
-    const spendingKey = deriveSpendingKeyFromMaster(MASTER);
-    const viewingPublicKey = deriveViewingPublicKey(deriveViewingSecretKey(spendingKey));
+    // Same derivation the wallet unlocks with — a feed built under any other
+    // scheme yields notes it cannot recognise, and the scan simply finds none.
+    const { spendingKey, ownerPk, viewingPublicKey } = deriveIdentity(MASTER, 'v3');
     const hints: ScanHint[] = [];
 
     for (let i = 0; i < count; i++) {
         const note = await NoteBuilder.build({
             value: BigInt((i + 1) * 1_000_000),
             assetId: 0n,
-            ownerPk: deriveOwnerPk(spendingKey),
+            ownerPk,
             spendingKey,
             viewingPublicKey,
             circuitVersion: CIRCUIT_VERSION,
@@ -150,12 +152,15 @@ async function main() {
     console.log('spend dependencies assembled from the facade alone');
 
     // The outputs a transfer builds, produced the same way the op would.
-    const recipientNote = await wallet.buildOutputNote({
+    // `buildOutputNote` returns `{ note, outgoingIndex? }`: the index is what
+    // lets the sender find this payment again later, and it only exists for
+    // notes addressed to someone else.
+    const { note: recipientNote } = await wallet.buildOutputNote({
         value: amount,
         assetId: 0n,
         ownerPk: deriveOwnerPk(RECIPIENT_SK),
         sourcePk: wallet.spendKeys().ownerPk,
-        viewingPublicKey: deriveViewingPublicKey(deriveViewingSecretKey(RECIPIENT_SK)),
+        viewingPublicKey: RECIPIENT.viewingPublicKey,
         recipientOwnerPk: deriveOwnerPk(RECIPIENT_SK),
     });
     if (recipientNote.circuitVersion !== CIRCUIT_VERSION) {
@@ -166,7 +171,7 @@ async function main() {
     // ── Shield marshalling ───────────────────────────────────────────────────
     // The commitment goes on chain little-endian; getting that wrong yields a
     // note nobody can ever find, with no error to notice.
-    const fresh = await wallet.buildOutputNote({ value: 5_000n });
+    const { note: fresh } = await wallet.buildOutputNote({ value: 5_000n });
     const shieldArgs = buildShieldParams(fresh);
     if (!shieldArgs.commitment.startsWith('0x') || shieldArgs.commitment.length !== 66) {
         throw new Error('shield commitment is not a 32-byte hex');
