@@ -66,12 +66,17 @@ export async function txLandedAfterError(
 
 /**
  * The result for a tx confirmed on-chain after the watching connection died.
+ *
  * Block details were lost with the connection — empty on purpose, and a caller
- * that needs them must look the tx up rather than trust these fields.
+ * that needs them must look the tx up rather than trust these fields. The hash
+ * is NOT among them: it is known at submission, before anything can drop, so a
+ * caller that captured it should pass it here. Losing it strands the user with a
+ * confirmed transaction they cannot reference — no receipt, no quest claim, no
+ * way to look it up.
  */
-export const RECOVERED_TX_RESULT: TxResult = {
-    txHash: '',
-    blockHash: '',
-    blockNumber: 0,
-    ok: true,
-};
+export function recoveredTxResult(txHash = ''): TxResult {
+    return { txHash, blockHash: '', blockNumber: 0, ok: true };
+}
+
+/** @deprecated Prefer `recoveredTxResult(txHash)` — this drops the hash. */
+export const RECOVERED_TX_RESULT: TxResult = recoveredTxResult();

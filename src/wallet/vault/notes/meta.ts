@@ -35,12 +35,35 @@ export type NoteWithMeta = ZkNote & {
     spentTxHash?: string | null;
     /** Explorer route for both hashes above. Absent means substrate. */
     txKind?: TxKind;
+    /** How this wallet created the note, when it created it itself.
+     *
+     * `sourcePk` cannot answer this: a shield deposit and an unshield's change
+     * note both carry zero, so the two are indistinguishable on the note alone.
+     * Stamped by the operation that built it; absent on scanned notes, where
+     * the distinction is not recoverable. */
+    createdBy?: NoteCreator;
 };
 
-/** Shield deposit vs PrivateTransfer output (received or change) — the memo's
- * sourcePk is zero only for shield/unshield-built notes. */
-export function noteOrigin(note: ZkNote): 'shield' | 'private-transfer' {
+/** Which operation minted a note — see `NoteWithMeta.createdBy`. */
+export type NoteCreator = 'shield' | 'transfer' | 'unshield' | 'fee-claim';
+
+/**
+ * How the note came to exist.
+ *
+ * Prefers the `createdBy` stamp, which this wallet writes when it builds a note
+ * itself. Falls back to `sourcePk`, which only separates two cases: zero means
+ * shield OR unshield-change — the commitment carries nothing that tells them
+ * apart — so an unstamped note of either kind reports `'shield'`.
+ */
+export function noteOrigin(note: ZkNote): NoteCreator | 'private-transfer' {
+    const stamped = (note as NoteWithMeta).createdBy;
+    if (stamped) return stamped;
     return note.sourcePk === 0n ? 'shield' : 'private-transfer';
+}
+
+/** Record which operation built this note. */
+export function stampCreatedBy(note: ZkNote, createdBy: NoteCreator): ZkNote {
+    return { ...note, createdBy } as NoteWithMeta;
 }
 
 export function noteCreatedAt(note: ZkNote): number | null {

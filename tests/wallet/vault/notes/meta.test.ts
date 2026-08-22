@@ -10,6 +10,7 @@ import {
     noteTxKind,
     stampCreatedTxHash,
     stampSpentTxHash,
+    stampCreatedBy,
 } from '../../../../src/wallet/vault/notes/meta';
 
 const note = (over: Partial<ZkNote>): ZkNote => ({ sourcePk: 0n, ...over }) as ZkNote;
@@ -18,6 +19,21 @@ describe('noteMeta', () => {
     it('origin: zero sourcePk → shield, non-zero → private-transfer', () => {
         expect(noteOrigin(note({ sourcePk: 0n }))).toBe('shield');
         expect(noteOrigin(note({ sourcePk: 123n }))).toBe('private-transfer');
+    });
+
+    // `sourcePk` cannot tell a shield from an unshield's change note — both are
+    // zero — so an unstamped unshield note reads as a shield. That is the whole
+    // reason the stamp exists.
+    it('prefers the createdBy stamp over the sourcePk guess', () => {
+        const changeNote = stampCreatedBy(note({ sourcePk: 0n }), 'unshield');
+        expect(noteOrigin(changeNote)).toBe('unshield');
+        expect(noteOrigin(note({ sourcePk: 0n }))).toBe('shield');
+    });
+
+    it('stamps every creator the wallet can be', () => {
+        for (const creator of ['shield', 'transfer', 'unshield', 'fee-claim'] as const) {
+            expect(noteOrigin(stampCreatedBy(note({ sourcePk: 0n }), creator))).toBe(creator);
+        }
     });
 
     it('createdAt: absent → null, stamped → value, survives spread', () => {

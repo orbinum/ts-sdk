@@ -12,7 +12,7 @@
 import { CircuitType } from '@orbinum/proof-generator';
 import { generateFeeClaimProof } from '../../../protocol/proving/fee-claim';
 import { fromHex } from '../../../foundation/encoding/hex';
-import { stampCreatedTxHash } from '../../vault/index';
+import { stampCreatedTxHash, stampCreatedBy } from '../../vault/index';
 import type { TxKind } from '../../vault/index';
 import type { VaultStore } from '../../vault/index';
 import type { ZkNote } from '../../../protocol/types';
@@ -97,7 +97,12 @@ export async function claimFees(
     // Persisted here rather than left to the next scan: a rescan does find it
     // (the ephemeral is deterministic), but until then the claimed fees are
     // missing from the balance, and a user who just claimed sees nothing arrive.
-    await deps.vault.save(stampCreatedTxHash(note, txResult.txHash, deps.txKind ?? 'substrate'));
+    await deps.vault.save(
+        stampCreatedBy(
+            stampCreatedTxHash(note, txResult.txHash, deps.txKind ?? 'substrate'),
+            'fee-claim'
+        )
+    );
 
     return txResult;
 }

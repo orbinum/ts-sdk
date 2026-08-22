@@ -7,5 +7,10 @@
  */
 export { buildShieldParams, buildShieldBatchOperations } from './shieldParams';
 export { chainActiveCircuitVersion } from './circuitVersion';
-export { txLandedAfterError, isConnectionLossError, RECOVERED_TX_RESULT } from './txRecovery';
+export {
+    txLandedAfterError,
+    isConnectionLossError,
+    recoveredTxResult,
+    RECOVERED_TX_RESULT,
+} from './txRecovery';
 export type { TxLandingPollOptions } from './txRecovery';

@@ -13,11 +13,12 @@ export {
     noteSpentTxHash,
     noteTxKind,
     stampCreatedAt,
+    stampCreatedBy,
     stampCreatedTxHash,
     stampSpentTxHash,
     ensureCreatedAt,
 } from './meta';
-export type { TxKind, NoteWithMeta } from './meta';
+export type { TxKind, NoteWithMeta, NoteCreator } from './meta';
 export { upsertNote, applyBatch, removeByCommitment, isNoteSelfConsistent } from './merge';
 export { normalizeNote, normalizeNotes, NOTE_BIGINT_FIELDS } from './normalize';
 export { createNotesCache } from './cache';

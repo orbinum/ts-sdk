@@ -22,7 +22,7 @@ import { addressToAccountIdHex, addressToFieldElement } from '../../../foundatio
 import { noteMatchesCommitment } from './guards';
 import { failed, refuseIfAlreadySpent, markInputsSpent } from './lifecycle';
 import type { SpendPrivacyReads, SpendVault } from './lifecycle';
-import { stampCreatedTxHash } from '../../vault/index';
+import { stampCreatedTxHash, stampCreatedBy } from '../../vault/index';
 import type { TxKind } from '../../vault/index';
 import type { ZkNote } from '../../../protocol/types';
 import type { CircuitVersionResolver } from '../../../protocol/circuit-version/index';
@@ -210,7 +210,12 @@ export async function unshieldNote(
         if (changeNote && changeValue > 0n) {
             const spendable = deps.recoverStealth(changeNote);
             if (spendable) {
-                await deps.vault.save(stampCreatedTxHash(spendable, txResult.txHash, txKind));
+                await deps.vault.save(
+                    stampCreatedBy(
+                        stampCreatedTxHash(spendable, txResult.txHash, txKind),
+                        'unshield'
+                    )
+                );
             }
         }
     }

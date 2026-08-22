@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.1.0] - 2026-08-22
+
+### Added
+
+- **`stampCreatedBy` / `NoteCreator`** — a note now records which operation built
+  it (`shield` / `transfer` / `unshield` / `fee-claim`), and `noteOrigin` prefers
+  that stamp.
+
+  `sourcePk` could never answer this. A shield deposit and an unshield's change
+  note both carry zero, so the two were indistinguishable and every unshield
+  change note reported `'shield'` — wallets showed it under the wrong heading
+  with no way to filter for it. The commitment carries nothing that separates
+  them, so the answer has to be recorded when the note is built.
+
+  `noteOrigin` still falls back to the `sourcePk` guess for scanned notes, where
+  the distinction is genuinely unrecoverable. Its return type widens from
+  `'shield' | 'private-transfer'` to include the four creators.
+
+- **`recoveredTxResult(txHash)`** — preserves the hash when a transaction is
+  confirmed after the watching connection dropped. `RECOVERED_TX_RESULT` blanked
+  it along with the block details, but the hash is known at submission, before
+  anything can drop: losing it left the user with a confirmed transaction they
+  could not reference — no receipt, no quest claim, no lookup. The old constant
+  stays, deprecated.
+
 ## [3.0.1] - 2026-08-21
 
 ### Fixed

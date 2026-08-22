@@ -30,7 +30,7 @@ import { sealRecipientBookEntry } from '../../../protocol/note/recipientBook';
 import { checkSpendableInputs, treeOf } from './guards';
 import { failed, refuseIfAlreadySpent, markInputsSpent } from './lifecycle';
 import type { SpendPrivacyReads, SpendVault } from './lifecycle';
-import { stampCreatedTxHash } from '../../vault/index';
+import { stampCreatedTxHash, stampCreatedBy } from '../../vault/index';
 import type { TxKind } from '../../vault/index';
 import type { ZkNote } from '../../../protocol/types';
 import type { CircuitVersionResolver } from '../../../protocol/circuit-version/index';
@@ -354,7 +354,9 @@ export async function transferNotes(
         // The change is ours — persist now, or the balance misses it until the
         // next rescan.
         if (changeValue > 0n) {
-            await deps.vault.save(stampCreatedTxHash(changeNote, txResult.txHash, txKind));
+            await deps.vault.save(
+                stampCreatedBy(stampCreatedTxHash(changeNote, txResult.txHash, txKind), 'transfer')
+            );
         }
 
         // Self-transfer: the recipient output is a stealth note only a rescan
